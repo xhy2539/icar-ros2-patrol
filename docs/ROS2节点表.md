@@ -18,7 +18,7 @@
 | 8 | `vision_node` | vision | 韦雪 | P0 | 视觉检测节点，YOLO 目标检测、目标追踪、截图保存 |
 | 9 | `sensor_node` | sensor | 王璐 | P0 | 传感器数据采集节点，汇总多传感器数据，发布异常告警 |
 | 10 | `llm_gateway_node` | llm | 熊浩宇 | P2 | LLM 网关节点（加分项），任务解析与报告生成，不发布 `/cmd_vel` |
-| 11 | `底盘控制模块` | 底盘 | 平台 | P0 | 接收 `/cmd_vel` 控制麦轮底盘运动（复用小车已有能力） |
+| 11 | `底盘控制模块` | 底盘 | 平台(复用) | P0 | AT32 麦轮底盘，接收 `/cmd_vel` 或 Rosmaster-Lib 串口直控，固件 v3.5，`/dev/myserial` 115200bps |
 
 ---
 

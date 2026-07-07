@@ -12,6 +12,36 @@
 
 **设计原则**：先保证 P0 核心链路可演示；P1 形成巡检闭环；LLM 作为增强层，不直接控制底盘。
 
+### 硬件平台
+
+| 硬件 | 型号 | 设备路径 | 用途 |
+|------|------|----------|------|
+| 主控 | Jetson Orin Nano (JetPack R35.3.1) | - | 运行 ROS2 和 AI 推理 |
+| 激光雷达 | 思岚 A1 (RPLIDAR) | `/dev/rplidar` → `ttyUSB0` | 360° 扫描测距 |
+| 深度相机 | 奥比中光 Astra Pro Plus | `/dev/astradepth`, `/dev/astrauvc`, `/dev/video0-1` | RGB + 深度图像 |
+| 底盘控制 | AT32 (Mecanum麦轮) | `/dev/myserial` → `ttyUSB1`, 115200bps | 运动控制（固件 v3.5） |
+| 传感器 | 温湿度/烟雾/PM2.5/光照/气压 | `/dev/ttyUSB2` (待确认) | 环境数据采集 |
+
+### 系统架构
+
+```
+┌──────────────────────────────────────────┐
+│         宿主机 (Jetson Ubuntu 20.04)       │
+│                                          │
+│  Rosmaster-App (Flask :6500)             │
+│  └─ Rosmaster-Lib (Python) ──串口──▶ AT32底盘 │
+│                                          │
+│  Docker: yahboomtechnology/ros-foxy:5.0.1│
+│  ├─ astra_camera (相机驱动)               │
+│  ├─ sllidar_ros2 (激光雷达)               │
+│  ├─ slam_gmapping (SLAM建图)             │
+│  ├─ teb_local_planner (路径规划)          │
+│  └─ icar_* (ICAR项目包)                  │
+└──────────────────────────────────────────┘
+```
+
+> **关键**：ROS2 Foxy 运行在 Docker 容器内，不是原生安装。底盘控制可通过 Rosmaster-Lib 串口直接通信，也可通过 ROS2 `/cmd_vel` 间接控制。
+
 ---
 
 ## 功能优先级
@@ -152,20 +182,30 @@ icar-ros2-patrol/
 
 ## 快速启动
 
-> 以下为占位说明，完整启动流程将在各模块开发完成后补充。
+> ROS2 Foxy 运行在 Docker 容器内，通过宿主机脚本管理。
 
 ```bash
-# 1. 确保 ROS2 环境已 source
-source /opt/ros/humble/setup.bash
+# 1. SSH 连接小车
+ssh jetson@<小车IP>   # 密码: yahboom
 
-# 2. 构建工作空间
-colcon build --symlink-install
+# 2. 启动 ROS2 Docker 容器
+docker start 5b1c        # 或 s (bashrc别名)
+docker exec -it 5b1c /bin/bash  # 或 d 进入容器
 
-# 3. source 工作空间
-source install/setup.bash
+# 3. 容器内启动各模块
+n1    # 底盘驱动 (icar_bringup Mcnamu_driver_X3)
+n2    # 激光雷达 (sllidar_ros2)
+n3    # 雷达避障 (laser_Avoidance)
+m1    # 深度相机 (astra_camera)
+# ... 更多别名见 ~/.bashrc
 
-# 4. 启动完整演示
-./scripts/start_demo.sh
+# 4. 宿主机启动 APP（底盘直接串口控制）
+run   # 或 cd ~/Rosmaster-App/rosmaster && python3 app.py
+# APP 运行在 http://<小车IP>:6500
+
+# 5. 底盘串口直控测试（不经ROS2）
+python3 ~/rosmaster_test.py 1 50   # 前进
+python3 ~/rosmaster_test.py 7 50   # 停止
 ```
 
 ## 开发计划
