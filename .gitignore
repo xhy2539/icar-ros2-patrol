@@ -22,9 +22,6 @@ install/
 # macOS
 .DS_Store
 
-# 敏感配置文件（含密码/密钥）
-小车配置
-
 # 其他临时文件
 *.swp
 *.swo

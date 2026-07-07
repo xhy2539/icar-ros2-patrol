@@ -1,0 +1,17 @@
+ssh jetson@10.90.164.78
+密码：yahboom
+小车网卡mac地址：48:8f:4c:ff:00:2c
+
+=== 串口设备映射 ===
+/dev/rplidar  → ttyUSB0  (CP210x, Hub 2.2, 思岚A1激光雷达)
+/dev/myserial → ttyUSB1  (CH341, Hub 2.3.2, AT32底盘控制板 v3.5, 115200bps)
+/dev/sensors  → ttyUSB2  (CH341, Hub 2.4.1, 传感器模块, 重启后生效)
+
+=== 相机 ===
+/dev/astradepth (深度), /dev/astrauvc (RGB), /dev/video0 (RGB), /dev/video1 (深度)
+
+=== 常用命令 ===
+docker start 5b1c       # 启动ROS2容器 (或 s)
+docker exec -it 5b1c bash  # 进入容器 (或 d)
+run                     # 启动APP (Flask :6500)
+python3 ~/rosmaster_test.py <cmd> <speed>  # 底盘直控测试
