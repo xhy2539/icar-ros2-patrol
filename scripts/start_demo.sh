@@ -71,10 +71,13 @@ echo "[6/8] Starting vision (icar_visual)..."
 # docker exec -it 5b1c bash -c "source /opt/ros/foxy/setup.bash && ros2 run icar_visual ... &"
 sleep 1
 
-# Phase 3: 调度层（宿主机）
-echo "=== Phase 3: Task Management (Host) ==="
+# Phase 3: 调度层
+echo "=== Phase 3: Task Management ==="
 echo "[7/8] Starting task_manager_node..."
-# python3 ~/task_manager/task_manager_node.py &
+# 方式A: 宿主机直接用 Python 运行
+# python3 $(ros2 pkg prefix task_manager)/lib/task_manager/task_manager_node &
+# 方式B: ROS2 方式运行（推荐）
+# ros2 run task_manager task_manager_node &
 sleep 1
 
 # Phase 4: 应用层（宿主机）
