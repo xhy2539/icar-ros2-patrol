@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+
+# 日志
+*.log
+logs/
+log/
+
+# IDE
+.vscode/
+.idea/
+
+# 构建产物
+build/
+install/
+
+# ROS2 bag 和数据文件
+*.bag
+*.db3
+
+# macOS
+.DS_Store
+
+# 其他临时文件
+*.swp
+*.swo
+*~
