@@ -1,67 +1,98 @@
 #!/bin/bash
 # ============================================================
 # start_navigation.sh
-# 启动导航相关节点（雷达 + SLAM + 避障 + 导航）
+# Navigation startup entrypoint for real/mock modes
 # 负责人：曹莹
 # ============================================================
-#
-# 启动节点（按顺序）：
-#   1. lidar_node             激光雷达驱动
-#   2. obstacle_avoid_node    避障节点
-#   3. slam_node              SLAM 建图节点
-#   4. navigation_node        自主导航节点
-#
-# 用法：
-#   ./scripts/start_navigation.sh [mode]
-#
-#   mode:
-#     full     启动全部导航节点（默认）
-#     lidar    仅启动雷达驱动
-#     slam     启动雷达 + SLAM
-#     nav      启动雷达 + SLAM + 导航
-#
-# 前置条件：
-#   - ROS2 环境已 source
-#   - 工作空间已 source
-#   - 激光雷达硬件已连接
-# ============================================================
 
-set -e
+set -euo pipefail
 
-MODE=${1:-full}
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+PROJECT_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
+MODE=${1:-mock}
+NAV_SCENARIO=${NAV_SCENARIO:-success}
+OBSTACLE_SCENARIO=${OBSTACLE_SCENARIO:-warning_then_clear}
+PATROL_ROUTE=${PATROL_ROUTE:-}
+PIDS=()
+
+cd "$PROJECT_ROOT"
+
+print_usage() {
+    cat <<'EOF'
+Usage:
+  ./scripts/start_navigation.sh [mode]
+
+Modes:
+  mock         Start /map, /pose and /nav_status in mock data mode
+  mock-full    Start mock chain plus /obstacle_status, /scan and A/B/C patrol
+  real         Placeholder for future real robot startup
+
+Environment variables:
+  NAV_SCENARIO        success | timeout | fail_fast
+  OBSTACLE_SCENARIO   clear | warning_then_clear | danger_then_recover
+  PATROL_ROUTE        Comma-separated route, e.g. A,B,C
+EOF
+}
+
+start_process() {
+    local name=$1
+    shift
+    echo "[start] $name -> $*"
+    "$@" &
+    PIDS+=($!)
+}
+
+cleanup() {
+    if [ ${#PIDS[@]} -eq 0 ]; then
+        return
+    fi
+    echo ""
+    echo "[cleanup] stopping navigation mock processes..."
+    kill "${PIDS[@]}" 2>/dev/null || true
+    wait "${PIDS[@]}" 2>/dev/null || true
+}
+
+trap cleanup EXIT INT TERM
 
 echo "============================================="
-echo "  Starting Navigation Module (mode: $MODE)..."
+echo " Navigation Module Startup"
+echo " mode: $MODE"
+echo " root: $PROJECT_ROOT"
 echo "============================================="
 
-# 1. 激光雷达驱动（所有模式都需要）
-echo "[1/4] Starting lidar_node..."
-# ros2 run navigation lidar_node &
-sleep 2
+case "$MODE" in
+    mock)
+        start_process "slam_node" python3 navigation/slam/slam_node.py
+        start_process "navigation_node" python3 navigation/navigation/navigation_node.py --scenario "$NAV_SCENARIO"
+        ;;
+    mock-full)
+        start_process "slam_node" python3 navigation/slam/slam_node.py
+        start_process "navigation_node" python3 navigation/navigation/navigation_node.py --scenario "$NAV_SCENARIO"
+        start_process "obstacle_avoid_node" python3 navigation/obstacle_avoid/obstacle_avoid_node.py --scenario "$OBSTACLE_SCENARIO"
+        start_process "lidar_node" python3 navigation/lidar/lidar_node.py
+        if [ -n "$PATROL_ROUTE" ]; then
+            start_process "patrol_node" python3 navigation/navigation/patrol_node.py --route "$PATROL_ROUTE"
+        else
+            start_process "patrol_node" python3 navigation/navigation/patrol_node.py
+        fi
+        ;;
+    real)
+        echo "[todo] real robot startup is not wired into this repository yet."
+        echo "[todo] use the Docker/container command chain after the vehicle is available."
+        exit 1
+        ;;
+    -h|--help|help)
+        print_usage
+        exit 0
+        ;;
+    *)
+        echo "[error] unknown mode: $MODE"
+        print_usage
+        exit 1
+        ;;
+esac
 
-if [ "$MODE" = "lidar" ]; then
-    echo "Navigation Module (lidar only) started."
-    exit 0
-fi
-
-# 2. 避障节点
-echo "[2/4] Starting obstacle_avoid_node..."
-# ros2 run navigation obstacle_avoid_node &
-sleep 1
-
-# 3. SLAM 建图
-echo "[3/4] Starting slam_node..."
-# ros2 run navigation slam_node &
-sleep 2
-
-if [ "$MODE" = "slam" ]; then
-    echo "Navigation Module (lidar + SLAM) started."
-    exit 0
-fi
-
-# 4. 自主导航
-echo "[4/4] Starting navigation_node..."
-# ros2 run navigation navigation_node &
-sleep 1
-
-echo "Navigation Module (full) started."
+echo ""
+echo "Navigation module is running."
+echo "Press Ctrl+C to stop all started processes."
+wait

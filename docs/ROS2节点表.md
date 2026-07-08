@@ -1,6 +1,6 @@
 # ROS2 节点表
 
-> **icar-ros2-patrol** ROS2 节点清单（共 11 个节点）
+> **icar-ros2-patrol** ROS2 节点清单（正式节点 11 个，另含导航 mock 临时节点）
 
 ---
 
@@ -101,7 +101,7 @@
 | **负责人** | 曹莹 |
 | **订阅 Topic** | `/map`, `/pose`, `/goal_pose`, `/scan` |
 | **发布 Topic** | `/nav_status`, 路径/运动指令 |
-| **功能** | 接收目标点，规划路径，控制小车自主行驶；支持固定路线巡检（A→B→C）；发布导航状态（IDLE/NAVIGATING/ARRIVED/FAILED） |
+| **功能** | 接收目标点，规划路径，控制小车自主行驶；支持固定路线巡检（A→B→C）；发布导航状态（IDLE/NAVIGATING/ARRIVED/FAILED）。当前无车阶段可先运行 mock 数据模式。 |
 | **启动命令** | `ros2 run navigation navigation_node` |
 
 ### 7. camera_node

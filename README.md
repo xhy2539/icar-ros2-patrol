@@ -130,10 +130,12 @@ icar-ros2-patrol/
 │   ├── backend/            #   后端服务
 │   └── frontend/           #   前端页面
 ├── navigation/             # 雷达/导航模块（曹莹）
-│   ├── lidar/              #   激光雷达驱动
-│   ├── obstacle_avoid/     #   避障算法
-│   ├── slam/               #   SLAM 建图
-│   └── navigation/         #   自主导航
+│   ├── lidar/              #   激光雷达驱动（当前可运行 mock 数据模式）
+│   ├── obstacle_avoid/     #   避障算法（当前可运行 mock 数据模式）
+│   ├── slam/               #   SLAM 建图（当前可运行 mock 数据模式）
+│   ├── navigation/         #   自主导航 / 巡检（当前可运行 mock 数据模式）
+│   ├── navigation_utils.py #   导航公共工具
+│   └── README.md           #   导航模块说明
 ├── vision/                 # 视觉检测模块（韦雪）
 │   ├── camera/             #   摄像头驱动
 │   ├── detection/          #   YOLO 目标检测
@@ -162,6 +164,9 @@ icar-ros2-patrol/
 ├── test/                   # 测试用例和测试记录
 ├── videos/                 # 演示视频（含兜底视频）
 ├── config/                 # 系统配置文件
+│   └── navigation/
+│       ├── maps/           #   地图资源（含 mock_lab.pgm/.yaml）
+│       └── mock/           #   mock 场景、点位、地图元信息
 ├── logs/                   # 运行日志（不提交到仓库）
 ├── .github/workflows/      # CI/CD 流水线
 ├── .gitignore
@@ -207,6 +212,31 @@ run   # 或 cd ~/Rosmaster-App/rosmaster && python3 app.py
 python3 ~/rosmaster_test.py 1 50   # 前进
 python3 ~/rosmaster_test.py 7 50   # 停止
 ```
+
+## 导航数据 Mock 联调
+
+当前仓库已经补充一套“真车不可用时”的导航数据 mock 模式，优先供任务调度和前端联调使用。工程结构保持正式导航模块命名，mock 只体现在运行模式和 `config/navigation/mock/` 配置中。
+
+```bash
+# 1. 进入仓库目录
+cd icar-ros2-patrol
+
+# 2. 启动最小导航 mock 数据模式
+./scripts/start_navigation.sh mock
+
+# 3. 或启动完整导航 mock 联调
+./scripts/start_navigation.sh mock-full
+
+# 4. 总演示入口
+./scripts/start_demo.sh nav-mock
+```
+
+说明：
+
+- `/map`、`/pose`、`/goal_pose`、`/scan` 使用标准 ROS2 消息
+- `/nav_status`、`/obstacle_status` 在 mock 阶段用 `std_msgs/msg/String` 承载 JSON 字段
+- 当前运行的是正式模块目录下的 mock 数据模式，不再使用 `mock_*` 实现文件作为工程主结构
+- 后续真车恢复后，优先保持 Topic 名和字段约定不变，再切回真实数据源
 
 ## 开发计划
 

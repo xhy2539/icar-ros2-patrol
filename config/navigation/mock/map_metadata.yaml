@@ -1,0 +1,9 @@
+map_yaml: config/navigation/maps/mock_lab.yaml
+frame_id: map
+width: 12
+height: 12
+resolution: 0.25
+origin:
+  x: -1.5
+  y: -1.5
+  yaw: 0.0
