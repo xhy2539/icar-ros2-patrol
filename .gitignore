@@ -18,6 +18,12 @@ install/
 # ROS2 bag 和数据文件
 *.bag
 *.db3
+vision_samples/
+
+# 模型文件较大，建议放网盘、Release 或 Git LFS
+*.pt
+*.onnx
+*.engine
 
 # macOS
 .DS_Store
