@@ -1,0 +1,38 @@
+# 云服务器（腾讯云）
+
+ssh ubuntu@82.156.132.43
+密码：Caoying305541@
+
+=== MQTT Broker ===
+地址: 82.156.132.43
+端口: 1883
+用户名: icar
+密码: icar123456
+
+连接命令:
+  mosquitto_pub -h 82.156.132.43 -u icar -P icar123456 -t /topic -m "msg"
+  mosquitto_sub -h 82.156.132.43 -u icar -P icar123456 -t /topic
+
+=== Topic 规范 ===
+/icar/cmd      手机→小车 指令
+/icar/status   小车→手机 巡检状态
+/icar/alert    小车→手机 异常告警
+/icar/data     小车→手机 传感器数据
+
+=== WebSocket 桥接 (Flask) ===
+API:    http://82.156.132.43:5000/
+WS:     ws://82.156.132.43:5000/ws
+健康:   http://82.156.132.43:5000/health
+
+APP 连接: new WebSocket("ws://82.156.132.43:5000/ws")
+发指令:   ws.send('{"topic":"/icar/cmd","data":"{\"action\":\"patrol\",\"route\":[\"A\",\"B\"]}"}')
+收数据:   ws.onmessage 收到 /icar/status, /icar/alert, /icar/log
+
+=== 服务管理 ===
+# MQTT
+sudo systemctl start/stop/status mosquitto
+
+# WebSocket 桥接
+sudo systemctl start/stop/status icar-cloud
+# 代码位置: ~/icar-cloud/icar_server.py
+# 日志: journalctl -u icar-cloud -f
