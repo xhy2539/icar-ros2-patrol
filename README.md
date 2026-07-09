@@ -130,10 +130,12 @@ icar-ros2-patrol/
 │   ├── backend/            #   后端服务
 │   └── frontend/           #   前端页面
 ├── navigation/             # 雷达/导航模块（曹莹）
-│   ├── lidar/              #   激光雷达驱动
-│   ├── obstacle_avoid/     #   避障算法
-│   ├── slam/               #   SLAM 建图
-│   └── navigation/         #   自主导航
+│   ├── lidar/              #   激光雷达驱动（当前可运行 mock 数据模式）
+│   ├── obstacle_avoid/     #   避障算法（当前可运行 mock 数据模式）
+│   ├── slam/               #   SLAM 建图（当前可运行 mock 数据模式）
+│   ├── navigation/         #   自主导航 / 巡检（当前可运行 mock 数据模式）
+│   ├── navigation_utils.py #   导航公共工具
+│   └── README.md           #   导航模块说明
 ├── vision/                 # 视觉检测模块（韦雪）
 │   ├── camera/             #   摄像头驱动
 │   ├── detection/          #   YOLO 目标检测
@@ -172,6 +174,9 @@ icar-ros2-patrol/
 ├── test/                   # 测试用例和测试记录
 ├── videos/                 # 演示视频（含兜底视频）
 ├── config/                 # 系统配置文件
+│   └── navigation/
+│       ├── maps/           #   地图资源（含 mock_lab.pgm/.yaml）
+│       └── mock/           #   mock 场景、点位、地图元信息
 ├── logs/                   # 运行日志（不提交到仓库）
 ├── .github/workflows/      # CI/CD 流水线 ✅
 │   └── ci.yml
@@ -222,28 +227,47 @@ python3 ~/rosmaster_test.py 1 50   # 前进
 python3 ~/rosmaster_test.py 7 50   # 停止
 ```
 
-## Mock 巡检闭环
+## Mock 联调与巡检闭环
 
-真实导航、视觉、传感器未完全接入前，可先跑 mock 闭环验证任务主线。
+真实导航、视觉、传感器未完全接入前，可先跑 mock 链路完成任务调度和前端联调。工程结构保持正式模块命名，mock 只体现在运行模式和 `config/navigation/mock/` 配置中。
 
 ```bash
-# 不依赖 ROS2，适合本机快速演示
+# 1. 进入仓库目录
+cd icar-ros2-patrol
+
+# 2. 启动最小导航 mock 数据模式
+./scripts/start_navigation.sh mock
+
+# 3. 启动完整导航 mock 联调
+./scripts/start_navigation.sh mock-full
+
+# 4. 总演示入口（导航 mock）
+./scripts/start_demo.sh nav-mock
+
+# 5. 不依赖 ROS2 的本机 mock 演示
 python3 scripts/run_mock_demo.py
 
-# ROS2 环境内 mock 联调，不会启动真实底盘
+# 6. ROS2 环境内 mock 巡检联调，不会启动真实底盘
 source /opt/ros/foxy/setup.bash
 source install/setup.bash
 ./scripts/start_mock_demo.sh
 ```
 
+说明：
+
+- `/map`、`/pose`、`/goal_pose`、`/scan` 使用标准 ROS2 消息
+- `/nav_status`、`/obstacle_status` 在 mock 阶段用 `std_msgs/msg/String` 承载 JSON 字段
+- 当前运行的是正式模块目录下的 mock 数据模式，不再使用 `mock_*` 实现文件作为工程主结构
+- 后续真车恢复后，优先保持 Topic 名和字段约定不变，再切回真实数据源
+
 后续各模块需要提供的 Topic、字段和验收材料见 `docs/模块集成产出清单.md`。
 
 ### 实车联调注意
 
-- 正常设备映射应为：`/dev/rplidar -> ttyUSB0`，`/dev/myserial -> ttyUSB1`，`/dev/sensors -> ttyUSB2`。
-- 2026-07-07 排查时发现宿主机 `/dev/myserial` 曾错误指向 `ttyUSB0`（雷达口），会导致 Rosmaster-App 和 `rosmaster_test.py` 无法正确控制底盘；遇到 APP 不能动或雷达/底盘串口互相占用时，优先检查该映射。
-- 容器内 alias 与宿主机 alias 可能不同。宿主机旧 alias `s/d` 曾指向已退出容器，进入容器前先执行 `docker ps -a`，不要只依赖旧别名。
-- ROS2 业务节点未启动时，`ros2 topic list -t` 只会看到 `/parameter_events` 和 `/rosout`，这是未启动链路，不是 Topic 表错误。
+- 正常设备映射应为：`/dev/rplidar -> ttyUSB0`，`/dev/myserial -> ttyUSB1`，`/dev/sensors -> ttyUSB2`
+- 2026-07-07 排查时发现宿主机 `/dev/myserial` 曾错误指向 `ttyUSB0`（雷达口），会导致 Rosmaster-App 和 `rosmaster_test.py` 无法正确控制底盘；遇到 APP 不能动或雷达/底盘串口互相占用时，优先检查该映射
+- 容器内 alias 与宿主机 alias 可能不同。宿主机旧 alias `s/d` 曾指向已退出容器，进入容器前先执行 `docker ps -a`，不要只依赖旧别名
+- ROS2 业务节点未启动时，`ros2 topic list -t` 只会看到 `/parameter_events` 和 `/rosout`，这是未启动链路，不是 Topic 表错误
 
 ## 开发计划
 

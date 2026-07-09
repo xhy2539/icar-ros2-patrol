@@ -1,37 +1,21 @@
 #!/bin/bash
 # ============================================================
 # start_demo.sh
-# 一键启动完整巡检演示系统
+# Demo entrypoint with phased navigation integration
 # 负责人：熊浩宇
 # ============================================================
-#
-# 架构说明：
-#   底盘控制：宿主机 Rosmaster-Lib 串口直控 (/dev/myserial → ttyUSB1)
-#   ROS2：Docker 容器内 (yahboomtechnology/ros-foxy:5.0.1)
-#
-# 启动顺序：
-#   1. 激光雷达驱动 (容器内 sllidar_ros2)
-#   2. 相机驱动 (容器内 astra_camera)
-#   3. 避障模块 (容器内 laser_Avoidance)
-#   4. SLAM 建图 (容器内 slam_gmapping)
-#   5. 自主导航 (容器内 teb_local_planner)
-#   6. 视觉检测 (容器内 icar_visual)
-#   7. 任务调度 (宿主机 task_manager)
-#   8. APP 控制台 (宿主机 Flask :6500)
-#
-# 用法：
-#   ./scripts/start_demo.sh
-#
-# 前置条件：
-#   - SSH 连接小车 jetson@<IP>
-#   - Docker 容器已启动：docker start 5b1c
-#   - 所有硬件已连接
-# ============================================================
 
-set -e
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+PROJECT_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
+MODE=${1:-nav-mock}
+
+cd "$PROJECT_ROOT"
 
 echo "============================================="
-echo "  iCar ROS2 Patrol - Full Demo Startup"
+echo " iCar ROS2 Patrol Demo Startup"
+echo " mode: $MODE"
 echo "============================================="
 echo ""
 echo "  架构: 宿主机(Rosmaster-Lib串口) + Docker(ROS2 Foxy)"
@@ -93,6 +77,39 @@ echo "  APP: http://<小车IP>:6500"
 echo "  Press Ctrl+C to stop all nodes"
 echo "============================================="
 
-# TODO: LLM 模块（P2 加分项，后期启动）
-# echo "[9/9] Starting llm_gateway_node..."
-# python3 llm_gateway_node.py &
+case "$MODE" in
+    nav-mock)
+        echo "[phase] navigation running in current phased mode"
+        echo "[note] starts /map, /pose, /nav_status and /obstacle_status in project mode, while /scan comes from the real lidar chain"
+        ./scripts/start_navigation.sh mock-full
+        ;;
+    nav-mock-basic)
+        echo "[phase] navigation basic mock data mode"
+        ./scripts/start_navigation.sh mock
+        ;;
+    nav-mock-with-app)
+        echo "[phase] navigation phased mode + placeholders for app/task_manager"
+        echo "[todo] start app_control_node and task_manager_node in their own terminals if they exist locally."
+        ./scripts/start_navigation.sh mock-full
+        ;;
+    real)
+        echo "[todo] real demo startup should be wired after the replacement vehicle arrives."
+        exit 1
+        ;;
+    -h|--help|help)
+        cat <<'EOF'
+Usage:
+  ./scripts/start_demo.sh [mode]
+
+Modes:
+  nav-mock          Start current phased navigation chain; /scan comes from the real lidar chain
+  nav-mock-basic    Start /map, /pose and /nav_status only
+  nav-mock-with-app Start phased navigation chain and leave notes for app/task_manager
+  real              Placeholder for future full real robot demo
+EOF
+        ;;
+    *)
+        echo "[error] unknown mode: $MODE"
+        exit 1
+        ;;
+esac
