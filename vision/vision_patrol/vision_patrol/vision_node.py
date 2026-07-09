@@ -8,6 +8,12 @@ from sensor_msgs.msg import Image
 from std_msgs.msg import String
 
 try:
+    from icar_interfaces.msg import Detection, DetectionArray
+except ImportError:
+    Detection = None
+    DetectionArray = None
+
+try:
     from cv_bridge import CvBridge
 except ImportError:
     CvBridge = None
@@ -41,9 +47,11 @@ class VisionNode(Node):
         super().__init__("vision_node")
         self.declare_parameter("image_topic", "/camera/color/image_raw")
         self.declare_parameter("detections_topic", "/vision/detections")
+        self.declare_parameter("detections_json_topic", "/vision/detections_json")
         self.declare_parameter("annotated_topic", "/vision/annotated_image")
         self.declare_parameter("mode", "detect")
         self.declare_parameter("detector_backend", "auto")
+        self.declare_parameter("publish_json_debug", True)
         self.declare_parameter("publish_annotated", False)
         self.declare_parameter("enable_road_detection", False)
         self.declare_parameter("min_color_area", 600.0)
@@ -56,9 +64,11 @@ class VisionNode(Node):
 
         self.image_topic = self.get_parameter("image_topic").value
         self.detections_topic = self.get_parameter("detections_topic").value
+        self.detections_json_topic = self.get_parameter("detections_json_topic").value
         self.annotated_topic = self.get_parameter("annotated_topic").value
         self.mode = self.get_parameter("mode").value
         self.detector_backend = str(self.get_parameter("detector_backend").value).lower()
+        self.publish_json_debug = bool(self.get_parameter("publish_json_debug").value)
         self.publish_annotated = bool(self.get_parameter("publish_annotated").value)
         self.enable_road_detection = bool(
             self.get_parameter("enable_road_detection").value
@@ -78,8 +88,17 @@ class VisionNode(Node):
         self.started_at = time.monotonic()
         self.yolo_model = None
         self.yolo_unavailable_logged = False
+        self.typed_detections_available = Detection is not None and DetectionArray is not None
 
-        self.detections_pub = self.create_publisher(String, self.detections_topic, 10)
+        detections_msg_type = DetectionArray if self.typed_detections_available else String
+        self.detections_pub = self.create_publisher(
+            detections_msg_type, self.detections_topic, 10
+        )
+        self.detections_json_pub = None
+        if self.publish_json_debug and self.typed_detections_available:
+            self.detections_json_pub = self.create_publisher(
+                String, self.detections_json_topic, 10
+            )
         self.annotated_pub = None
         if self.publish_annotated:
             self.annotated_pub = self.create_publisher(Image, self.annotated_topic, 10)
@@ -96,6 +115,11 @@ class VisionNode(Node):
             f"image_topic={self.image_topic}, "
             f"detections_topic={self.detections_topic}"
         )
+        if not self.typed_detections_available:
+            self.get_logger().warning(
+                "icar_interfaces is unavailable; publishing JSON String on "
+                f"{self.detections_topic} as a fallback"
+            )
         if self.bridge is None:
             self.get_logger().warning(
                 "cv_bridge is unavailable; publishing metadata-only detections"
@@ -160,7 +184,7 @@ class VisionNode(Node):
             "detections": detections,
             "road": road,
         }
-        self.detections_pub.publish(String(data=json.dumps(payload, ensure_ascii=False)))
+        self.publish_detections(msg, detections, payload)
 
         if self.annotated_pub is not None and frame is not None:
             annotated = self.draw_annotations(frame.copy(), detections, road)
@@ -196,6 +220,7 @@ class VisionNode(Node):
             ("obstacle", (170, 90, 90), (180, 255, 255), "red"),
             ("sign", (35, 70, 60), (90, 255, 255), "green"),
             ("person", (20, 80, 80), (34, 255, 255), "yellow"),
+            ("water", (95, 70, 60), (130, 255, 255), "blue"),
         ]
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         detections = []
@@ -219,6 +244,37 @@ class VisionNode(Node):
                     }
                 )
         return detections
+
+    def publish_detections(self, image_msg, detections, payload):
+        if self.typed_detections_available:
+            typed_msg = DetectionArray()
+            typed_msg.header = image_msg.header
+            typed_msg.detections = [
+                self.to_detection_msg(det) for det in detections
+            ]
+            self.detections_pub.publish(typed_msg)
+
+            if self.detections_json_pub is not None:
+                self.detections_json_pub.publish(
+                    String(data=json.dumps(payload, ensure_ascii=False))
+                )
+            return
+
+        self.detections_pub.publish(String(data=json.dumps(payload, ensure_ascii=False)))
+
+    @staticmethod
+    def to_detection_msg(det):
+        msg = Detection()
+        bbox = det.get("bbox") or [0, 0, 0, 0]
+        x1, y1, x2, y2 = [int(v) for v in bbox[:4]]
+        msg.class_name = str(det.get("class_name", "unknown"))
+        msg.confidence = float(det.get("confidence", 0.0) or 0.0)
+        msg.x_min = x1
+        msg.y_min = y1
+        msg.x_max = x2
+        msg.y_max = y2
+        msg.image_path = str(det.get("image_path", ""))
+        return msg
 
     def run_yolo_detection(self, frame):
         kwargs = {

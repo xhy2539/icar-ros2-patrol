@@ -6,6 +6,11 @@ from geometry_msgs.msg import Twist
 from rclpy.node import Node
 from std_msgs.msg import String
 
+try:
+    from icar_interfaces.msg import DetectionArray
+except ImportError:
+    DetectionArray = None
+
 
 class TargetTrackerNode(Node):
     """Select a visual target and publish safe follow-control velocity hints."""
@@ -13,6 +18,7 @@ class TargetTrackerNode(Node):
     def __init__(self):
         super().__init__("target_tracker_node")
         self.declare_parameter("detections_topic", "/vision/detections")
+        self.declare_parameter("json_detections_topic", "")
         self.declare_parameter("command_topic", "/vision/target_tracking/command")
         self.declare_parameter("cmd_vel_topic", "/vision/target_cmd_vel")
         self.declare_parameter("status_topic", "/vision/target_tracking/status")
@@ -30,8 +36,11 @@ class TargetTrackerNode(Node):
         self.declare_parameter("lost_timeout_sec", 0.8)
         self.declare_parameter("publish_stop_on_lost", True)
         self.declare_parameter("allow_fallback", True)
+        self.declare_parameter("frame_width", 640)
+        self.declare_parameter("frame_height", 480)
 
         self.detections_topic = self.get_parameter("detections_topic").value
+        self.json_detections_topic = self.get_parameter("json_detections_topic").value
         self.command_topic = self.get_parameter("command_topic").value
         self.cmd_vel_topic = self.get_parameter("cmd_vel_topic").value
         self.status_topic = self.get_parameter("status_topic").value
@@ -51,6 +60,8 @@ class TargetTrackerNode(Node):
         self.lost_timeout_sec = float(self.get_parameter("lost_timeout_sec").value)
         self.publish_stop_on_lost = bool(self.get_parameter("publish_stop_on_lost").value)
         self.allow_fallback = bool(self.get_parameter("allow_fallback").value)
+        self.frame_width = int(self.get_parameter("frame_width").value)
+        self.frame_height = int(self.get_parameter("frame_height").value)
 
         self.last_seen_at = 0.0
         self.last_frame_size = None
@@ -58,12 +69,28 @@ class TargetTrackerNode(Node):
 
         self.cmd_pub = self.create_publisher(Twist, self.cmd_vel_topic, 10)
         self.status_pub = self.create_publisher(String, self.status_topic, 10)
-        self.detections_sub = self.create_subscription(
-            String,
-            self.detections_topic,
-            self.on_detections,
-            10,
-        )
+        if DetectionArray is not None:
+            self.detections_sub = self.create_subscription(
+                DetectionArray,
+                self.detections_topic,
+                self.on_detection_array,
+                10,
+            )
+        else:
+            self.detections_sub = self.create_subscription(
+                String,
+                self.detections_topic,
+                self.on_detections_json,
+                10,
+            )
+        self.json_detections_sub = None
+        if self.json_detections_topic:
+            self.json_detections_sub = self.create_subscription(
+                String,
+                self.json_detections_topic,
+                self.on_detections_json,
+                10,
+            )
         self.command_sub = self.create_subscription(
             String,
             self.command_topic,
@@ -124,7 +151,24 @@ class TargetTrackerNode(Node):
                 },
             )
 
-    def on_detections(self, msg):
+    def on_detection_array(self, msg):
+        detections = []
+        for det in msg.detections:
+            detections.append(
+                {
+                    "class_name": det.class_name,
+                    "confidence": det.confidence,
+                    "bbox": [det.x_min, det.y_min, det.x_max, det.y_max],
+                    "image_path": det.image_path,
+                }
+            )
+        payload = {
+            "frame": {"width": self.frame_width, "height": self.frame_height},
+            "detections": detections,
+        }
+        self.handle_detection_payload(payload)
+
+    def on_detections_json(self, msg):
         if not self.enabled:
             return
         try:
@@ -132,7 +176,11 @@ class TargetTrackerNode(Node):
         except json.JSONDecodeError as exc:
             self.publish_status("bad_json", {"error": str(exc)})
             return
+        self.handle_detection_payload(payload)
 
+    def handle_detection_payload(self, payload):
+        if not self.enabled:
+            return
         frame = payload.get("frame", {})
         width = int(frame.get("width", 0) or 0)
         height = int(frame.get("height", 0) or 0)
