@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
+import '../services/car_controller.dart';
 
 class StatusPage extends StatefulWidget {
   const StatusPage({super.key});
@@ -11,10 +12,10 @@ class StatusPage extends StatefulWidget {
 
 class _StatusPageState extends State<StatusPage> {
   // 模拟数据
-  double _batteryLevel = 78.0;
+  final double _batteryLevel = 78.0;
   double _currentSpeed = 0.0;
   String _navigationMode = '手动控制';
-  String _signalStrength = '强';
+  final String _signalStrength = '强';
   int _runningTime = 1245; // 秒
   Timer? _timer;
 
@@ -71,6 +72,10 @@ class _StatusPageState extends State<StatusPage> {
   }
 
   Widget _buildCameraFeed() {
+    final ctrl = CarController.instance;
+    final bool showVideo = ctrl.isConnected;
+    final String videoUrl = ctrl.videoUrl;
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
       height: 220,
@@ -90,81 +95,122 @@ class _StatusPageState extends State<StatusPage> {
       ),
       child: Stack(
         children: [
-          // 模拟摄像头画面
-          Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.videocam,
-                  color: AppColors.blueGray.withValues(alpha: 0.5),
-                  size: 48,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '摄像头画面',
-                  style: TextStyle(
-                    color: AppColors.blueGrayDark,
-                    fontSize: 14,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '连接小车后显示实时画面',
-                  style: TextStyle(
-                    color: AppColors.blueGray.withValues(alpha: 0.6),
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          // 左上角 LIVE 标识
-          Positioned(
-            top: 12,
-            left: 12,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: AppColors.orange,
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.circle, color: Colors.white, size: 8),
-                  SizedBox(width: 4),
-                  Text(
-                    'LIVE',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
+          // 摄像头画面 / 占位
+          ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: showVideo
+                ? Image.network(
+                    videoUrl,
+                    width: double.infinity,
+                    height: double.infinity,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) {
+                      return Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.wifi_off,
+                                color: AppColors.blueGray, size: 40),
+                            const SizedBox(height: 8),
+                            Text(
+                              '视频流加载失败',
+                              style: TextStyle(
+                                color: AppColors.blueGrayDark,
+                                fontSize: 13,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              videoUrl,
+                              style: TextStyle(
+                                color: AppColors.blueGray.withValues(alpha: 0.5),
+                                fontSize: 10,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                    loadingBuilder: (context, child, loadingProgress) {
+                      if (loadingProgress == null) return child;
+                      return Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const CircularProgressIndicator(
+                              color: AppColors.orange,
+                              strokeWidth: 2,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              '正在加载视频流...',
+                              style: TextStyle(
+                                color: AppColors.blueGrayDark,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  )
+                : Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.videocam,
+                          color: AppColors.blueGray.withValues(alpha: 0.5),
+                          size: 48,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '摄像头画面',
+                          style: TextStyle(
+                            color: AppColors.blueGrayDark,
+                            fontSize: 14,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '连接小车后显示实时画面',
+                          style: TextStyle(
+                            color: AppColors.blueGray.withValues(alpha: 0.6),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ],
-              ),
-            ),
           ),
-          // 右上角 分辨率
-          Positioned(
-            top: 12,
-            right: 12,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: AppColors.darkNavy.withValues(alpha: 0.6),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: const Text(
-                '640×480',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 11,
+          // 左上角 LIVE 标识
+          if (showVideo)
+            Positioned(
+              top: 12,
+              left: 12,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.orange,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.circle, color: Colors.white, size: 8),
+                    SizedBox(width: 4),
+                    Text(
+                      'LIVE',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
-          ),
           // 底部工具栏
           Positioned(
             bottom: 0,

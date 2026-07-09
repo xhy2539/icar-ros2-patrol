@@ -9,7 +9,7 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  String _carIp = '192.168.43.1';
+  String _carIp = '10.90.164.83';
   int _rosbridgePort = 9090;
   double _defaultSpeed = 0.5;
   bool _autoReconnect = true;
@@ -56,9 +56,9 @@ class _SettingsPageState extends State<SettingsPage> {
             onChanged: (value) => _carIp = value,
           ),
           const SizedBox(height: 16),
-          // rosbridge 端口
+          // WebSocket 端口
           _buildTextField(
-            label: 'rosbridge 端口',
+            label: 'WebSocket 端口',
             value: _rosbridgePort.toString(),
             icon: Icons.lan,
             keyboardType: TextInputType.number,
@@ -94,7 +94,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 SizedBox(height: 8),
                 Text(
-                  '热点名称: ohcar\n密码: 88888888\nVNC 密码: yahboom',
+                  '网络: 10.90.164.83\nVNC 密码: yahboom\n底盘串口: /dev/myserial (ttyUSB1)',
                   style: TextStyle(
                     color: AppColors.blueGrayDark,
                     fontSize: 12,
@@ -187,11 +187,11 @@ class _SettingsPageState extends State<SettingsPage> {
         children: [
           _buildInfoRow('应用名称', 'iCar 巡检控制端'),
           const Divider(height: 16),
-          _buildInfoRow('版本', 'v1.0.0'),
+          _buildInfoRow('版本', 'v2.0.0'),
           const Divider(height: 16),
           _buildInfoRow('项目', '2026 小学期实训'),
           const Divider(height: 16),
-          _buildInfoRow('技术栈', 'Flutter + rosbridge'),
+          _buildInfoRow('技术栈', 'Flutter + WebSocket'),
         ],
       ),
     );

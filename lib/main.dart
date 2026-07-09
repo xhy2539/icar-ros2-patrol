@@ -6,6 +6,7 @@ import 'pages/status_page.dart';
 import 'pages/sensor_page.dart';
 import 'pages/mission_log_page.dart';
 import 'pages/settings_page.dart';
+import 'services/car_controller.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -19,6 +20,8 @@ void main() {
       statusBarIconBrightness: Brightness.dark,
     ),
   );
+  // 初始化小车控制器单例
+  CarController.instance;
   runApp(const ICarApp());
 }
 
@@ -168,7 +171,7 @@ class _MainScreenState extends State<MainScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('1. 确保手机和小车连接同一 WiFi 热点 (ohcar)',
+              Text('1. 确保手机和小车在同一网络下 (小车 IP: 10.90.164.83)',
                   style: TextStyle(color: AppColors.blueGrayDark, fontSize: 13)),
               SizedBox(height: 8),
               Text('2. 在控制页面输入小车 IP 地址并点击连接',

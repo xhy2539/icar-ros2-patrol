@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/app_theme.dart';
+import '../services/car_controller.dart';
+import '../services/car_tcp_service.dart';
 
 class ControlPage extends StatefulWidget {
   const ControlPage({super.key});
@@ -10,29 +12,38 @@ class ControlPage extends StatefulWidget {
 }
 
 class _ControlPageState extends State<ControlPage> {
-  bool _isConnected = false;
-  String _carIp = '192.168.43.1';
-  double _speed = 0.5;
-  String _currentAction = '待机';
-  String _currentDirection = '';
+  final CarController _ctrl = CarController.instance;
+  late TextEditingController _ipController;
 
-  // 模拟连接
+  @override
+  void initState() {
+    super.initState();
+    _ipController = TextEditingController(text: _ctrl.host);
+    _ctrl.addListener(_onControllerChanged);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.removeListener(_onControllerChanged);
+    _ipController.dispose();
+    super.dispose();
+  }
+
+  void _onControllerChanged() {
+    if (mounted) setState(() {});
+  }
+
   void _toggleConnection() {
-    setState(() {
-      _isConnected = !_isConnected;
-      if (!_isConnected) {
-        _currentAction = '待机';
-        _currentDirection = '';
-      } else {
-        _currentAction = '已连接';
-      }
-    });
+    if (_ctrl.isConnected) {
+      _ctrl.disconnect();
+    } else {
+      _ctrl.connect(_ipController.text.trim());
+    }
     HapticFeedback.mediumImpact();
   }
 
-  // 发送控制指令
   void _sendCommand(String direction) {
-    if (!_isConnected) {
+    if (!_ctrl.isConnected) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('请先连接小车'),
@@ -42,28 +53,7 @@ class _ControlPageState extends State<ControlPage> {
       );
       return;
     }
-
-    setState(() {
-      _currentDirection = direction;
-      switch (direction) {
-        case 'forward':
-          _currentAction = '前进中';
-          break;
-        case 'backward':
-          _currentAction = '后退中';
-          break;
-        case 'left':
-          _currentAction = '左转中';
-          break;
-        case 'right':
-          _currentAction = '右转中';
-          break;
-        case 'stop':
-          _currentAction = '已停止';
-          _currentDirection = '';
-          break;
-      }
-    });
+    _ctrl.sendCommand(direction);
     HapticFeedback.heavyImpact();
   }
 
@@ -75,20 +65,20 @@ class _ControlPageState extends State<ControlPage> {
           padding: const EdgeInsets.symmetric(vertical: 16),
           child: Column(
             children: [
-              // 连接状态栏
               _buildConnectionBar(),
               const SizedBox(height: 16),
-              // 速度控制
               _buildSpeedControl(),
               const SizedBox(height: 24),
-              // 方向控制
               _buildDirectionPad(),
               const SizedBox(height: 24),
-              // 当前状态
               _buildActionStatus(),
               const SizedBox(height: 24),
-              // 快捷操作
               _buildQuickActions(),
+              // 通信日志
+              if (_ctrl.messages.isNotEmpty) ...[
+                const SizedBox(height: 24),
+                _buildLogPanel(),
+              ],
             ],
           ),
         ),
@@ -97,21 +87,37 @@ class _ControlPageState extends State<ControlPage> {
   }
 
   Widget _buildConnectionBar() {
+    final isConnecting = _ctrl.connectionState == CarConnectionState.connecting;
+    final isConnected = _ctrl.isConnected;
+    final isError = _ctrl.connectionState == CarConnectionState.error;
+
+    String badgeText;
+    Color badgeColor;
+    if (isConnecting) {
+      badgeText = '连接中';
+      badgeColor = AppColors.warningOrange;
+    } else if (isConnected) {
+      badgeText = '已连接';
+      badgeColor = AppColors.successGreen;
+    } else if (isError) {
+      badgeText = '连接错误';
+      badgeColor = AppColors.errorRed;
+    } else {
+      badgeText = '未连接';
+      badgeColor = AppColors.blueGray;
+    }
+
     return AppCard(
       title: '连接状态',
       icon: Icons.wifi,
       child: Row(
         children: [
-          StatusBadge(
-            text: _isConnected ? '已连接' : '未连接',
-            color: _isConnected ? AppColors.successGreen : AppColors.blueGray,
-          ),
+          StatusBadge(text: badgeText, color: badgeColor),
           const Spacer(),
-          // IP 地址输入
           Expanded(
             flex: 2,
             child: TextField(
-              controller: TextEditingController(text: _carIp),
+              controller: _ipController,
               style: const TextStyle(color: AppColors.darkNavy, fontSize: 14),
               decoration: InputDecoration(
                 isDense: true,
@@ -126,22 +132,30 @@ class _ControlPageState extends State<ControlPage> {
                   color: AppColors.blueGray,
                 ),
               ),
-              onChanged: (value) => _carIp = value,
-              enabled: !_isConnected,
+              enabled: !isConnected && !isConnecting,
             ),
           ),
           const SizedBox(width: 12),
-          // 连接按钮
           SizedBox(
             height: 42,
             child: ElevatedButton(
-              onPressed: _toggleConnection,
+              onPressed: isConnecting ? null : _toggleConnection,
               style: ElevatedButton.styleFrom(
-                backgroundColor:
-                    _isConnected ? AppColors.blueGray : AppColors.orange,
+                backgroundColor: isConnected
+                    ? AppColors.blueGray
+                    : AppColors.orange,
                 padding: const EdgeInsets.symmetric(horizontal: 20),
               ),
-              child: Text(_isConnected ? '断开' : '连接'),
+              child: isConnecting
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : Text(isConnected ? '断开' : '连接'),
             ),
           ),
         ],
@@ -157,15 +171,16 @@ class _ControlPageState extends State<ControlPage> {
         children: [
           Row(
             children: [
-              const Icon(Icons.slow_motion_video, color: AppColors.blueGray, size: 20),
+              const Icon(Icons.slow_motion_video,
+                  color: AppColors.blueGray, size: 20),
               Expanded(
                 child: Slider(
-                  value: _speed,
+                  value: _ctrl.speed,
                   min: 0.1,
                   max: 1.0,
                   divisions: 9,
-                  label: '${(_speed * 100).round()}%',
-                  onChanged: (value) => setState(() => _speed = value),
+                  label: '${(_ctrl.speed * 100).round()}%',
+                  onChanged: (value) => _ctrl.speed = value,
                 ),
               ),
               const Icon(Icons.flash_on, color: AppColors.orange, size: 20),
@@ -176,14 +191,14 @@ class _ControlPageState extends State<ControlPage> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                '当前速度: ${(_speed * 100).round()}%',
+                '当前速度: ${(_ctrl.speed * 100).round()}%',
                 style: const TextStyle(
                   color: AppColors.darkNavy,
                   fontSize: 14,
                 ),
               ),
               Text(
-                '${(_speed * 1.5).toStringAsFixed(1)} m/s',
+                '${(_ctrl.speed * 1.5).toStringAsFixed(1)} m/s',
                 style: const TextStyle(
                   color: AppColors.bluePurple,
                   fontSize: 14,
@@ -217,15 +232,10 @@ class _ControlPageState extends State<ControlPage> {
       ),
       child: Column(
         children: [
-          // 方向控制标题
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                Icons.gamepad,
-                color: AppColors.bluePurple,
-                size: 20,
-              ),
+              Icon(Icons.gamepad, color: AppColors.bluePurple, size: 20),
               const SizedBox(width: 8),
               const Text(
                 '方向控制',
@@ -238,7 +248,6 @@ class _ControlPageState extends State<ControlPage> {
             ],
           ),
           const SizedBox(height: 20),
-          // 前进按钮
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -246,12 +255,11 @@ class _ControlPageState extends State<ControlPage> {
                 icon: Icons.arrow_upward,
                 label: '前进',
                 direction: 'forward',
-                isActive: _currentDirection == 'forward',
+                isActive: _ctrl.currentDirection == 'forward',
               ),
             ],
           ),
           const SizedBox(height: 12),
-          // 左转、停止、右转
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -259,7 +267,7 @@ class _ControlPageState extends State<ControlPage> {
                 icon: Icons.arrow_back,
                 label: '左转',
                 direction: 'left',
-                isActive: _currentDirection == 'left',
+                isActive: _ctrl.currentDirection == 'left',
               ),
               const SizedBox(width: 12),
               _buildStopButton(),
@@ -268,12 +276,11 @@ class _ControlPageState extends State<ControlPage> {
                 icon: Icons.arrow_forward,
                 label: '右转',
                 direction: 'right',
-                isActive: _currentDirection == 'right',
+                isActive: _ctrl.currentDirection == 'right',
               ),
             ],
           ),
           const SizedBox(height: 12),
-          // 后退按钮
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -281,7 +288,7 @@ class _ControlPageState extends State<ControlPage> {
                 icon: Icons.arrow_downward,
                 label: '后退',
                 direction: 'backward',
-                isActive: _currentDirection == 'backward',
+                isActive: _ctrl.currentDirection == 'backward',
               ),
             ],
           ),
@@ -308,7 +315,9 @@ class _ControlPageState extends State<ControlPage> {
               : AppColors.surfaceAlt,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: isActive ? AppColors.orange : AppColors.blueGray.withValues(alpha: 0.3),
+            color: isActive
+                ? AppColors.orange
+                : AppColors.blueGray.withValues(alpha: 0.3),
             width: isActive ? 2 : 1,
           ),
           boxShadow: isActive
@@ -364,11 +373,7 @@ class _ControlPageState extends State<ControlPage> {
         child: const Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.stop_circle,
-              color: Colors.white,
-              size: 32,
-            ),
+            Icon(Icons.stop_circle, color: Colors.white, size: 32),
             SizedBox(height: 2),
             Text(
               '停止',
@@ -392,14 +397,14 @@ class _ControlPageState extends State<ControlPage> {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(
-            _currentAction,
+            _ctrl.currentAction,
             style: const TextStyle(
               color: AppColors.darkNavy,
               fontSize: 18,
               fontWeight: FontWeight.w600,
             ),
           ),
-          if (_currentDirection.isNotEmpty && _isConnected)
+          if (_ctrl.currentDirection.isNotEmpty && _ctrl.isConnected)
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
@@ -407,7 +412,7 @@ class _ControlPageState extends State<ControlPage> {
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Icon(
-                _getDirectionIcon(_currentDirection),
+                _getDirectionIcon(_ctrl.currentDirection),
                 color: AppColors.orange,
                 size: 24,
               ),
@@ -442,16 +447,7 @@ class _ControlPageState extends State<ControlPage> {
             child: _buildQuickButton(
               icon: Icons.center_focus_strong,
               label: '自动归位',
-              onTap: _isConnected
-                  ? () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('自动归位指令已发送'),
-                          backgroundColor: AppColors.successGreen,
-                        ),
-                      );
-                    }
-                  : null,
+              onTap: _ctrl.isConnected ? _ctrl.sendAutoReturn : null,
             ),
           ),
           const SizedBox(width: 12),
@@ -459,16 +455,7 @@ class _ControlPageState extends State<ControlPage> {
             child: _buildQuickButton(
               icon: Icons.screenshot_monitor,
               label: '截图',
-              onTap: _isConnected
-                  ? () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('截图已保存'),
-                          backgroundColor: AppColors.successGreen,
-                        ),
-                      );
-                    }
-                  : null,
+              onTap: _ctrl.isConnected ? _ctrl.sendScreenshot : null,
             ),
           ),
           const SizedBox(width: 12),
@@ -476,16 +463,7 @@ class _ControlPageState extends State<ControlPage> {
             child: _buildQuickButton(
               icon: Icons.videocam,
               label: '录制',
-              onTap: _isConnected
-                  ? () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('录制已开始'),
-                          backgroundColor: AppColors.successGreen,
-                        ),
-                      );
-                    }
-                  : null,
+              onTap: _ctrl.isConnected ? _ctrl.sendRecord : null,
             ),
           ),
         ],
@@ -504,9 +482,7 @@ class _ControlPageState extends State<ControlPage> {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 16),
         decoration: BoxDecoration(
-          color: enabled
-              ? AppColors.surfaceAlt
-              : AppColors.background,
+          color: enabled ? AppColors.surfaceAlt : AppColors.background,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: enabled
@@ -518,19 +494,146 @@ class _ControlPageState extends State<ControlPage> {
           children: [
             Icon(
               icon,
-              color: enabled ? AppColors.bluePurple : AppColors.blueGray.withValues(alpha: 0.4),
+              color: enabled
+                  ? AppColors.bluePurple
+                  : AppColors.blueGray.withValues(alpha: 0.4),
               size: 24,
             ),
             const SizedBox(height: 6),
             Text(
               label,
               style: TextStyle(
-                color: enabled ? AppColors.darkNavy : AppColors.blueGray.withValues(alpha: 0.4),
+                color: enabled
+                    ? AppColors.darkNavy
+                    : AppColors.blueGray.withValues(alpha: 0.4),
                 fontSize: 12,
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildLogPanel() {
+    final logs = _ctrl.messages.reversed.take(50).toList();
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: AppColors.blueGray.withValues(alpha: 0.2),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 标题行：图标 + 标题 + 复制按钮 + 清空按钮
+          Row(
+            children: [
+              const Icon(Icons.terminal, color: AppColors.bluePurple, size: 20),
+              const SizedBox(width: 8),
+              const Text(
+                '通信日志',
+                style: TextStyle(
+                  color: AppColors.bluePurple,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              // 复制全部日志
+              IconButton(
+                onPressed: logs.isEmpty
+                    ? null
+                    : () {
+                        final allLogs = _ctrl.messages.join('\n');
+                        Clipboard.setData(ClipboardData(text: allLogs));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('日志已复制到剪贴板'),
+                            duration: Duration(seconds: 2),
+                          ),
+                        );
+                      },
+                icon: const Icon(Icons.copy, size: 18),
+                color: AppColors.bluePurple,
+                tooltip: '复制全部日志',
+                constraints: const BoxConstraints(
+                  minWidth: 36,
+                  minHeight: 36,
+                ),
+                padding: EdgeInsets.zero,
+              ),
+              const SizedBox(width: 4),
+              // 清空日志
+              IconButton(
+                onPressed: logs.isEmpty ? null : _ctrl.clearMessages,
+                icon: const Icon(Icons.delete_outline, size: 18),
+                color: AppColors.blueGray,
+                tooltip: '清空日志',
+                constraints: const BoxConstraints(
+                  minWidth: 36,
+                  minHeight: 36,
+                ),
+                padding: EdgeInsets.zero,
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // 日志内容
+          Container(
+            height: 180,
+            decoration: BoxDecoration(
+              color: AppColors.surfaceAlt,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: logs.isEmpty
+                ? const Center(
+                    child: Text(
+                      '暂无日志',
+                      style: TextStyle(
+                        color: AppColors.blueGray,
+                        fontSize: 12,
+                      ),
+                    ),
+                  )
+                : ListView.builder(
+                    reverse: true,
+                    padding: const EdgeInsets.all(8),
+                    itemCount: logs.length,
+                    itemBuilder: (context, index) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 1),
+                        child: Text(
+                          logs[index],
+                          style: TextStyle(
+                            color: logs[index].contains('[错误]')
+                                ? AppColors.errorRed
+                                : logs[index].contains('[收到]')
+                                    ? AppColors.successGreen
+                                    : logs[index].contains('[调试]')
+                                        ? AppColors.blueGray
+                                        : AppColors.darkNavyLight,
+                            fontSize: 11,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
       ),
     );
   }

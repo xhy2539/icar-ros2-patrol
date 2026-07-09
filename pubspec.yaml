@@ -1,7 +1,7 @@
 name: icar_app
 description: "iCar 智能巡检小车控制端 - 2026小学期实训项目"
 publish_to: 'none'
-version: 1.0.0+1
+version: 2.0.0+2
 
 environment:
   sdk: ^3.12.0
@@ -9,6 +9,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  web_socket_channel: ^3.0.0
 
 dev_dependencies:
   flutter_test:
