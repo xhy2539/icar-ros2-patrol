@@ -15,6 +15,9 @@ class _ControlPageState extends State<ControlPage> {
   final CarController _ctrl = CarController.instance;
   late TextEditingController _ipController;
 
+  /// 当前长按中的方向（空 = 没有按住）
+  String _holdDirection = '';
+
   @override
   void initState() {
     super.initState();
@@ -42,7 +45,8 @@ class _ControlPageState extends State<ControlPage> {
     HapticFeedback.mediumImpact();
   }
 
-  void _sendCommand(String direction) {
+  /// 按下方向键：发送方向指令并开始持续运动
+  void _onPress(String direction) {
     if (!_ctrl.isConnected) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -54,6 +58,22 @@ class _ControlPageState extends State<ControlPage> {
       return;
     }
     _ctrl.sendCommand(direction);
+    setState(() => _holdDirection = direction);
+    HapticFeedback.heavyImpact();
+  }
+
+  /// 松开方向键：发送 stop
+  void _onRelease() {
+    if (_holdDirection.isEmpty) return;
+    _ctrl.sendCommand('stop');
+    setState(() => _holdDirection = '');
+    HapticFeedback.lightImpact();
+  }
+
+  /// 单次点击 stop
+  void _onStop() {
+    _ctrl.sendCommand('stop');
+    setState(() => _holdDirection = '');
     HapticFeedback.heavyImpact();
   }
 
@@ -215,7 +235,7 @@ class _ControlPageState extends State<ControlPage> {
   Widget _buildDirectionPad() {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(20),
@@ -232,13 +252,14 @@ class _ControlPageState extends State<ControlPage> {
       ),
       child: Column(
         children: [
+          // 标题
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(Icons.gamepad, color: AppColors.bluePurple, size: 20),
               const SizedBox(width: 8),
               const Text(
-                '方向控制',
+                '运动控制',
                 style: TextStyle(
                   color: AppColors.bluePurple,
                   fontSize: 14,
@@ -247,85 +268,176 @@ class _ControlPageState extends State<ControlPage> {
               ),
             ],
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 4),
+          Text(
+            '按住方向键运动，松手即停',
+            style: TextStyle(
+              color: AppColors.blueGray.withValues(alpha: 0.7),
+              fontSize: 11,
+            ),
+          ),
+          const SizedBox(height: 16),
+          // 移动 + 转向 并排
           Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildDirectionButton(
-                icon: Icons.arrow_upward,
-                label: '前进',
-                direction: 'forward',
-                isActive: _ctrl.currentDirection == 'forward',
+              // ─── 左侧：平移 D-pad ───
+              Expanded(
+                child: Column(
+                  children: [
+                    Text(
+                      '移动',
+                      style: TextStyle(
+                        color: AppColors.darkNavy,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    // 前进
+                    Center(
+                      child: _buildHoldButton(
+                        icon: Icons.arrow_upward,
+                        label: '前进',
+                        direction: 'forward',
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    // 左移 + 停止 + 右移
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        _buildHoldButton(
+                          icon: Icons.arrow_back,
+                          label: '左移',
+                          direction: 'left',
+                          size: 64,
+                        ),
+                        const SizedBox(width: 8),
+                        _buildStopButton(),
+                        const SizedBox(width: 8),
+                        _buildHoldButton(
+                          icon: Icons.arrow_forward,
+                          label: '右移',
+                          direction: 'right',
+                          size: 64,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    // 后退
+                    Center(
+                      child: _buildHoldButton(
+                        icon: Icons.arrow_downward,
+                        label: '后退',
+                        direction: 'backward',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // ─── 分割线 ───
+              Container(
+                width: 1,
+                height: 200,
+                color: AppColors.blueGray.withValues(alpha: 0.2),
+              ),
+              // ─── 右侧：转向 ───
+              Expanded(
+                child: Column(
+                  children: [
+                    Text(
+                      '转向',
+                      style: TextStyle(
+                        color: AppColors.darkNavy,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    // 左转
+                    _buildHoldButton(
+                      icon: Icons.rotate_left,
+                      label: '左转',
+                      direction: 'turn_left',
+                      size: 80,
+                      color: AppColors.bluePurple,
+                    ),
+                    const SizedBox(height: 12),
+                    // 右转
+                    _buildHoldButton(
+                      icon: Icons.rotate_right,
+                      label: '右转',
+                      direction: 'turn_right',
+                      size: 80,
+                      color: AppColors.bluePurple,
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _buildDirectionButton(
-                icon: Icons.arrow_back,
-                label: '左转',
-                direction: 'left',
-                isActive: _ctrl.currentDirection == 'left',
+          // 全停按钮
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: ElevatedButton.icon(
+              onPressed: _onStop,
+              icon: const Icon(Icons.stop_circle, size: 22),
+              label: const Text(
+                '全部停止',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
               ),
-              const SizedBox(width: 12),
-              _buildStopButton(),
-              const SizedBox(width: 12),
-              _buildDirectionButton(
-                icon: Icons.arrow_forward,
-                label: '右转',
-                direction: 'right',
-                isActive: _ctrl.currentDirection == 'right',
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.orange,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _buildDirectionButton(
-                icon: Icons.arrow_downward,
-                label: '后退',
-                direction: 'backward',
-                isActive: _ctrl.currentDirection == 'backward',
-              ),
-            ],
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildDirectionButton({
+  /// 长按运动按钮：按下发送指令，松手发 stop
+  Widget _buildHoldButton({
     required IconData icon,
     required String label,
     required String direction,
-    bool isActive = false,
+    double size = 72,
+    Color? color,
   }) {
+    final bool isActive = _holdDirection == direction;
+    final Color activeColor = color ?? AppColors.orange;
+
     return GestureDetector(
-      onTap: () => _sendCommand(direction),
-      onLongPress: () => _sendCommand(direction),
+      onTapDown: (_) => _onPress(direction),
+      onTapUp: (_) => _onRelease(),
+      onTapCancel: _onRelease,
       child: Container(
-        width: 80,
-        height: 80,
+        width: size,
+        height: size,
         decoration: BoxDecoration(
           color: isActive
-              ? AppColors.orange.withValues(alpha: 0.15)
+              ? activeColor.withValues(alpha: 0.15)
               : AppColors.surfaceAlt,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: isActive
-                ? AppColors.orange
+                ? activeColor
                 : AppColors.blueGray.withValues(alpha: 0.3),
             width: isActive ? 2 : 1,
           ),
           boxShadow: isActive
               ? [
                   BoxShadow(
-                    color: AppColors.orange.withValues(alpha: 0.2),
-                    blurRadius: 12,
-                    spreadRadius: 2,
+                    color: activeColor.withValues(alpha: 0.2),
+                    blurRadius: 10,
+                    spreadRadius: 1,
                   ),
                 ]
               : null,
@@ -335,15 +447,15 @@ class _ControlPageState extends State<ControlPage> {
           children: [
             Icon(
               icon,
-              color: isActive ? AppColors.orange : AppColors.darkNavy,
-              size: 28,
+              color: isActive ? activeColor : AppColors.darkNavy,
+              size: size > 70 ? 26 : 22,
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 3),
             Text(
               label,
               style: TextStyle(
-                color: isActive ? AppColors.orange : AppColors.blueGray,
-                fontSize: 12,
+                color: isActive ? activeColor : AppColors.blueGray,
+                fontSize: 11,
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -355,36 +467,22 @@ class _ControlPageState extends State<ControlPage> {
 
   Widget _buildStopButton() {
     return GestureDetector(
-      onTap: () => _sendCommand('stop'),
+      onTap: _onStop,
       child: Container(
-        width: 80,
-        height: 80,
+        width: 56,
+        height: 56,
         decoration: BoxDecoration(
           color: AppColors.orange,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(28),
           boxShadow: [
             BoxShadow(
               color: AppColors.orange.withValues(alpha: 0.3),
-              blurRadius: 12,
-              spreadRadius: 2,
+              blurRadius: 10,
+              spreadRadius: 1,
             ),
           ],
         ),
-        child: const Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.stop_circle, color: Colors.white, size: 32),
-            SizedBox(height: 2),
-            Text(
-              '停止',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-        ),
+        child: const Icon(Icons.stop, color: Colors.white, size: 28),
       ),
     );
   }
@@ -432,6 +530,10 @@ class _ControlPageState extends State<ControlPage> {
         return Icons.west;
       case 'right':
         return Icons.east;
+      case 'turn_left':
+        return Icons.rotate_left;
+      case 'turn_right':
+        return Icons.rotate_right;
       default:
         return Icons.stop;
     }

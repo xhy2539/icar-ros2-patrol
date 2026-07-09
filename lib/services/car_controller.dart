@@ -153,9 +153,15 @@ class CarController extends ChangeNotifier {
           _currentAction = '后退中';
           break;
         case 'left':
-          _currentAction = '左转中';
+          _currentAction = '左平移中';
           break;
         case 'right':
+          _currentAction = '右平移中';
+          break;
+        case 'turn_left':
+          _currentAction = '左转中';
+          break;
+        case 'turn_right':
           _currentAction = '右转中';
           break;
         case 'stop':
