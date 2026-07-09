@@ -21,6 +21,8 @@ setup(
         "console_scripts": [
             "fake_camera = vision_patrol.fake_camera_node:main",
             "camera_probe = vision_patrol.camera_probe_node:main",
+            "dataset_recorder = vision_patrol.dataset_recorder_node:main",
+            "target_tracker = vision_patrol.target_tracker_node:main",
             "vision_node = vision_patrol.vision_node:main",
         ],
     },

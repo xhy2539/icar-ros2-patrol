@@ -24,6 +24,11 @@
 | 14 | `/task/request` | 自定义 `TaskRequest` | `app_control_node` | `task_manager_node` | P0 | Reliable | 按需 |
 | 15 | `/task/status` | 自定义 `TaskStatus` | `task_manager_node` | `app_control_node` | P0 | Reliable | 按需（状态变化） |
 | 16 | `/task/log` | 自定义 `TaskLog` | `task_manager_node` | `app_control_node`, `llm_gateway_node`(P2) | P1 | Reliable | 按需（事件触发） |
+| 17 | `/vision/capture_command` | `std_msgs/msg/String` (JSON) | `app_control_node`, `task_manager_node` | `dataset_recorder_node` | P1 | Reliable | 按需 |
+| 18 | `/vision/capture_status` | `std_msgs/msg/String` (JSON) | `dataset_recorder_node` | `app_control_node`, `task_manager_node` | P1 | Reliable | 按需 |
+| 19 | `/vision/target_tracking/command` | `std_msgs/msg/String` (JSON) | `app_control_node`, `task_manager_node` | `target_tracker_node` | P1 | Reliable | 按需 |
+| 20 | `/vision/target_cmd_vel` | `geometry_msgs/msg/Twist` | `target_tracker_node` | `task_manager_node`, `app_control_node` | P1 | Reliable | 按需/10Hz |
+| 21 | `/vision/target_tracking/status` | `std_msgs/msg/String` (JSON) | `target_tracker_node` | `task_manager_node`, `app_control_node` | P1 | Reliable | 按需 |
 
 ---
 
@@ -309,6 +314,106 @@ QoS:      Reliable
 | `event_type` | string | 事件类型: NAV_START / CHECKPOINT_REACHED / SENSOR_READING / VISION_DETECT / ANOMALY / NAV_END / TASK_END |
 | `data_json` | string | 事件数据 JSON |
 | `severity` | string | INFO / WARN / ERROR |
+
+---
+
+### 17. /vision/capture_command — 视觉截图/数据采集命令
+
+```
+消息类型: std_msgs/msg/String (JSON)
+发布者:   app_control_node, task_manager_node
+订阅者:   dataset_recorder_node
+QoS:      Reliable
+频率:     按需
+```
+
+示例：
+
+```json
+{"action": "capture_once", "tag": "checkpoint_A"}
+{"action": "set_interval", "interval_sec": 3.0}
+{"action": "stop"}
+```
+
+### 18. /vision/capture_status — 视觉截图/数据采集状态
+
+```
+消息类型: std_msgs/msg/String (JSON)
+发布者:   dataset_recorder_node
+订阅者:   app_control_node, task_manager_node
+QoS:      Reliable
+频率:     按需
+```
+
+示例：
+
+```json
+{
+  "module": "vision",
+  "event": "image_saved",
+  "save_dir": "/tmp/icar_vision_dataset",
+  "saved_count": 12,
+  "data": {
+    "path": "/tmp/icar_vision_dataset/vision_123_000000000_0011_checkpoint_A.jpg"
+  }
+}
+```
+
+---
+
+### 19. /vision/target_tracking/command — 目标跟踪命令
+
+```
+消息类型: std_msgs/msg/String (JSON)
+发布者:   app_control_node, task_manager_node
+订阅者:   target_tracker_node
+QoS:      Reliable
+频率:     按需
+```
+
+示例：
+
+```json
+{"action": "start", "class_name": "person"}
+{"action": "select_target", "class_name": "bottle"}
+{"action": "stop"}
+{"action": "set_params", "max_linear_speed": 0.12}
+```
+
+### 20. /vision/target_cmd_vel — 目标跟随速度建议
+
+```
+消息类型: geometry_msgs/msg/Twist
+发布者:   target_tracker_node
+订阅者:   task_manager_node, app_control_node
+QoS:      Reliable
+频率:     按需/10Hz
+```
+
+> 安全约束：该 Topic 是视觉模块输出的速度建议，默认不直接等同 `/cmd_vel`。是否转发到底盘由任务调度/安全模块统一决定。
+
+### 21. /vision/target_tracking/status — 目标跟踪状态
+
+```
+消息类型: std_msgs/msg/String (JSON)
+发布者:   target_tracker_node
+订阅者:   task_manager_node, app_control_node
+QoS:      Reliable
+频率:     按需
+```
+
+示例：
+
+```json
+{
+  "module": "vision",
+  "event": "tracking",
+  "data": {
+    "target": {"class_name": "person", "bbox": [120, 80, 300, 420]},
+    "control": {"linear_x": 0.08, "angular_z": -0.2}
+  }
+}
+```
 
 ---
 

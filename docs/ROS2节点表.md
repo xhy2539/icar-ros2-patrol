@@ -15,7 +15,9 @@
 | 5 | `slam_node` | navigation | 曹莹 | P0 | SLAM 建图节点，生成并发布 `/map` 栅格地图和 `/pose` 位姿 |
 | 6 | `navigation_node` | navigation | 曹莹 | P0 | 自主导航节点，路径规划与目标点导航 |
 | 7 | `camera_node` | vision | 韦雪 | P0 | 摄像头驱动节点，发布 `/image` 和 `/depth` |
-| 8 | `vision_node` | vision | 韦雪 | P0 | 视觉检测节点，YOLO 目标检测、目标追踪、截图保存 |
+| 8 | `vision_node` | vision | 韦雪 | P0 | 视觉检测节点，YOLO 目标检测、目标追踪、检测结果输出 |
+| 8.1 | `dataset_recorder_node` | vision | 韦雪 | P1 | 按 App/任务命令截图或按间隔采集数据集图片 |
+| 8.2 | `target_tracker_node` | vision | 韦雪 | P1 | 根据检测框选择目标，输出目标跟随速度建议 |
 | 9 | `sensor_node` | sensor | 王璐 | P0 | 传感器数据采集节点，汇总多传感器数据，发布异常告警 |
 | 10 | `llm_gateway_node` | llm | 熊浩宇 | P2 | LLM 网关节点（加分项），任务解析与报告生成，不发布 `/cmd_vel` |
 | 11 | `底盘控制模块` | 底盘 | 平台 | P0 | 接收 `/cmd_vel` 控制麦轮底盘运动（复用小车已有能力） |
@@ -129,6 +131,32 @@
 | **发布 Topic** | `/vision/detections` |
 | **功能** | 1. 接收图像数据 2. YOLO 模型推理 3. 目标检测结果输出（类别/置信度/bbox）4. 可选目标追踪 5. 截图保存到 logs/images/ |
 | **启动命令** | `ros2 run vision vision_node` |
+
+### 8.1. dataset_recorder_node
+
+| 属性 | 值 |
+|------|-----|
+| **节点名** | `dataset_recorder_node` |
+| **包名** | `vision_patrol` |
+| **语言** | Python |
+| **负责人** | 韦雪 |
+| **订阅 Topic** | `/image` 或真实相机图像 Topic, `/vision/capture_command` |
+| **发布 Topic** | `/vision/capture_status` |
+| **功能** | 1. 默认不保存图片 2. 接收 App/任务调度命令后保存单张截图 3. 支持每 N 秒保存一张用于 YOLO 数据采集 4. 使用 `max_images` 限制保存数量，避免占满磁盘 |
+| **启动命令** | `ros2 run vision_patrol dataset_recorder` |
+
+### 8.2. target_tracker_node
+
+| 属性 | 值 |
+|------|-----|
+| **节点名** | `target_tracker_node` |
+| **包名** | `vision_patrol` |
+| **语言** | Python |
+| **负责人** | 韦雪 |
+| **订阅 Topic** | `/vision/detections`, `/vision/target_tracking/command` |
+| **发布 Topic** | `/vision/target_cmd_vel`, `/vision/target_tracking/status` |
+| **功能** | 1. 优先选择 person 作为追踪目标 2. 根据目标框中心偏差输出转向速度建议 3. 根据目标框面积输出前进/后退速度建议 4. 目标丢失时输出停止建议 |
+| **启动命令** | `ros2 run vision_patrol target_tracker` |
 
 ### 9. sensor_node
 
