@@ -206,7 +206,7 @@ QoS:      Reliable
 | `risk_level` | string | 风险等级 (safe/warning/danger) |
 | `action` | string | 建议动作 (none/slow_down/stop/turn) |
 
-> 当前状态：消息类型与字段已按正式接口对齐；当前障碍判定仍为 mock 场景驱动，后续切换为真实 `/scan` 计算时不需要修改 Topic 和消息协议。
+> 当前状态：消息类型与字段已按正式接口对齐；`obstacle_avoid_node` 默认根据真实 `/scan` 前方扇区计算障碍状态，mock 场景仅保留为无雷达演示模式。
 
 ### 11. /vision/detections — 视觉检测结果
 

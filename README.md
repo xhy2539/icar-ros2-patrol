@@ -131,7 +131,7 @@ icar-ros2-patrol/
 │   └── frontend/           #   前端页面
 ├── navigation/             # 雷达/导航模块（曹莹）
 │   ├── lidar/              #   激光雷达驱动（当前可运行 mock 数据模式）
-│   ├── obstacle_avoid/     #   避障算法（当前可运行 mock 数据模式）
+│   ├── obstacle_avoid/     #   避障算法（默认真实 /scan，保留 mock 演示模式）
 │   ├── slam/               #   SLAM 建图（当前可运行 mock 数据模式）
 │   ├── navigation/         #   自主导航 / 巡检（当前可运行 mock 数据模式）
 │   ├── navigation_utils.py #   导航公共工具
@@ -256,7 +256,7 @@ source install/setup.bash
 说明：
 
 - `/map`、`/pose`、`/goal_pose`、`/scan` 使用标准 ROS2 消息
-- `/nav_status`、`/obstacle_status` 在 mock 阶段用 `std_msgs/msg/String` 承载 JSON 字段
+- `/nav_status`、`/obstacle_status` 使用正式自定义消息；`/obstacle_status` 默认由真实 `/scan` 前方扇区判定生成
 - 当前运行的是正式模块目录下的 mock 数据模式，不再使用 `mock_*` 实现文件作为工程主结构
 - 后续真车恢复后，优先保持 Topic 名和字段约定不变，再切回真实数据源
 

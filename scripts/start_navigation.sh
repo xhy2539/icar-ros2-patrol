@@ -11,6 +11,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 MODE=${1:-mock}
 NAV_SCENARIO=${NAV_SCENARIO:-success}
+OBSTACLE_MODE=${OBSTACLE_MODE:-real}
 OBSTACLE_SCENARIO=${OBSTACLE_SCENARIO:-warning_then_clear}
 PATROL_ROUTE=${PATROL_ROUTE:-}
 PIDS=()
@@ -29,6 +30,7 @@ Modes:
 
 Environment variables:
   NAV_SCENARIO        success | timeout | fail_fast
+  OBSTACLE_MODE       real | mock
   OBSTACLE_SCENARIO   clear | warning_then_clear | danger_then_recover
   PATROL_ROUTE        Comma-separated route, e.g. A,B,C
 EOF
@@ -69,7 +71,7 @@ case "$MODE" in
     mock-full)
         start_process "slam_node" python3 navigation/slam/slam_node.py
         start_process "navigation_node" python3 navigation/navigation/navigation_node.py --scenario "$NAV_SCENARIO"
-        start_process "obstacle_avoid_node" python3 navigation/obstacle_avoid/obstacle_avoid_node.py --scenario "$OBSTACLE_SCENARIO"
+        start_process "obstacle_avoid_node" python3 navigation/obstacle_avoid/obstacle_avoid_node.py --mode "$OBSTACLE_MODE" --scenario "$OBSTACLE_SCENARIO"
         start_process "lidar_node" python3 navigation/lidar/lidar_node.py
         if [ -n "$PATROL_ROUTE" ]; then
             start_process "patrol_node" python3 navigation/navigation/patrol_node.py --route "$PATROL_ROUTE"
