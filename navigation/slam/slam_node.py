@@ -3,10 +3,11 @@ from pathlib import Path
 
 import rclpy
 from geometry_msgs.msg import PoseStamped
-from nav_msgs.msg import OccupancyGrid
+from icar_interfaces.msg import NavStatus
+from nav_msgs.msg import OccupancyGrid, Odometry
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
-from std_msgs.msg import String
+from sensor_msgs.msg import LaserScan
 CURRENT_DIR = Path(__file__).resolve().parent
 PARENT_DIR = CURRENT_DIR.parent
 for path in (CURRENT_DIR, PARENT_DIR):
@@ -17,7 +18,6 @@ from navigation_utils import (
     interpolate_pose,
     load_checkpoints,
     load_map_metadata,
-    parse_json_message,
     yaw_to_quaternion,
 )
 
@@ -61,7 +61,13 @@ class SlamNode(Node):
         self.current_pose = dict(checkpoints.get("HOME", {"x": 0.0, "y": 0.0, "yaw": 0.0}))
         self.start_pose = dict(self.current_pose)
         self.target_pose = None
-        self.nav_status = {"status": "IDLE", "progress": 0.0}
+        self.nav_status = NavStatus()
+        self.nav_status.status = "IDLE"
+        self.nav_status.progress = 0.0
+        self.nav_status.distance_remain = 0.0
+        self.nav_status.message = ""
+        self.scan_received = False
+        self.odom_received = False
 
         map_yaml_path = self.map_metadata.get("map_yaml", "config/navigation/maps/mock_lab.yaml")
         self.map_yaml_file = (PARENT_DIR / map_yaml_path).resolve()
@@ -78,7 +84,9 @@ class SlamNode(Node):
         self.map_publisher = self.create_publisher(OccupancyGrid, "/map", map_qos)
         self.pose_publisher = self.create_publisher(PoseStamped, "/pose", 10)
         self.create_subscription(PoseStamped, "/goal_pose", self.on_goal_pose, 10)
-        self.create_subscription(String, "/nav_status", self.on_nav_status, 10)
+        self.create_subscription(NavStatus, "/nav_status", self.on_nav_status, 10)
+        self.create_subscription(LaserScan, "/scan", self.on_scan, 10)
+        self.create_subscription(Odometry, "/odom", self.on_odom, 10)
 
         self.create_timer(2.0, self.publish_map)
         self.create_timer(0.25, self.publish_pose)
@@ -94,11 +102,14 @@ class SlamNode(Node):
             "yaw": 0.0,
         }
 
-    def on_nav_status(self, message: String):
-        payload = parse_json_message(message.data)
-        if payload.get("current_goal"):
-            self.target_pose = dict(payload["current_goal"])
-        self.nav_status = payload
+    def on_nav_status(self, message: NavStatus):
+        self.nav_status = message
+
+    def on_scan(self, _: LaserScan):
+        self.scan_received = True
+
+    def on_odom(self, _: Odometry):
+        self.odom_received = True
 
     def publish_map(self):
         map_message = OccupancyGrid()
@@ -119,8 +130,8 @@ class SlamNode(Node):
         self.map_publisher.publish(map_message)
 
     def publish_pose(self):
-        status = self.nav_status.get("status", "IDLE")
-        progress = float(self.nav_status.get("progress", 0.0))
+        status = self.nav_status.status or "IDLE"
+        progress = float(self.nav_status.progress)
 
         if self.target_pose and status == "NAVIGATING":
             self.current_pose = interpolate_pose(self.start_pose, self.target_pose, progress)

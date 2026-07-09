@@ -1,6 +1,6 @@
 # Topic 通信表
 
-> **icar-ros2-patrol** ROS2 Topic 通信矩阵（共 15 个 Topic）
+> **icar-ros2-patrol** ROS2 Topic 通信矩阵（当前导航模块已切到正式 Topic/消息协议，部分内部数据源仍为 mock 过渡态）
 
 ---
 
@@ -9,7 +9,7 @@
 | 序号 | Topic 名称 | 消息类型 | 发布者 | 订阅者 | 优先级 | QoS | 频率 |
 |------|------------|----------|--------|--------|--------|-----|------|
 | 1 | `/cmd_vel` | `geometry_msgs/msg/Twist` | `app_control_node`, `obstacle_avoid_node`, `task_manager_node` | 底盘控制模块 | P0 | Reliable | 按需/20Hz |
-| 2 | `/scan` | `sensor_msgs/msg/LaserScan` | `lidar_node` | `obstacle_avoid_node`, `slam_node`, `navigation_node` | P0 | Best Effort | 10-20Hz |
+| 2 | `/scan` | `sensor_msgs/msg/LaserScan` | 车端真实雷达链路 | `lidar_node`, `obstacle_avoid_node`, `slam_node`, `navigation_node` | P0 | Best Effort | 10-20Hz |
 | 3 | `/odom` | `nav_msgs/msg/Odometry` | 底盘/里程计 | `slam_node`, `navigation_node` | P0 | Reliable | 20-50Hz |
 | 4 | `/image` | `sensor_msgs/msg/Image` | `camera_node` | `vision_node`, `app_control_node`（展示） | P0 | Best Effort | 15-30Hz |
 | 5 | `/depth` | `sensor_msgs/msg/Image` | `camera_node` | `vision_node` | P0 | Best Effort | 15-30Hz |
@@ -54,8 +54,8 @@ QoS:      Reliable
 
 ```
 消息类型: sensor_msgs/msg/LaserScan
-发布者:   lidar_node
-订阅者:   obstacle_avoid_node, slam_node, navigation_node
+发布者:   车端真实雷达链路
+订阅者:   lidar_node, obstacle_avoid_node, slam_node, navigation_node
 QoS:      Best Effort
 频率:     10-20 Hz
 ```
@@ -186,6 +186,8 @@ QoS:      Reliable
 | `distance_remain` | float32 | 剩余距离 (m) |
 | `message` | string | 状态描述文本 |
 
+> 当前状态：消息类型与字段已按正式接口对齐；导航结果仍可能来自 mock 过渡逻辑，待真实 `/map`、`/pose` 稳定后切换为真导航反馈。
+
 ### 10. /obstacle_status — 障碍物检测状态
 
 ```
@@ -203,6 +205,8 @@ QoS:      Reliable
 | `direction` | string | 方位 (front/left/right/back) |
 | `risk_level` | string | 风险等级 (safe/warning/danger) |
 | `action` | string | 建议动作 (none/slow_down/stop/turn) |
+
+> 当前状态：消息类型与字段已按正式接口对齐；当前障碍判定仍为 mock 场景驱动，后续切换为真实 `/scan` 计算时不需要修改 Topic 和消息协议。
 
 ### 11. /vision/detections — 视觉检测结果
 

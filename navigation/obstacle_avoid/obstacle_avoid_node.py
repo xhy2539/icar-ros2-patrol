@@ -3,9 +3,11 @@ import sys
 import time
 from pathlib import Path
 
+from geometry_msgs.msg import Twist
+from icar_interfaces.msg import ObstacleStatus
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import String
+from sensor_msgs.msg import LaserScan
 
 CURRENT_DIR = Path(__file__).resolve().parent
 PARENT_DIR = CURRENT_DIR.parent
@@ -13,7 +15,7 @@ for path in (CURRENT_DIR, PARENT_DIR):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from navigation_utils import dump_json_message, load_obstacle_scenarios
+from navigation_utils import load_obstacle_scenarios
 
 
 class ObstacleAvoidNode(Node):
@@ -27,10 +29,16 @@ class ObstacleAvoidNode(Node):
         self.loop = bool(self.scenario.get("loop", True))
         self.events = self.scenario.get("events", [])
         self.started_at = time.monotonic()
+        self.last_scan_at = None
 
-        self.publisher = self.create_publisher(String, "/obstacle_status", 10)
+        self.publisher = self.create_publisher(ObstacleStatus, "/obstacle_status", 10)
+        self.cmd_vel_publisher = self.create_publisher(Twist, "/cmd_vel", 10)
+        self.create_subscription(LaserScan, "/scan", self.on_scan, 10)
         self.create_timer(0.5, self.on_timer)
         self.get_logger().info(f"Obstacle avoid node started in mock data mode: {self.scenario_name}")
+
+    def on_scan(self, _: LaserScan):
+        self.last_scan_at = time.monotonic()
 
     def current_event(self):
         if not self.events:
@@ -57,19 +65,19 @@ class ObstacleAvoidNode(Node):
 
     def on_timer(self):
         event = self.current_event()
-        payload = {
-            "source": "obstacle_avoid_node",
-            "mode": "mock",
-            "scenario": self.scenario_name,
-            "is_obstacle": bool(event.get("is_obstacle", False)),
-            "min_distance": float(event.get("min_distance", 2.5)),
-            "direction": event.get("direction", "front"),
-            "risk_level": event.get("risk_level", "safe"),
-            "action": event.get("action", "none"),
-        }
-        message = String()
-        message.data = dump_json_message(payload)
+        message = ObstacleStatus()
+        message.is_obstacle = bool(event.get("is_obstacle", False))
+        message.min_distance = float(event.get("min_distance", 2.5))
+        message.direction = event.get("direction", "front")
+        message.risk_level = event.get("risk_level", "safe")
+        message.action = event.get("action", "none")
         self.publisher.publish(message)
+
+        if message.risk_level == "danger":
+            stop = Twist()
+            stop.linear.x = 0.0
+            stop.angular.z = 0.0
+            self.cmd_vel_publisher.publish(stop)
 
 
 def main():

@@ -5,8 +5,11 @@ from pathlib import Path
 
 import rclpy
 from geometry_msgs.msg import PoseStamped
+from icar_interfaces.msg import NavStatus, ObstacleStatus
+from nav_msgs.msg import OccupancyGrid
 from rclpy.node import Node
-from std_msgs.msg import String
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from sensor_msgs.msg import LaserScan
 
 CURRENT_DIR = Path(__file__).resolve().parent
 PARENT_DIR = CURRENT_DIR.parent
@@ -14,7 +17,7 @@ for path in (CURRENT_DIR, PARENT_DIR):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from navigation_utils import clamp, distance_between, dump_json_message, load_checkpoints, load_nav_scenarios, parse_json_message, quaternion_to_yaw
+from navigation_utils import clamp, distance_between, load_checkpoints, load_nav_scenarios, quaternion_to_yaw
 
 
 class NavigationNode(Node):
@@ -36,12 +39,21 @@ class NavigationNode(Node):
         self.result_status = None
         self.result_message = ""
         self.last_status_signature = None
-        self.current_obstacle = {}
+        self.current_obstacle = None
         self.danger_since = None
+        self.map_received = False
+        self.scan_received = False
 
-        self.status_publisher = self.create_publisher(String, "/nav_status", 10)
+        map_qos = QoSProfile(depth=1)
+        map_qos.reliability = ReliabilityPolicy.RELIABLE
+        map_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
+
+        self.status_publisher = self.create_publisher(NavStatus, "/nav_status", 10)
         self.create_subscription(PoseStamped, "/goal_pose", self.on_goal_pose, 10)
-        self.create_subscription(String, "/obstacle_status", self.on_obstacle_status, 10)
+        self.create_subscription(ObstacleStatus, "/obstacle_status", self.on_obstacle_status, 10)
+        self.create_subscription(PoseStamped, "/pose", self.on_pose, 10)
+        self.create_subscription(OccupancyGrid, "/map", self.on_map, map_qos)
+        self.create_subscription(LaserScan, "/scan", self.on_scan, 10)
         self.timer = self.create_timer(0.5, self.on_timer)
 
         self.get_logger().info(f"Navigation node started in mock data mode: {self.scenario_name}")
@@ -65,24 +77,38 @@ class NavigationNode(Node):
             f"Received goal ({self.active_goal['x']:.2f}, {self.active_goal['y']:.2f})"
         )
 
-    def on_obstacle_status(self, message: String):
-        self.current_obstacle = parse_json_message(message.data)
+    def on_obstacle_status(self, message: ObstacleStatus):
+        self.current_obstacle = message
+
+    def on_pose(self, message: PoseStamped):
+        self.current_pose = {
+            "x": float(message.pose.position.x),
+            "y": float(message.pose.position.y),
+            "yaw": quaternion_to_yaw(
+                float(message.pose.orientation.z),
+                float(message.pose.orientation.w),
+            ),
+        }
+
+    def on_map(self, _: OccupancyGrid):
+        self.map_received = True
+
+    def on_scan(self, _: LaserScan):
+        self.scan_received = True
 
     def publish_status(self, status: str, progress: float, distance_remain: float, message_text: str):
-        payload = {
-            "source": "navigation_node",
-            "mode": "mock",
-            "status": status,
-            "progress": round(progress, 3),
-            "distance_remain": round(distance_remain, 3),
-            "message": message_text,
-            "current_goal": self.active_goal,
-            "scenario": self.scenario_name,
-        }
-        signature = dump_json_message(payload)
+        signature = (
+            status,
+            round(progress, 3),
+            round(distance_remain, 3),
+            message_text,
+        )
         if signature != self.last_status_signature:
-            ros_message = String()
-            ros_message.data = signature
+            ros_message = NavStatus()
+            ros_message.status = status
+            ros_message.progress = round(progress, 3)
+            ros_message.distance_remain = round(distance_remain, 3)
+            ros_message.message = message_text
             self.status_publisher.publish(ros_message)
             self.last_status_signature = signature
 
@@ -128,7 +154,7 @@ class NavigationNode(Node):
         total_distance = distance_between(self.goal_start_pose, self.active_goal)
         distance_remain = total_distance * (1.0 - progress)
 
-        risk_level = self.current_obstacle.get("risk_level", "safe")
+        risk_level = self.current_obstacle.risk_level if self.current_obstacle else "safe"
         if risk_level == "danger":
             if self.danger_since is None:
                 self.danger_since = now

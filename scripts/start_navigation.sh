@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================================
 # start_navigation.sh
-# Navigation startup entrypoint for real/mock modes
+# Navigation startup entrypoint for formal interfaces with switchable data sources
 # 负责人：曹莹
 # ============================================================
 
@@ -23,9 +23,9 @@ Usage:
   ./scripts/start_navigation.sh [mode]
 
 Modes:
-  mock         Start /map, /pose and /nav_status in mock data mode
-  mock-full    Start mock chain plus /obstacle_status, /scan and A/B/C patrol
-  real         Placeholder for future real robot startup
+  mock         Start the formal navigation interfaces with mock map/pose/nav data
+  mock-full    Start the formal navigation chain plus obstacle status and patrol, while /scan can still come from the real lidar chain
+  real         Reserved entry for future full real robot startup
 
 Environment variables:
   NAV_SCENARIO        success | timeout | fail_fast
@@ -47,7 +47,7 @@ cleanup() {
         return
     fi
     echo ""
-    echo "[cleanup] stopping navigation mock processes..."
+    echo "[cleanup] stopping navigation processes..."
     kill "${PIDS[@]}" 2>/dev/null || true
     wait "${PIDS[@]}" 2>/dev/null || true
 }
@@ -58,6 +58,7 @@ echo "============================================="
 echo " Navigation Module Startup"
 echo " mode: $MODE"
 echo " root: $PROJECT_ROOT"
+echo " contract: formal topics + formal message types"
 echo "============================================="
 
 case "$MODE" in
@@ -77,8 +78,8 @@ case "$MODE" in
         fi
         ;;
     real)
-        echo "[todo] real robot startup is not wired into this repository yet."
-        echo "[todo] use the Docker/container command chain after the vehicle is available."
+        echo "[todo] real mode keeps the same topics and message types as mock mode."
+        echo "[todo] wire the internal providers to the real vehicle chain after the vehicle is available."
         exit 1
         ;;
     -h|--help|help)

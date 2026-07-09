@@ -5,8 +5,8 @@ from pathlib import Path
 
 import rclpy
 from geometry_msgs.msg import PoseStamped
+from icar_interfaces.msg import NavStatus
 from rclpy.node import Node
-from std_msgs.msg import String
 
 CURRENT_DIR = Path(__file__).resolve().parent
 PARENT_DIR = CURRENT_DIR.parent
@@ -14,7 +14,7 @@ for path in (CURRENT_DIR, PARENT_DIR):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from navigation_utils import load_checkpoints, parse_json_message, yaw_to_quaternion
+from navigation_utils import load_checkpoints, yaw_to_quaternion
 
 
 class PatrolNode(Node):
@@ -29,7 +29,7 @@ class PatrolNode(Node):
         self.started_at = time.monotonic()
         self.last_status = "IDLE"
         self.goal_publisher = self.create_publisher(PoseStamped, "/goal_pose", 10)
-        self.create_subscription(String, "/nav_status", self.on_nav_status, 10)
+        self.create_subscription(NavStatus, "/nav_status", self.on_nav_status, 10)
         self.create_timer(1.0, self.on_timer)
         self.get_logger().info(f"Patrol node started in mock data mode: {self.route_names}")
 
@@ -50,9 +50,8 @@ class PatrolNode(Node):
         self.waiting_result = True
         self.get_logger().info(f"Published patrol goal: {name}")
 
-    def on_nav_status(self, message: String):
-        payload = parse_json_message(message.data)
-        self.last_status = payload.get("status", "IDLE")
+    def on_nav_status(self, message: NavStatus):
+        self.last_status = message.status or "IDLE"
         if self.waiting_result and self.last_status == "ARRIVED":
             self.waiting_result = False
             self.current_index += 1

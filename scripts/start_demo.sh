@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================================
 # start_demo.sh
-# Demo entrypoint with mock-first navigation mode
+# Demo entrypoint with phased navigation integration
 # 负责人：熊浩宇
 # ============================================================
 
@@ -79,8 +79,8 @@ echo "============================================="
 
 case "$MODE" in
     nav-mock)
-        echo "[phase] navigation running in mock data mode"
-        echo "[note] starts /map, /pose, /nav_status, /obstacle_status and /scan"
+        echo "[phase] navigation running in current phased mode"
+        echo "[note] starts /map, /pose, /nav_status and /obstacle_status in project mode, while /scan comes from the real lidar chain"
         ./scripts/start_navigation.sh mock-full
         ;;
     nav-mock-basic)
@@ -88,7 +88,7 @@ case "$MODE" in
         ./scripts/start_navigation.sh mock
         ;;
     nav-mock-with-app)
-        echo "[phase] navigation mock data mode + placeholders for app/task_manager"
+        echo "[phase] navigation phased mode + placeholders for app/task_manager"
         echo "[todo] start app_control_node and task_manager_node in their own terminals if they exist locally."
         ./scripts/start_navigation.sh mock-full
         ;;
@@ -102,10 +102,10 @@ Usage:
   ./scripts/start_demo.sh [mode]
 
 Modes:
-  nav-mock          Start full navigation chain in mock data mode
+  nav-mock          Start current phased navigation chain; /scan comes from the real lidar chain
   nav-mock-basic    Start /map, /pose and /nav_status only
-  nav-mock-with-app Start navigation mock mode and leave notes for app/task_manager
-  real              Placeholder for future real robot demo
+  nav-mock-with-app Start phased navigation chain and leave notes for app/task_manager
+  real              Placeholder for future full real robot demo
 EOF
         ;;
     *)

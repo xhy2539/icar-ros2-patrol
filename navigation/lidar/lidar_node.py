@@ -1,59 +1,76 @@
-import math
-import sys
-from pathlib import Path
-
 import rclpy
+from rclpy.duration import Duration
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
-from std_msgs.msg import String
-
-CURRENT_DIR = Path(__file__).resolve().parent
-PARENT_DIR = CURRENT_DIR.parent
-for path in (CURRENT_DIR, PARENT_DIR):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
-
-from navigation_utils import parse_json_message
 
 
 class LidarNode(Node):
     def __init__(self):
         super().__init__("lidar_node")
-        self.current_obstacle = {
-            "is_obstacle": False,
-            "min_distance": 2.5,
-            "direction": "front",
-        }
-        self.publisher = self.create_publisher(LaserScan, "/scan", 10)
-        self.create_subscription(String, "/obstacle_status", self.on_obstacle_status, 10)
-        self.create_timer(0.2, self.publish_scan)
-        self.get_logger().info("Lidar node started in mock data mode")
+        self.last_scan_time = None
+        self.last_frame_id = ""
+        self.last_range_count = 0
+        self.scan_count = 0
+        self.real_scan_logged = False
+        self.scan_ready = False
+        self.waiting_logged = False
+        self.timeout_logged = False
+        self.scan_timeout = Duration(seconds=2.0)
 
-    def on_obstacle_status(self, message: String):
-        self.current_obstacle = parse_json_message(message.data)
+        self.create_subscription(LaserScan, "/scan", self.on_scan, 10)
+        self.create_timer(1.0, self.check_scan_health)
+        self.get_logger().info("Lidar node started in formal mode, waiting for real /scan")
 
-    def publish_scan(self):
-        sample_count = 360
-        scan = LaserScan()
-        scan.header.stamp = self.get_clock().now().to_msg()
-        scan.header.frame_id = "laser"
-        scan.angle_min = -math.pi
-        scan.angle_max = math.pi
-        scan.angle_increment = (2.0 * math.pi) / sample_count
-        scan.time_increment = 0.0
-        scan.scan_time = 0.2
-        scan.range_min = 0.12
-        scan.range_max = 8.0
+    def on_scan(self, message: LaserScan):
+        self.last_scan_time = self.get_clock().now()
+        self.last_frame_id = message.header.frame_id
+        self.last_range_count = len(message.ranges)
+        self.scan_count += 1
 
-        ranges = [2.5] * sample_count
-        if self.current_obstacle.get("is_obstacle"):
-            front_distance = max(0.15, float(self.current_obstacle.get("min_distance", 0.8)))
-            for offset in range(-15, 16):
-                index = (180 + offset) % sample_count
-                ranges[index] = front_distance
-        scan.ranges = ranges
-        scan.intensities = [100.0] * sample_count
-        self.publisher.publish(scan)
+        if not self.real_scan_logged:
+            self.get_logger().info(
+                "Real /scan connected: frame_id=%s, sample_count=%d"
+                % (self.last_frame_id or "<empty>", self.last_range_count)
+            )
+            self.real_scan_logged = True
+        self.scan_ready = True
+        self.waiting_logged = False
+        self.timeout_logged = False
+
+    def check_scan_health(self):
+        if self.last_scan_time is None:
+            if self.scan_ready:
+                self.scan_ready = False
+            if not self.waiting_logged:
+                self.get_logger().warning("Waiting for real /scan from the vehicle lidar chain")
+                self.waiting_logged = True
+            return
+
+        elapsed = self.get_clock().now() - self.last_scan_time
+        if elapsed > self.scan_timeout:
+            self.scan_ready = False
+            if not self.timeout_logged:
+                self.get_logger().warning(
+                    "Real /scan timed out: last frame_id=%s, sample_count=%d"
+                    % (self.last_frame_id or "<empty>", self.last_range_count)
+                )
+                self.timeout_logged = True
+            return
+
+        if not self.scan_ready:
+            age_seconds = elapsed.nanoseconds / 1_000_000_000.0
+            self.get_logger().info(
+                "Real /scan healthy again: total_messages=%d, last_frame_id=%s, sample_count=%d, age=%.2fs"
+                % (
+                    self.scan_count,
+                    self.last_frame_id or "<empty>",
+                    self.last_range_count,
+                    age_seconds,
+                )
+            )
+            self.scan_ready = True
+        self.waiting_logged = False
+        self.timeout_logged = False
 
 
 def main():
