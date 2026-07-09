@@ -22,6 +22,9 @@ install/
 # macOS
 .DS_Store
 
+# 临时目录
+tmp/
+
 # 其他临时文件
 *.swp
 *.swo
