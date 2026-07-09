@@ -52,7 +52,7 @@ string action
 ## 目录说明
 
 - `navigation/lidar/lidar_node.py`：接入并监测真实 `/scan`
-- `navigation/obstacle_avoid/obstacle_avoid_node.py`：订阅 `/scan`，发布 `/obstacle_status`，预留 `/cmd_vel`
+- `navigation/obstacle_avoid/obstacle_avoid_node.py`：默认根据真实 `/scan` 前方扇区计算障碍状态，发布 `/obstacle_status`，危险时发布 `/cmd_vel` 停止指令；`--mode mock` 仅保留为无雷达演示兜底
 - `navigation/slam/slam_node.py`：保留 `/scan + /odom -> /map + /pose` 的正式骨架，当前地图和位姿仍为 mock 驱动
 - `navigation/navigation/navigation_node.py`：保留 `/map + /pose + /goal_pose + /scan -> /nav_status` 的正式骨架，当前导航状态仍按 mock 场景推进
 - `navigation/navigation/patrol_node.py`：自动下发 A/B/C 巡检点
@@ -90,6 +90,7 @@ string action
 
 ```bash
 NAV_SCENARIO=success
+OBSTACLE_MODE=real
 OBSTACLE_SCENARIO=warning_then_clear
 PATROL_ROUTE=A,B,C
 ./scripts/start_navigation.sh mock-full
@@ -98,6 +99,7 @@ PATROL_ROUTE=A,B,C
 可用值：
 
 - `NAV_SCENARIO`: `success` / `timeout` / `fail_fast`
+- `OBSTACLE_MODE`: `real` / `mock`，默认 `real`
 - `OBSTACLE_SCENARIO`: `clear` / `warning_then_clear` / `danger_then_recover`
 
 ## 当前边界
@@ -111,14 +113,14 @@ PATROL_ROUTE=A,B,C
 
 当前阶段仍未宣称完成：
 
-- 真机自动避障验收
+- 真机自动避障已默认接入真实 `/scan` 前方扇区判定，仍需补真机场景视频/日志证据
 - 真机 SLAM 建图验收
 - 真机自主导航验收
 
 ## 切回真车时怎么处理
 
 - 保留 `/goal_pose`、`/map`、`/pose`、`/scan`、`/nav_status`、`/obstacle_status` 不变
-- 将 `obstacle_avoid` 的障碍判定切换为真实 `/scan` 计算
+- `obstacle_avoid` 默认使用真实 `/scan` 计算，mock 场景仅作为演示模式保留
 - 将 `slam` 的地图和位姿输出切换为真实链路
 - 将 `navigation` 的状态推进切换为真实导航反馈
 

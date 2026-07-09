@@ -11,7 +11,7 @@
 | 1 | `app_control_node` | app | 李雨晨 | P0 | APP/网页控制台与 ROS2 通信桥梁，发布控制指令、订阅状态信息 |
 | 2 | `task_manager_node` | 架构 | 熊浩宇 | P0 | 任务调度核心节点，巡检状态机、任务日志、模块协调 |
 | 3 | `lidar_node` | navigation | 曹莹 | P0 | 雷达接入/监测节点，当前 `/scan` 已对接真实雷达链路 |
-| 4 | `obstacle_avoid_node` | navigation | 曹莹 | P0 | 避障节点，正式订阅 `/scan` 并发布 `/obstacle_status`、预留 `/cmd_vel`；当前判定逻辑仍为 mock 过渡态 |
+| 4 | `obstacle_avoid_node` | navigation | 曹莹 | P0 | 避障节点，默认根据真实 `/scan` 前方扇区发布 `/obstacle_status`，危险时发布 `/cmd_vel` 停止指令；mock 仅保留为演示模式 |
 | 5 | `slam_node` | navigation | 曹莹 | P0 | SLAM 节点，正式保留 `/scan + /odom -> /map + /pose` 接口骨架；当前地图和位姿仍为 mock 过渡态 |
 | 6 | `navigation_node` | navigation | 曹莹 | P0 | 自主导航节点，正式保留 `/map + /pose + /goal_pose + /scan -> /nav_status` 接口骨架；当前导航反馈仍为 mock 过渡态 |
 | 7 | `camera_node` | vision | 韦雪 | P0 | 摄像头驱动节点，发布 `/image` 和 `/depth` |
@@ -77,7 +77,7 @@
 | **负责人** | 曹莹 |
 | **订阅 Topic** | `/scan` |
 | **发布 Topic** | `/cmd_vel`（停止/避让指令）, `/obstacle_status` |
-| **功能** | 正式保留避障节点接口：订阅 `/scan`，发布 `/obstacle_status` 并在危险时预留停止指令；当前障碍判定逻辑仍由 mock 场景驱动，待真机阶段切换为真实雷达判定 |
+| **功能** | 默认根据真实 `/scan` 前方约 ±30° 扇区计算最近障碍距离，发布 `/obstacle_status` 并在危险时发布停止指令；`--mode mock` 仅保留为无雷达演示兜底 |
 | **启动命令** | `ros2 run navigation obstacle_avoid_node` |
 
 ### 5. slam_node
