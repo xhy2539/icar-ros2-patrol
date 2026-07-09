@@ -14,8 +14,9 @@ object detection and road detection will be added on top of the same ROS2 input.
   dataset collection and inspection screenshots.
 - `fake_camera`: publishes a synthetic patrol camera image for off-car tests.
 - `vision_node`: subscribes to the camera image topic and publishes JSON results
-  to `/vision/detections`. It currently includes lightweight color-object and
-  lane-line detection so the ROS2 flow can be tested before YOLO is added.
+  to `/vision/detections`. It includes lightweight color-object and lane-line
+  detection for no-model tests, and can optionally load an Ultralytics YOLO
+  model through runtime parameters.
 - `target_tracker`: subscribes to `/vision/detections`, selects a target such as
   `person`, and publishes follow-control velocity hints to `/vision/target_cmd_vel`.
   It does not publish directly to `/cmd_vel` by default. It stays idle until an
@@ -172,10 +173,28 @@ Then run the placeholder vision pipeline:
 ```bash
 ros2 run vision_patrol vision_node --ros-args \
   -p image_topic:=/camera/color/image_raw \
+  -p detector_backend:=color \
   -p mode:=detect
 ```
 
 Replace `/camera/color/image_raw` with the actual topic reported by the car.
+
+Optional YOLO runtime, when the car already has `ultralytics` and a local model:
+
+```bash
+ros2 run vision_patrol vision_node --ros-args \
+  -p image_topic:=/camera/color/image_raw \
+  -p detector_backend:=yolo \
+  -p yolo_model:=/home/jetson/models/yolo11n.pt \
+  -p yolo_device:=0 \
+  -p yolo_confidence:=0.35 \
+  -p yolo_imgsz:=640 \
+  -p target_classes:="[person,bottle,chair,backpack]" \
+  -p publish_annotated:=true
+```
+
+If the YOLO model cannot be loaded, the node logs a warning and falls back to
+the lightweight detector so the ROS2 vision chain can still be demonstrated.
 
 ## Integration Topics
 
