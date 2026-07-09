@@ -1,0 +1,89 @@
+{
+  "common_pretrained": [
+    {
+      "class_name": "person",
+      "label_zh": "人",
+      "trackable": true,
+      "source": "COCO pretrained YOLO"
+    },
+    {
+      "class_name": "backpack",
+      "label_zh": "背包",
+      "trackable": true,
+      "source": "COCO pretrained YOLO"
+    },
+    {
+      "class_name": "handbag",
+      "label_zh": "手提包",
+      "trackable": true,
+      "source": "COCO pretrained YOLO"
+    },
+    {
+      "class_name": "bottle",
+      "label_zh": "瓶子",
+      "trackable": true,
+      "source": "COCO pretrained YOLO"
+    },
+    {
+      "class_name": "chair",
+      "label_zh": "椅子",
+      "trackable": true,
+      "source": "COCO pretrained YOLO"
+    },
+    {
+      "class_name": "stop sign",
+      "label_zh": "停止标志",
+      "trackable": true,
+      "source": "COCO pretrained YOLO"
+    },
+    {
+      "class_name": "traffic light",
+      "label_zh": "交通灯",
+      "trackable": false,
+      "source": "COCO pretrained YOLO"
+    }
+  ],
+  "project_custom": [
+    {
+      "class_name": "obstacle",
+      "label_zh": "路障/障碍物",
+      "trackable": true,
+      "source": "project rule or custom YOLO"
+    },
+    {
+      "class_name": "sign_A",
+      "label_zh": "A 巡检点标志",
+      "trackable": true,
+      "source": "custom YOLO required"
+    },
+    {
+      "class_name": "sign_B",
+      "label_zh": "B 巡检点标志",
+      "trackable": true,
+      "source": "custom YOLO required"
+    },
+    {
+      "class_name": "sign_C",
+      "label_zh": "C 巡检点标志",
+      "trackable": true,
+      "source": "custom YOLO required"
+    },
+    {
+      "class_name": "danger_object",
+      "label_zh": "危险异物",
+      "trackable": false,
+      "source": "custom YOLO or rule required"
+    },
+    {
+      "class_name": "road_lane",
+      "label_zh": "道路/车道线",
+      "trackable": false,
+      "source": "OpenCV or segmentation"
+    }
+  ],
+  "notes": [
+    "person/backpack/bottle/chair/stop sign 等常规目标可先直接调用 COCO 预训练 YOLO。",
+    "sign_A/sign_B/sign_C/danger_object 这类项目自定义目标需要采集图片并标注后训练或微调。",
+    "road_lane 更适合 OpenCV 车道线检测或分割模型，不建议只用普通检测框解决。"
+  ]
+}
