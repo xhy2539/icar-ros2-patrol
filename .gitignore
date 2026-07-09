@@ -28,6 +28,10 @@ vision_samples/
 # macOS
 .DS_Store
 
+# 敏感配置文件（含密码）
+小车配置
+云服务器配置
+
 # 临时目录
 tmp/
 
