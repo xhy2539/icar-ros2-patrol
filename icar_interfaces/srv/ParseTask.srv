@@ -1,0 +1,8 @@
+# ParseTask.srv — LLM 任务解析服务 (P2 加分项)
+# 服务端: llm_gateway_node
+
+string input_text           # 用户自然语言输入，如 "巡检实验室一圈，经过A/B/C点"
+---
+string task_json            # 解析后的结构化任务 JSON
+bool success                # 是否解析成功
+string error_msg            # 错误信息

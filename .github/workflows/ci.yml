@@ -1,0 +1,217 @@
+name: CI 基础检查
+
+# ==========================================================================
+# ICAR Patrol CI/CD
+# 检查项: 目录完整性 / README 存在 / Python 语法 / Shell 脚本可执行
+# 负责人: 熊浩宇
+# ==========================================================================
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # ------------------------------------------------------------------
+  # 1. 目录结构完整性检查
+  # ------------------------------------------------------------------
+  check-structure:
+    name: 目录结构检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 检查必须目录是否存在
+        run: |
+          MISSING_DIRS=""
+          for dir in app navigation vision sensor llm docs scripts test videos config; do
+            if [ ! -d "$dir" ]; then
+              echo "❌ 缺少目录: $dir"
+              MISSING_DIRS="$MISSING_DIRS $dir"
+            else
+              echo "✅ 目录存在: $dir"
+            fi
+          done
+          if [ -n "$MISSING_DIRS" ]; then
+            echo "::error::缺少必须目录:$MISSING_DIRS"
+            exit 1
+          fi
+
+      - name: 检查 ROS2 包结构（消息包）
+        run: |
+          for f in icar_interfaces/package.xml icar_interfaces/CMakeLists.txt; do
+            if [ -f "$f" ]; then
+              echo "✅ $f"
+            else
+              echo "::error::缺少 $f"
+              exit 1
+            fi
+          done
+
+      - name: 检查 ROS2 包结构（任务调度包）
+        run: |
+          for f in task_manager/package.xml task_manager/setup.py task_manager/task_manager/__init__.py task_manager/task_manager/task_manager_node.py; do
+            if [ -f "$f" ]; then
+              echo "✅ $f"
+            else
+              echo "::error::缺少 $f"
+              exit 1
+            fi
+          done
+
+  # ------------------------------------------------------------------
+  # 2. README 存在性检查
+  # ------------------------------------------------------------------
+  check-readme:
+    name: README 检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 检查 README 存在且非空
+        run: |
+          if [ -s README.md ]; then
+            LINES=$(wc -l < README.md)
+            echo "✅ README.md 存在，共 $LINES 行"
+          else
+            echo "::error::README.md 不存在或为空"
+            exit 1
+          fi
+
+      - name: 检查文档目录
+        run: |
+          DOCS=$(find docs -name "*.md" | wc -l)
+          echo "📄 docs/ 目录包含 $DOCS 个 Markdown 文件"
+          if [ "$DOCS" -lt 3 ]; then
+            echo "::warning::文档较少，建议补充"
+          fi
+
+  # ------------------------------------------------------------------
+  # 3. Python 语法检查
+  # ------------------------------------------------------------------
+  check-python:
+    name: Python 语法检查
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.8', '3.10']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 设置 Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: 编译检查所有 Python 文件
+        run: |
+          ERROR_COUNT=0
+          while IFS= read -r -d '' pyfile; do
+            if python -m py_compile "$pyfile" 2>/dev/null; then
+              echo "✅ $pyfile"
+            else
+              # py_compile 可能因缺 ROS2 依赖失败，用 ast 做语法检查
+              python -c "import ast; ast.parse(open('$pyfile').read()); print('✅ $pyfile (syntax OK)')" 2>&1 || {
+                echo "::error::语法错误在 $pyfile"
+                ERROR_COUNT=$((ERROR_COUNT + 1))
+              }
+            fi
+          done < <(find . -name "*.py" -not -path "./.git/*" -print0)
+
+          if [ "$ERROR_COUNT" -gt 0 ]; then
+            echo "::error::共 $ERROR_COUNT 个文件存在语法错误"
+            exit 1
+          fi
+          echo "所有 Python 文件语法检查通过 ✅"
+
+  # ------------------------------------------------------------------
+  # 4. Shell 脚本检查
+  # ------------------------------------------------------------------
+  check-shell:
+    name: Shell 脚本检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 检查脚本存在且可执行
+        run: |
+          SCRIPTS=(
+            scripts/start_app.sh
+            scripts/start_navigation.sh
+            scripts/start_vision.sh
+            scripts/start_sensor.sh
+            scripts/start_demo.sh
+          )
+          ALL_OK=true
+          for s in "${SCRIPTS[@]}"; do
+            if [ -f "$s" ]; then
+              if [ -x "$s" ]; then
+                echo "✅ $s (可执行)"
+              else
+                echo "⚠️  $s (不可执行，设置 +x)"
+                chmod +x "$s"
+              fi
+            else
+              echo "::error::缺少脚本: $s"
+              ALL_OK=false
+            fi
+          done
+          if [ "$ALL_OK" = false ]; then
+            exit 1
+          fi
+
+      - name: bash 语法检查
+        run: |
+          while IFS= read -r -d '' shfile; do
+            if bash -n "$shfile" 2>&1; then
+              echo "✅ $shfile"
+            else
+              echo "::error::语法错误在 $shfile"
+              exit 1
+            fi
+          done < <(find . -name "*.sh" -not -path "./.git/*" -print0)
+
+  # ------------------------------------------------------------------
+  # 5. 自定义消息定义完整性
+  # ------------------------------------------------------------------
+  check-messages:
+    name: 消息定义完整性
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 检查必须的 .msg 和 .srv 文件
+        run: |
+          EXPECTED_MSGS=(
+            "icar_interfaces/msg/NavStatus.msg"
+            "icar_interfaces/msg/ObstacleStatus.msg"
+            "icar_interfaces/msg/Detection.msg"
+            "icar_interfaces/msg/DetectionArray.msg"
+            "icar_interfaces/msg/EnvData.msg"
+            "icar_interfaces/msg/SensorAlert.msg"
+            "icar_interfaces/msg/TaskRequest.msg"
+            "icar_interfaces/msg/TaskStatus.msg"
+            "icar_interfaces/msg/TaskLog.msg"
+          )
+          EXPECTED_SRVS=(
+            "icar_interfaces/srv/ParseTask.srv"
+          )
+          ALL_OK=true
+          for m in "${EXPECTED_MSGS[@]}" "${EXPECTED_SRVS[@]}"; do
+            if [ -f "$m" ]; then
+              echo "✅ $m"
+            else
+              echo "::error::缺少消息/服务文件: $m"
+              ALL_OK=false
+            fi
+          done
+          if [ "$ALL_OK" = false ]; then
+            exit 1
+          fi
+          echo ""
+          echo "所有 $((${#EXPECTED_MSGS[@]} + ${#EXPECTED_SRVS[@]})) 个消息/服务文件完整 ✅"

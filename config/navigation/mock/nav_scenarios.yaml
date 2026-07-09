@@ -1,0 +1,18 @@
+default_scenario: success
+
+scenarios:
+  success:
+    duration_sec: 8.0
+    hold_result_sec: 2.0
+    fail_after_sec: null
+    obstacle_fail_after_sec: 6.0
+  timeout:
+    duration_sec: 10.0
+    hold_result_sec: 2.0
+    fail_after_sec: 10.0
+    obstacle_fail_after_sec: 4.0
+  fail_fast:
+    duration_sec: 4.0
+    hold_result_sec: 2.0
+    fail_after_sec: 4.0
+    obstacle_fail_after_sec: 2.0

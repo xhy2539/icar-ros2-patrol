@@ -12,6 +12,36 @@
 
 **设计原则**：先保证 P0 核心链路可演示；P1 形成巡检闭环；LLM 作为增强层，不直接控制底盘。
 
+### 硬件平台
+
+| 硬件 | 型号 | 设备路径 | 用途 |
+|------|------|----------|------|
+| 主控 | Jetson Orin Nano (JetPack R35.3.1) | - | 运行 ROS2 和 AI 推理 |
+| 激光雷达 | 思岚 A1 (RPLIDAR) | `/dev/rplidar` → `ttyUSB0` | 360° 扫描测距 |
+| 深度相机 | 奥比中光 Astra Pro Plus | `/dev/astradepth`, `/dev/astrauvc`, `/dev/video0-1` | RGB + 深度图像 |
+| 底盘控制 | AT32 (Mecanum麦轮) | `/dev/myserial` → `ttyUSB1`, 115200bps | 运动控制（固件 v3.5） |
+| 传感器 | 温湿度/烟雾/PM2.5/光照/气压 | `/dev/sensors` → `ttyUSB2` | 环境数据采集 |
+
+### 系统架构
+
+```
+┌──────────────────────────────────────────┐
+│         宿主机 (Jetson Ubuntu 20.04)       │
+│                                          │
+│  Rosmaster-App (Flask :6500)             │
+│  └─ Rosmaster-Lib (Python) ──串口──▶ AT32底盘 │
+│                                          │
+│  Docker: yahboomtechnology/ros-foxy:5.0.1│
+│  ├─ astra_camera (相机驱动)               │
+│  ├─ sllidar_ros2 (激光雷达)               │
+│  ├─ slam_gmapping (SLAM建图)             │
+│  ├─ teb_local_planner (路径规划)          │
+│  └─ icar_* (ICAR项目包)                  │
+└──────────────────────────────────────────┘
+```
+
+> **关键**：ROS2 Foxy 运行在 Docker 容器内，不是原生安装。底盘控制可通过 Rosmaster-Lib 串口直接通信，也可通过 ROS2 `/cmd_vel` 间接控制。仓库中的 `app_control_node`、`lidar_node` 等名称是项目规划层节点名；实车预置包主要使用 `yahboomcar_*`、`sllidar_ros2`、`astra_camera`、`slam_gmapping`、`teb_local_planner` 等包。
+
 ---
 
 ## 功能优先级
@@ -100,10 +130,12 @@ icar-ros2-patrol/
 │   ├── backend/            #   后端服务
 │   └── frontend/           #   前端页面
 ├── navigation/             # 雷达/导航模块（曹莹）
-│   ├── lidar/              #   激光雷达驱动
-│   ├── obstacle_avoid/     #   避障算法
-│   ├── slam/               #   SLAM 建图
-│   └── navigation/         #   自主导航
+│   ├── lidar/              #   激光雷达驱动（当前可运行 mock 数据模式）
+│   ├── obstacle_avoid/     #   避障算法（当前可运行 mock 数据模式）
+│   ├── slam/               #   SLAM 建图（当前可运行 mock 数据模式）
+│   ├── navigation/         #   自主导航 / 巡检（当前可运行 mock 数据模式）
+│   ├── navigation_utils.py #   导航公共工具
+│   └── README.md           #   导航模块说明
 ├── vision/                 # 视觉检测模块（韦雪）
 │   ├── camera/             #   摄像头驱动
 │   ├── detection/          #   YOLO 目标检测
@@ -114,13 +146,23 @@ icar-ros2-patrol/
 │   ├── pm25/               #   PM2.5 传感器
 │   ├── light/              #   光照传感器
 │   └── pressure/           #   气压传感器
+├── icar_interfaces/        # 自定义 ROS2 消息/服务（熊浩宇）✅
+│   ├── msg/                #   9 个自定义消息
+│   ├── srv/                #   1 个自定义服务 (ParseTask)
+│   ├── CMakeLists.txt
+│   └── package.xml
+├── task_manager/           # 任务调度模块（熊浩宇）✅
+│   ├── task_manager/       #   task_manager_node（状态机）
+│   ├── setup.py
+│   └── package.xml
 ├── llm/                    # LLM 模块（熊浩宇，P2加分项）
 │   ├── task_parser/        #   任务解析
 │   └── report_gen/         #   报告生成
 ├── docs/                   # 项目文档
 │   ├── 接口设计.md          #   模块间接口说明 (IF-01~IF-10)
 │   ├── ROS2节点表.md        #   ROS2 节点清单 (11个节点)
-│   ├── Topic通信表.md       #   Topic 通信矩阵 (15+ Topic)
+│   ├── Topic通信表.md       #   Topic 通信矩阵 (16 Topic)
+│   ├── 模块集成产出清单.md   #   各模块接入前必须产出的 Topic/数据
 │   ├── 项目进度记录.md       #   开发进度跟踪 (7.7-7.15)
 │   └── 测试用例.md          #   测试用例 (TC-01~TC-12)
 ├── scripts/                # 启动脚本
@@ -132,8 +174,12 @@ icar-ros2-patrol/
 ├── test/                   # 测试用例和测试记录
 ├── videos/                 # 演示视频（含兜底视频）
 ├── config/                 # 系统配置文件
+│   └── navigation/
+│       ├── maps/           #   地图资源（含 mock_lab.pgm/.yaml）
+│       └── mock/           #   mock 场景、点位、地图元信息
 ├── logs/                   # 运行日志（不提交到仓库）
-├── .github/workflows/      # CI/CD 流水线
+├── .github/workflows/      # CI/CD 流水线 ✅
+│   └── ci.yml
 ├── .gitignore
 └── README.md
 ```
@@ -152,21 +198,76 @@ icar-ros2-patrol/
 
 ## 快速启动
 
-> 以下为占位说明，完整启动流程将在各模块开发完成后补充。
+> ROS2 Foxy 运行在 Docker 容器内，通过宿主机脚本管理。
+> 2026-07-07 实测：小车 IP 为 `10.90.164.78`；当前运行容器可能不是文档旧编号 `5b1c`，启动前先用 `docker ps -a` 确认。
 
 ```bash
-# 1. 确保 ROS2 环境已 source
-source /opt/ros/humble/setup.bash
+# 1. SSH 连接小车
+ssh jetson@10.90.164.78   # 密码: yahboom
 
-# 2. 构建工作空间
-colcon build --symlink-install
+# 2. 确认并进入 ROS2 Docker 容器
+docker ps -a
+docker start <容器ID或容器名>
+docker exec -it <容器ID或容器名> /bin/bash
 
-# 3. source 工作空间
-source install/setup.bash
+# 3. 容器内启动预置 Yahboom ROS2 模块（以容器内 ~/.bashrc 为准）
+r     # 底盘 bringup: yahboomcar_bringup_X3_launch.py
+n1    # 雷达 bringup: yahboomcar_nav laser_bringup_launch.py
+m1    # SLAM 建图: yahboomcar_nav map_gmapping_launch.py
+n3    # DWA 导航: yahboomcar_nav navigation_dwa_launch.py
+n4    # TEB 导航: yahboomcar_nav navigation_teb_launch.py
 
-# 4. 启动完整演示
-./scripts/start_demo.sh
+# 4. 宿主机启动 APP（底盘直接串口控制，默认使用 /dev/myserial）
+run   # 或 cd ~/Rosmaster-App/rosmaster && python3 app.py
+# APP 运行在 http://<小车IP>:6500
+
+# 5. 底盘串口直控测试（不经ROS2，测试前确认 /dev/myserial 指向底盘 ttyUSB1）
+ls -l /dev/myserial /dev/rplidar /dev/sensors
+python3 ~/rosmaster_test.py 1 50   # 前进
+python3 ~/rosmaster_test.py 7 50   # 停止
 ```
+
+## Mock 联调与巡检闭环
+
+真实导航、视觉、传感器未完全接入前，可先跑 mock 链路完成任务调度和前端联调。工程结构保持正式模块命名，mock 只体现在运行模式和 `config/navigation/mock/` 配置中。
+
+```bash
+# 1. 进入仓库目录
+cd icar-ros2-patrol
+
+# 2. 启动最小导航 mock 数据模式
+./scripts/start_navigation.sh mock
+
+# 3. 启动完整导航 mock 联调
+./scripts/start_navigation.sh mock-full
+
+# 4. 总演示入口（导航 mock）
+./scripts/start_demo.sh nav-mock
+
+# 5. 不依赖 ROS2 的本机 mock 演示
+python3 scripts/run_mock_demo.py
+
+# 6. ROS2 环境内 mock 巡检联调，不会启动真实底盘
+source /opt/ros/foxy/setup.bash
+source install/setup.bash
+./scripts/start_mock_demo.sh
+```
+
+说明：
+
+- `/map`、`/pose`、`/goal_pose`、`/scan` 使用标准 ROS2 消息
+- `/nav_status`、`/obstacle_status` 在 mock 阶段用 `std_msgs/msg/String` 承载 JSON 字段
+- 当前运行的是正式模块目录下的 mock 数据模式，不再使用 `mock_*` 实现文件作为工程主结构
+- 后续真车恢复后，优先保持 Topic 名和字段约定不变，再切回真实数据源
+
+后续各模块需要提供的 Topic、字段和验收材料见 `docs/模块集成产出清单.md`。
+
+### 实车联调注意
+
+- 正常设备映射应为：`/dev/rplidar -> ttyUSB0`，`/dev/myserial -> ttyUSB1`，`/dev/sensors -> ttyUSB2`
+- 2026-07-07 排查时发现宿主机 `/dev/myserial` 曾错误指向 `ttyUSB0`（雷达口），会导致 Rosmaster-App 和 `rosmaster_test.py` 无法正确控制底盘；遇到 APP 不能动或雷达/底盘串口互相占用时，优先检查该映射
+- 容器内 alias 与宿主机 alias 可能不同。宿主机旧 alias `s/d` 曾指向已退出容器，进入容器前先执行 `docker ps -a`，不要只依赖旧别名
+- ROS2 业务节点未启动时，`ros2 topic list -t` 只会看到 `/parameter_events` 和 `/rosout`，这是未启动链路，不是 Topic 表错误
 
 ## 开发计划
 

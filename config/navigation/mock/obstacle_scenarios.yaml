@@ -1,0 +1,54 @@
+default_scenario: warning_then_clear
+
+scenarios:
+  clear:
+    loop: true
+    events:
+      - duration_sec: 30.0
+        is_obstacle: false
+        min_distance: 2.5
+        direction: front
+        risk_level: safe
+        action: none
+  warning_then_clear:
+    loop: true
+    events:
+      - duration_sec: 6.0
+        is_obstacle: false
+        min_distance: 2.5
+        direction: front
+        risk_level: safe
+        action: none
+      - duration_sec: 4.0
+        is_obstacle: true
+        min_distance: 0.8
+        direction: front
+        risk_level: warning
+        action: slow_down
+      - duration_sec: 6.0
+        is_obstacle: false
+        min_distance: 2.5
+        direction: front
+        risk_level: safe
+        action: none
+  danger_then_recover:
+    loop: true
+    events:
+      - duration_sec: 5.0
+        is_obstacle: false
+        min_distance: 2.5
+        direction: front
+        risk_level: safe
+        action: none
+      - duration_sec: 5.0
+        is_obstacle: true
+        min_distance: 0.35
+        direction: front
+        risk_level: danger
+        action: stop
+      - duration_sec: 6.0
+        is_obstacle: false
+        min_distance: 2.5
+        direction: front
+        risk_level: safe
+        action: none

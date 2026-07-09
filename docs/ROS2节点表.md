@@ -1,6 +1,6 @@
 # ROS2 节点表
 
-> **icar-ros2-patrol** ROS2 节点清单（共 11 个节点）
+> **icar-ros2-patrol** ROS2 节点清单（当前以正式接口运行，导航模块部分内部数据源仍处于 mock 过渡态）
 
 ---
 
@@ -10,17 +10,17 @@
 |------|----------|----------|--------|--------|----------|
 | 1 | `app_control_node` | app | 李雨晨 | P0 | APP/网页控制台与 ROS2 通信桥梁，发布控制指令、订阅状态信息 |
 | 2 | `task_manager_node` | 架构 | 熊浩宇 | P0 | 任务调度核心节点，巡检状态机、任务日志、模块协调 |
-| 3 | `lidar_node` | navigation | 曹莹 | P0 | 激光雷达驱动节点，发布 `/scan` 数据 |
-| 4 | `obstacle_avoid_node` | navigation | 曹莹 | P0 | 避障节点，订阅 `/scan`，检测障碍物并发布避障/停止指令 |
-| 5 | `slam_node` | navigation | 曹莹 | P0 | SLAM 建图节点，生成并发布 `/map` 栅格地图和 `/pose` 位姿 |
-| 6 | `navigation_node` | navigation | 曹莹 | P0 | 自主导航节点，路径规划与目标点导航 |
+| 3 | `lidar_node` | navigation | 曹莹 | P0 | 雷达接入/监测节点，当前 `/scan` 已对接真实雷达链路 |
+| 4 | `obstacle_avoid_node` | navigation | 曹莹 | P0 | 避障节点，正式订阅 `/scan` 并发布 `/obstacle_status`、预留 `/cmd_vel`；当前判定逻辑仍为 mock 过渡态 |
+| 5 | `slam_node` | navigation | 曹莹 | P0 | SLAM 节点，正式保留 `/scan + /odom -> /map + /pose` 接口骨架；当前地图和位姿仍为 mock 过渡态 |
+| 6 | `navigation_node` | navigation | 曹莹 | P0 | 自主导航节点，正式保留 `/map + /pose + /goal_pose + /scan -> /nav_status` 接口骨架；当前导航反馈仍为 mock 过渡态 |
 | 7 | `camera_node` | vision | 韦雪 | P0 | 摄像头驱动节点，发布 `/image` 和 `/depth` |
 | 8 | `vision_node` | vision | 韦雪 | P0 | 视觉检测节点，YOLO 目标检测、目标追踪、检测结果输出 |
 | 8.1 | `dataset_recorder_node` | vision | 韦雪 | P1 | 按 App/任务命令截图或按间隔采集数据集图片 |
 | 8.2 | `target_tracker_node` | vision | 韦雪 | P1 | 根据检测框选择目标，输出目标跟随速度建议 |
 | 9 | `sensor_node` | sensor | 王璐 | P0 | 传感器数据采集节点，汇总多传感器数据，发布异常告警 |
 | 10 | `llm_gateway_node` | llm | 熊浩宇 | P2 | LLM 网关节点（加分项），任务解析与报告生成，不发布 `/cmd_vel` |
-| 11 | `底盘控制模块` | 底盘 | 平台 | P0 | 接收 `/cmd_vel` 控制麦轮底盘运动（复用小车已有能力） |
+| 11 | `底盘控制模块` | 底盘 | 平台(复用) | P0 | AT32 麦轮底盘，接收 `/cmd_vel` 或 Rosmaster-Lib 串口直控，固件 v3.5，`/dev/myserial` 115200bps |
 
 ---
 
@@ -61,10 +61,10 @@
 | **包名** | `navigation` |
 | **语言** | Python |
 | **负责人** | 曹莹 |
-| **订阅 Topic** | 无（直接读取思岚A1硬件） |
-| **发布 Topic** | `/scan` |
+| **订阅 Topic** | 无（当前对接车端真实 `/scan` 链路并做健康监测） |
+| **发布 Topic** | 无（当前项目内不重复发布 `/scan`） |
 | **服务** | 无 |
-| **功能** | 驱动思岚A1激光雷达硬件，发布 `sensor_msgs/LaserScan` 消息，360° 距离扫描 |
+| **功能** | 对接并监测思岚 A1 真实雷达链路，确认 `/scan` 已稳定接入；当前项目内不重复实现底层雷达驱动 |
 | **启动命令** | `ros2 run navigation lidar_node` |
 
 ### 4. obstacle_avoid_node
@@ -75,9 +75,9 @@
 | **包名** | `navigation` |
 | **语言** | Python |
 | **负责人** | 曹莹 |
-| **订阅 Topic** | `/scan`, 运动状态 |
+| **订阅 Topic** | `/scan` |
 | **发布 Topic** | `/cmd_vel`（停止/避让指令）, `/obstacle_status` |
-| **功能** | 分析激光雷达数据，检测障碍物距离和方位；当距离 < 安全阈值时发布停止或避让指令；输出风险等级和动作建议 |
+| **功能** | 正式保留避障节点接口：订阅 `/scan`，发布 `/obstacle_status` 并在危险时预留停止指令；当前障碍判定逻辑仍由 mock 场景驱动，待真机阶段切换为真实雷达判定 |
 | **启动命令** | `ros2 run navigation obstacle_avoid_node` |
 
 ### 5. slam_node
@@ -90,7 +90,7 @@
 | **负责人** | 曹莹 |
 | **订阅 Topic** | `/scan`, `/odom` |
 | **发布 Topic** | `/map`, `/pose` |
-| **功能** | 基于激光雷达和里程计数据构建栅格地图；支持地图保存（.pgm + .yaml）和加载；发布实时位姿估计 |
+| **功能** | 正式保留 `SLAM(/scan + /odom -> /map + /pose)` 接口骨架；当前代码已切到正式 Topic 和消息口径，但地图与位姿生成逻辑仍为 mock 过渡实现，待继续结合手册 3.7 接入真实链路 |
 | **启动命令** | `ros2 run navigation slam_node` |
 
 ### 6. navigation_node
@@ -103,7 +103,7 @@
 | **负责人** | 曹莹 |
 | **订阅 Topic** | `/map`, `/pose`, `/goal_pose`, `/scan` |
 | **发布 Topic** | `/nav_status`, 路径/运动指令 |
-| **功能** | 接收目标点，规划路径，控制小车自主行驶；支持固定路线巡检（A→B→C）；发布导航状态（IDLE/NAVIGATING/ARRIVED/FAILED） |
+| **功能** | 正式保留 `导航(/map + /pose + /goal_pose + /scan -> /nav_status)` 接口骨架；当前 `/nav_status` 已切为正式 `NavStatus` 消息，但导航结果仍由 mock 场景推进，待真实地图与定位稳定后切换为真导航反馈 |
 | **启动命令** | `ros2 run navigation navigation_node` |
 
 ### 7. camera_node

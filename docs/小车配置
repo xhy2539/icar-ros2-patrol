@@ -1,0 +1,43 @@
+# 小车 #1（旧）
+ssh jetson@10.90.164.78
+密码：yahboom
+
+Docker: slam_test / boring_keldysh (yahboomtechnology/ros-foxy:5.0.1)
+别名: s=docker start, d=docker exec 进入容器
+
+# 小车 #2（新，当前使用）
+ssh jetson@192.168.180.83
+密码：yahboom
+
+Docker: icar_ros2 (icar/ros-foxy:1.0.2) + autodrive_ros2 (yahboomtechnology/ros-foxy:5.0.1)
+别名: is=启动icar容器, id=进入icar容器, s=启动autodrive容器, d=进入autodrive容器
+
+=== 串口设备映射（两车相同） ===
+/dev/rplidar  → ttyUSB0  (CP210x, 思岚A1激光雷达)
+/dev/myserial → ttyUSB1  (CH341, AT32底盘控制板 v3.5, 115200bps)
+/dev/sensors  → ttyUSB2  (CH341, 传感器模块)
+
+=== 相机 ===
+/dev/astradepth (深度), /dev/astrauvc (RGB), /dev/video0 (RGB), /dev/video1 (深度)
+
+=== 项目部署 ===
+代码路径: ~/icar-ros2-patrol/
+容器内工作空间: /root/ros2_ws/
+快速重编译: cd ~/icar-ros2-patrol && bash scripts/rebuild.sh
+一键部署(Mac): ./scripts/deploy.sh
+
+=== 底盘控制（两种方式，二选一） ===
+
+-- 方式1：串口直控（简单，但 ROS2 驱动不能同时跑） --
+python3 ~/Rosmaster-App/rosmaster/rosmaster_test.py <cmd> <speed>
+  1=前进 2=后退 3=左转 4=右转 7=停止  speed=0~100
+注意：app.py 会占串口，直控前先 kill
+
+-- 方式2：ROS2 键盘控制（需要两个终端） --
+T1: docker exec -it autodrive_ros2 bash -lic 'r'    # 启动底盘驱动
+T2: docker exec -it autodrive_ros2 bash -lic 'm3'   # 键盘控制(vi键位)
+   u/i/o = 左前/前进/右前
+   j/k/l = 左转/停止/右转
+   m/,/. = 左后/后退/右后
+   q/z   = 加速/减速 10%
+   space/k = 急停

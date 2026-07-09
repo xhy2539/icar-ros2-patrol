@@ -1,89 +1,115 @@
 #!/bin/bash
 # ============================================================
 # start_demo.sh
-# 一键启动完整巡检演示系统
+# Demo entrypoint with phased navigation integration
 # 负责人：熊浩宇
 # ============================================================
-#
-# 启动顺序：
-#   1. 激光雷达驱动
-#   2. 传感器采集
-#   3. 避障模块
-#   4. SLAM 建图
-#   5. 自主导航
-#   6. 视觉检测
-#   7. 任务调度
-#   8. APP 控制台
-#
-# 用法：
-#   ./scripts/start_demo.sh
-#
-# 前置条件：
-#   - ROS2 环境已 source
-#   - 工作空间已 source
-#   - 所有硬件已连接
-# ============================================================
 
-set -e
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+PROJECT_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
+MODE=${1:-nav-mock}
+
+cd "$PROJECT_ROOT"
 
 echo "============================================="
-echo "  iCar ROS2 Patrol - Full Demo Startup"
+echo " iCar ROS2 Patrol Demo Startup"
+echo " mode: $MODE"
 echo "============================================="
 echo ""
-echo "  Starting all modules..."
+echo "  架构: 宿主机(Rosmaster-Lib串口) + Docker(ROS2 Foxy)"
 echo ""
 
-# Phase 1: 驱动层
-echo "=== Phase 1: Drivers ==="
-echo "[1/8] Starting lidar_node..."
-# ros2 run navigation lidar_node &
+# Phase 0: 环境准备
+echo "=== Phase 0: Environment ==="
+echo "[0/3] Starting Docker container..."
+# docker start 5b1c    # 或 s (bashrc别名)
+sleep 3
+
+# Phase 1: 驱动层（容器内）
+echo "=== Phase 1: Drivers (Docker) ==="
+echo "[1/8] Starting lidar (sllidar_ros2)..."
+# docker exec -it 5b1c bash -c "source /opt/ros/foxy/setup.bash && ros2 launch sllidar_ros2 sllidar_launch.py &"
 sleep 2
 
-echo "[2/8] Starting sensor_node..."
-# ros2 run sensor sensor_node &
-sleep 1
-
-# Phase 2: 感知层
-echo "=== Phase 2: Perception ==="
-echo "[3/8] Starting obstacle_avoid_node..."
-# ros2 run navigation obstacle_avoid_node &
-sleep 1
-
-echo "[4/8] Starting slam_node..."
-# ros2 run navigation slam_node &
+echo "[2/8] Starting camera (astra_camera)..."
+# docker exec -it 5b1c bash -c "source /opt/ros/foxy/setup.bash && ros2 launch astra_camera astra.launch.xml &"
 sleep 2
 
-echo "[5/8] Starting navigation_node..."
-# ros2 run navigation navigation_node &
+# Phase 2: 感知层（容器内）
+echo "=== Phase 2: Perception (Docker) ==="
+echo "[3/8] Starting obstacle_avoid..."
+# docker exec -it 5b1c bash -c "source /opt/ros/foxy/setup.bash && ros2 run icar_laser laser_Avoidance_a1_X3 &"
 sleep 1
 
-echo "[6/8] Starting vision_node..."
-# ros2 run vision vision_node &
+echo "[4/8] Starting SLAM (slam_gmapping)..."
+# docker exec -it 5b1c bash -c "source /opt/ros/foxy/setup.bash && ros2 launch slam_gmapping ... &"
+sleep 2
+
+echo "[5/8] Starting navigation (teb_local_planner)..."
+# docker exec -it 5b1c bash -c "source /opt/ros/foxy/setup.bash && ros2 launch teb_local_planner ... &"
+sleep 1
+
+echo "[6/8] Starting vision (icar_visual)..."
+# docker exec -it 5b1c bash -c "source /opt/ros/foxy/setup.bash && ros2 run icar_visual ... &"
 sleep 1
 
 # Phase 3: 调度层
 echo "=== Phase 3: Task Management ==="
 echo "[7/8] Starting task_manager_node..."
+# 方式A: 宿主机直接用 Python 运行
+# python3 $(ros2 pkg prefix task_manager)/lib/task_manager/task_manager_node &
+# 方式B: ROS2 方式运行（推荐）
 # ros2 run task_manager task_manager_node &
 sleep 1
 
-# Phase 4: 应用层
-echo "=== Phase 4: Application ==="
-echo "[8/8] Starting app_control_node..."
-# ros2 run app_control app_control_node &
+# Phase 4: 应用层（宿主机）
+echo "=== Phase 4: Application (Host) ==="
+echo "[8/8] Starting APP (Rosmaster-App)..."
+# cd ~/Rosmaster-App/rosmaster && python3 app.py &
 sleep 1
 
 echo ""
 echo "============================================="
 echo "  All modules started!"
-echo "  APP: http://localhost:3000"
+echo "  APP: http://<小车IP>:6500"
 echo "  Press Ctrl+C to stop all nodes"
 echo "============================================="
 
-# 等待退出信号
-# trap 'kill $(jobs -p)' EXIT
-# wait
+case "$MODE" in
+    nav-mock)
+        echo "[phase] navigation running in current phased mode"
+        echo "[note] starts /map, /pose, /nav_status and /obstacle_status in project mode, while /scan comes from the real lidar chain"
+        ./scripts/start_navigation.sh mock-full
+        ;;
+    nav-mock-basic)
+        echo "[phase] navigation basic mock data mode"
+        ./scripts/start_navigation.sh mock
+        ;;
+    nav-mock-with-app)
+        echo "[phase] navigation phased mode + placeholders for app/task_manager"
+        echo "[todo] start app_control_node and task_manager_node in their own terminals if they exist locally."
+        ./scripts/start_navigation.sh mock-full
+        ;;
+    real)
+        echo "[todo] real demo startup should be wired after the replacement vehicle arrives."
+        exit 1
+        ;;
+    -h|--help|help)
+        cat <<'EOF'
+Usage:
+  ./scripts/start_demo.sh [mode]
 
-# TODO: LLM 模块（P2 加分项，后期启动）
-# echo "[9/9] Starting llm_gateway_node..."
-# ros2 run llm_gateway llm_gateway_node &
+Modes:
+  nav-mock          Start current phased navigation chain; /scan comes from the real lidar chain
+  nav-mock-basic    Start /map, /pose and /nav_status only
+  nav-mock-with-app Start phased navigation chain and leave notes for app/task_manager
+  real              Placeholder for future full real robot demo
+EOF
+        ;;
+    *)
+        echo "[error] unknown mode: $MODE"
+        exit 1
+        ;;
+esac
