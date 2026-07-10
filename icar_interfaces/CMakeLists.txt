@@ -26,6 +26,7 @@ set(msg_files
 # 自定义服务定义
 set(srv_files
   "srv/ParseTask.srv"
+  "srv/GenerateReport.srv"
 )
 
 # 生成消息和服务代码
