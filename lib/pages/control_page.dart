@@ -15,8 +15,8 @@ class _ControlPageState extends State<ControlPage> {
   final CarController _ctrl = CarController.instance;
   late TextEditingController _ipController;
 
-  /// 当前长按中的方向（空 = 没有按住）
-  String _holdDirection = '';
+  /// 当前激活中的运动方向（空 = 未运动）
+  String _activeDirection = '';
 
   @override
   void initState() {
@@ -45,7 +45,7 @@ class _ControlPageState extends State<ControlPage> {
     HapticFeedback.mediumImpact();
   }
 
-  /// 按下方向键：发送方向指令并开始持续运动
+  /// 点击方向键：切换运动状态（再点同方向或点停止键才停）
   void _onPress(String direction) {
     if (!_ctrl.isConnected) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -57,23 +57,23 @@ class _ControlPageState extends State<ControlPage> {
       );
       return;
     }
-    _ctrl.sendCommand(direction);
-    setState(() => _holdDirection = direction);
-    HapticFeedback.heavyImpact();
-  }
-
-  /// 松开方向键：发送 stop
-  void _onRelease() {
-    if (_holdDirection.isEmpty) return;
-    _ctrl.sendCommand('stop');
-    setState(() => _holdDirection = '');
-    HapticFeedback.lightImpact();
+    if (_activeDirection == direction) {
+      // 再次点击同一方向 → 停止
+      _ctrl.sendCommand('stop');
+      setState(() => _activeDirection = '');
+      HapticFeedback.lightImpact();
+    } else {
+      // 点击新方向 → 直接发送（不需要先 stop，车端会切换）
+      _ctrl.sendCommand(direction);
+      setState(() => _activeDirection = direction);
+      HapticFeedback.heavyImpact();
+    }
   }
 
   /// 单次点击 stop
   void _onStop() {
     _ctrl.sendCommand('stop');
-    setState(() => _holdDirection = '');
+    setState(() => _activeDirection = '');
     HapticFeedback.heavyImpact();
   }
 
@@ -235,7 +235,7 @@ class _ControlPageState extends State<ControlPage> {
   Widget _buildDirectionPad() {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(20),
@@ -268,126 +268,97 @@ class _ControlPageState extends State<ControlPage> {
               ),
             ],
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 2),
           Text(
-            '按住方向键运动，松手即停',
+            '点击方向键运动，再点或按停止键结束',
             style: TextStyle(
               color: AppColors.blueGray.withValues(alpha: 0.7),
               fontSize: 11,
             ),
           ),
-          const SizedBox(height: 16),
-          // 移动 + 转向 并排
+          // ─── 移动区 ───
+          const SizedBox(height: 12),
+          _buildSectionLabel('移动', Icons.open_with),
+          const SizedBox(height: 10),
+          // 前进
+          Center(
+            child: _buildHoldButton(
+              icon: Icons.arrow_upward,
+              label: '前进',
+              direction: 'forward',
+              size: 60,
+            ),
+          ),
+          const SizedBox(height: 6),
+          // 左移 + 停止 + 右移
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // ─── 左侧：平移 D-pad ───
-              Expanded(
-                child: Column(
-                  children: [
-                    Text(
-                      '移动',
-                      style: TextStyle(
-                        color: AppColors.darkNavy,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    // 前进
-                    Center(
-                      child: _buildHoldButton(
-                        icon: Icons.arrow_upward,
-                        label: '前进',
-                        direction: 'forward',
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    // 左移 + 停止 + 右移
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        _buildHoldButton(
-                          icon: Icons.arrow_back,
-                          label: '左移',
-                          direction: 'left',
-                          size: 64,
-                        ),
-                        const SizedBox(width: 8),
-                        _buildStopButton(),
-                        const SizedBox(width: 8),
-                        _buildHoldButton(
-                          icon: Icons.arrow_forward,
-                          label: '右移',
-                          direction: 'right',
-                          size: 64,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    // 后退
-                    Center(
-                      child: _buildHoldButton(
-                        icon: Icons.arrow_downward,
-                        label: '后退',
-                        direction: 'backward',
-                      ),
-                    ),
-                  ],
-                ),
+              _buildHoldButton(
+                icon: Icons.arrow_back,
+                label: '左移',
+                direction: 'left',
+                size: 56,
               ),
-              // ─── 分割线 ───
-              Container(
-                width: 1,
-                height: 200,
-                color: AppColors.blueGray.withValues(alpha: 0.2),
-              ),
-              // ─── 右侧：转向 ───
-              Expanded(
-                child: Column(
-                  children: [
-                    Text(
-                      '转向',
-                      style: TextStyle(
-                        color: AppColors.darkNavy,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    // 左转
-                    _buildHoldButton(
-                      icon: Icons.rotate_left,
-                      label: '左转',
-                      direction: 'turn_left',
-                      size: 80,
-                      color: AppColors.bluePurple,
-                    ),
-                    const SizedBox(height: 12),
-                    // 右转
-                    _buildHoldButton(
-                      icon: Icons.rotate_right,
-                      label: '右转',
-                      direction: 'turn_right',
-                      size: 80,
-                      color: AppColors.bluePurple,
-                    ),
-                  ],
-                ),
+              const SizedBox(width: 10),
+              _buildStopButton(),
+              const SizedBox(width: 10),
+              _buildHoldButton(
+                icon: Icons.arrow_forward,
+                label: '右移',
+                direction: 'right',
+                size: 56,
               ),
             ],
           ),
-          // 全停按钮
+          const SizedBox(height: 6),
+          // 后退
+          Center(
+            child: _buildHoldButton(
+              icon: Icons.arrow_downward,
+              label: '后退',
+              direction: 'backward',
+              size: 60,
+            ),
+          ),
+          // ─── 分隔 ───
+          const SizedBox(height: 16),
+          Divider(color: AppColors.blueGray.withValues(alpha: 0.15)),
+          const SizedBox(height: 12),
+          // ─── 转向区 ───
+          _buildSectionLabel('转向', Icons.rotate_90_degrees_ccw),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _buildHoldButton(
+                icon: Icons.rotate_left,
+                label: '左转',
+                direction: 'turn_left',
+                size: 72,
+                color: AppColors.bluePurple,
+              ),
+              const SizedBox(width: 24),
+              _buildHoldButton(
+                icon: Icons.rotate_right,
+                label: '右转',
+                direction: 'turn_right',
+                size: 72,
+                color: AppColors.bluePurple,
+              ),
+            ],
+          ),
+          // ─── 全停按钮 ───
           const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
-            height: 48,
+            height: 44,
             child: ElevatedButton.icon(
               onPressed: _onStop,
-              icon: const Icon(Icons.stop_circle, size: 22),
+              icon: const Icon(Icons.stop_circle, size: 20),
               label: const Text(
                 '全部停止',
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
               ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.orange,
@@ -403,7 +374,25 @@ class _ControlPageState extends State<ControlPage> {
     );
   }
 
-  /// 长按运动按钮：按下发送指令，松手发 stop
+  Widget _buildSectionLabel(String text, IconData icon) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(icon, color: AppColors.darkNavy, size: 14),
+        const SizedBox(width: 4),
+        Text(
+          text,
+          style: const TextStyle(
+            color: AppColors.darkNavy,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 点击切换按钮：点一下开始运动，再点同方向停止
   Widget _buildHoldButton({
     required IconData icon,
     required String label,
@@ -411,13 +400,11 @@ class _ControlPageState extends State<ControlPage> {
     double size = 72,
     Color? color,
   }) {
-    final bool isActive = _holdDirection == direction;
+    final bool isActive = _activeDirection == direction;
     final Color activeColor = color ?? AppColors.orange;
 
     return GestureDetector(
-      onTapDown: (_) => _onPress(direction),
-      onTapUp: (_) => _onRelease(),
-      onTapCancel: _onRelease,
+      onTap: () => _onPress(direction),
       child: Container(
         width: size,
         height: size,
