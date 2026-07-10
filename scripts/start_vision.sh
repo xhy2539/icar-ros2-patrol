@@ -32,6 +32,13 @@ MODE=${1:-detect}
 IMAGE_TOPIC=${IMAGE_TOPIC:-/camera/color/image_raw}
 DETECTIONS_TOPIC=${DETECTIONS_TOPIC:-/vision/detections}
 STATUS_TOPIC=${STATUS_TOPIC:-/vision/camera_status}
+DETECTOR_BACKEND=${DETECTOR_BACKEND:-auto}
+YOLO_MODEL=${YOLO_MODEL:-}
+YOLO_DEVICE=${YOLO_DEVICE:-}
+YOLO_CONFIDENCE=${YOLO_CONFIDENCE:-0.35}
+YOLO_IOU=${YOLO_IOU:-0.5}
+YOLO_IMGSZ=${YOLO_IMGSZ:-640}
+DETECTION_CLASSES=${DETECTION_CLASSES:-}
 CAPTURE_COMMAND_TOPIC=${CAPTURE_COMMAND_TOPIC:-/vision/capture_command}
 CAPTURE_STATUS_TOPIC=${CAPTURE_STATUS_TOPIC:-/vision/capture_status}
 SAVE_DIR=${SAVE_DIR:-/tmp/icar_vision_dataset}
@@ -49,6 +56,10 @@ echo "============================================="
 echo "  Starting Vision Module (mode: $MODE)..."
 echo "============================================="
 echo "  image topic: $IMAGE_TOPIC"
+echo "  detector backend: $DETECTOR_BACKEND"
+if [ -n "$YOLO_MODEL" ]; then
+    echo "  yolo model: $YOLO_MODEL"
+fi
 
 if [ "$MODE" = "fake" ]; then
     ros2 run vision_patrol fake_camera --ros-args \
@@ -80,11 +91,22 @@ else
     if [ "$MODE" = "road" ]; then
         ENABLE_ROAD=true
     fi
+    DETECTION_CLASSES_PARAM="[]"
+    if [ -n "$DETECTION_CLASSES" ]; then
+        DETECTION_CLASSES_PARAM="[$DETECTION_CLASSES]"
+    fi
 
     ros2 run vision_patrol vision_node --ros-args \
         -p image_topic:="$IMAGE_TOPIC" \
         -p detections_topic:="$DETECTIONS_TOPIC" \
         -p mode:="$MODE" \
+        -p detector_backend:="$DETECTOR_BACKEND" \
+        -p yolo_model:="$YOLO_MODEL" \
+        -p yolo_device:="$YOLO_DEVICE" \
+        -p yolo_confidence:="$YOLO_CONFIDENCE" \
+        -p yolo_iou:="$YOLO_IOU" \
+        -p yolo_imgsz:="$YOLO_IMGSZ" \
+        -p target_classes:="$DETECTION_CLASSES_PARAM" \
         -p publish_annotated:="$PUBLISH_ANNOTATED" \
         -p enable_road_detection:="$ENABLE_ROAD"
 fi
