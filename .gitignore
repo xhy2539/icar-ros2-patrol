@@ -24,6 +24,8 @@ vision_samples/
 *.pt
 *.onnx
 *.engine
+*.gguf
+models/
 
 # macOS
 .DS_Store
