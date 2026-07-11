@@ -43,6 +43,15 @@ OBSTACLE_ALIAS_ENABLED=${OBSTACLE_ALIAS_ENABLED:-true}
 DEFAULT_OBSTACLE_CLASSES="backpack,handbag,suitcase,bottle,cup,chair,couch,bed,dining table,bench,potted plant,traffic cone,cone,box,cart,wheelchair,stroller"
 OBSTACLE_CLASSES=${OBSTACLE_CLASSES:-$DEFAULT_OBSTACLE_CLASSES}
 OBSTACLE_MIN_AREA_RATIO=${OBSTACLE_MIN_AREA_RATIO:-0.003}
+WATER_DETECTOR_BACKEND=${WATER_DETECTOR_BACKEND:-auto}
+WATER_MODEL=${WATER_MODEL:-}
+WATER_DEVICE=${WATER_DEVICE:-}
+WATER_CONFIDENCE=${WATER_CONFIDENCE:-0.15}
+WATER_IOU=${WATER_IOU:-0.5}
+WATER_IMGSZ=${WATER_IMGSZ:-640}
+DEFAULT_WATER_CLASSES="water puddle,puddle,standing water,wet floor,water on floor"
+WATER_CLASSES=${WATER_CLASSES:-$DEFAULT_WATER_CLASSES}
+WATER_MIN_AREA_RATIO=${WATER_MIN_AREA_RATIO:-0.002}
 CAPTURE_COMMAND_TOPIC=${CAPTURE_COMMAND_TOPIC:-/vision/capture_command}
 CAPTURE_STATUS_TOPIC=${CAPTURE_STATUS_TOPIC:-/vision/capture_status}
 SAVE_DIR=${SAVE_DIR:-/tmp/icar_vision_dataset}
@@ -63,6 +72,9 @@ echo "  image topic: $IMAGE_TOPIC"
 echo "  detector backend: $DETECTOR_BACKEND"
 if [ -n "$YOLO_MODEL" ]; then
     echo "  yolo model: $YOLO_MODEL"
+fi
+if [ -n "$WATER_MODEL" ]; then
+    echo "  water model: $WATER_MODEL"
 fi
 
 if [ "$MODE" = "fake" ]; then
@@ -100,6 +112,7 @@ else
         DETECTION_CLASSES_PARAM="[$DETECTION_CLASSES]"
     fi
     OBSTACLE_CLASSES_PARAM="[$OBSTACLE_CLASSES]"
+    WATER_CLASSES_PARAM="[$WATER_CLASSES]"
 
     ros2 run vision_patrol vision_node --ros-args \
         -p image_topic:="$IMAGE_TOPIC" \
@@ -115,6 +128,14 @@ else
         -p obstacle_alias_enabled:="$OBSTACLE_ALIAS_ENABLED" \
         -p obstacle_classes:="$OBSTACLE_CLASSES_PARAM" \
         -p obstacle_min_area_ratio:="$OBSTACLE_MIN_AREA_RATIO" \
+        -p water_detector_backend:="$WATER_DETECTOR_BACKEND" \
+        -p water_model:="$WATER_MODEL" \
+        -p water_device:="$WATER_DEVICE" \
+        -p water_confidence:="$WATER_CONFIDENCE" \
+        -p water_iou:="$WATER_IOU" \
+        -p water_imgsz:="$WATER_IMGSZ" \
+        -p water_classes:="$WATER_CLASSES_PARAM" \
+        -p water_min_area_ratio:="$WATER_MIN_AREA_RATIO" \
         -p publish_annotated:="$PUBLISH_ANNOTATED" \
         -p enable_road_detection:="$ENABLE_ROAD"
 fi

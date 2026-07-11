@@ -36,6 +36,12 @@ Common classes can start from a COCO-pretrained YOLO model. Custom checkpoint
 signs, low-position obstacles, and water/wet-floor scenes need real images and
 annotation before fine-tuning.
 
+For a no-training water/puddle demo, `vision_node` can optionally load a second
+Ultralytics YOLO-World model and map prompts such as `water puddle`, `puddle`,
+`standing water`, `wet floor`, and `water on floor` to the project class
+`water`. This is useful for early validation, but a custom water dataset and
+fine-tuned checkpoint will be more reliable for the final car scene.
+
 ## Off-Car Simulation
 
 Use the Ubuntu 20.04 + ROS2 Foxy VM for this flow.
@@ -148,6 +154,45 @@ ros2 topic pub --once /vision/capture_command std_msgs/String \
   "{data: '{\"action\":\"stop\"}'}"
 ```
 
+## Local Webcam Test
+
+For quick local validation without ROS2 or a VM, use the Windows Python webcam
+script:
+
+```bash
+cd D:\北交大两周项目\code_repos\icar-ros2-patrol-yolo-obstacle
+python vision\local_webcam_detect.py --backend yolo --model yolo11n.pt --camera 0
+```
+
+The first run may download `yolo11n.pt`. Put common blocking objects such as a
+chair, backpack, suitcase, bottle, bed, couch, or table in front of the camera;
+the script publishes them visually as `obstacle:<raw_yolo_class>` on the preview
+window. Press `s` to save a screenshot and JSON result, and `q` to quit.
+
+Headless one-frame check:
+
+```bash
+python vision\local_webcam_detect.py --backend yolo --model yolo11n.pt \
+  --camera 0 --frames 1 --no-window
+```
+
+Optional YOLO-World water/puddle check:
+
+```bash
+python vision\local_webcam_detect.py --backend yolo --model yolo11n.pt \
+  --water-model yolov8s-world.pt --camera 0
+```
+
+The first water run may download the YOLO-World checkpoint and text encoder
+dependencies. Water detections are shown as `water:<raw_prompt>` in the preview
+and JSON output.
+
+Fallback without a YOLO model:
+
+```bash
+python vision\local_webcam_detect.py --backend color --camera 0
+```
+
 ## Car Usage
 
 Use the team-agreed container flow. Do not run camera commands on the host.
@@ -201,6 +246,32 @@ ros2 run vision_patrol vision_node --ros-args \
   -p yolo_imgsz:=640 \
   -p target_classes:="[person,obstacle,water,sign]" \
   -p publish_annotated:=true
+```
+
+Optional YOLO-World water/puddle fusion:
+
+```bash
+ros2 run vision_patrol vision_node --ros-args \
+  -p image_topic:=/camera/color/image_raw \
+  -p detector_backend:=yolo \
+  -p yolo_model:=/home/jetson/models/yolo11n.pt \
+  -p water_model:=/home/jetson/models/yolov8s-world.pt \
+  -p water_classes:="[water puddle,puddle,standing water,wet floor,water on floor]" \
+  -p water_confidence:=0.15 \
+  -p target_classes:="[person,obstacle,water]" \
+  -p publish_annotated:=true
+```
+
+With `scripts/start_vision.sh`, the same setup can be started with environment
+variables:
+
+```bash
+DETECTOR_BACKEND=yolo \
+YOLO_MODEL=/home/jetson/models/yolo11n.pt \
+WATER_MODEL=/home/jetson/models/yolov8s-world.pt \
+DETECTION_CLASSES=person,obstacle,water \
+PUBLISH_ANNOTATED=true \
+./scripts/start_vision.sh detect
 ```
 
 YOLO obstacle mapping is enabled by default. Common COCO classes that can block

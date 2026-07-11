@@ -19,6 +19,7 @@ install/
 *.bag
 *.db3
 vision_samples/
+local_detection_samples/
 
 # 模型文件较大，建议放网盘、Release 或 Git LFS
 *.pt
