@@ -26,7 +26,7 @@ Usage:
 Modes:
   mock         Start the formal navigation interfaces with mock map/pose/nav data
   mock-full    Start the formal navigation chain plus obstacle status and patrol, while /scan can still come from the real lidar chain
-  real         Reserved entry for future full real robot startup
+  real         Start the real-ready shell; external SLAM/Nav2 providers can attach to the same topics
 
 Environment variables:
   NAV_SCENARIO        success | timeout | fail_fast
@@ -66,11 +66,11 @@ echo "============================================="
 case "$MODE" in
     mock)
         start_process "slam_node" python3 navigation/slam/slam_node.py
-        start_process "navigation_node" python3 navigation/navigation/navigation_node.py --scenario "$NAV_SCENARIO"
+        start_process "navigation_node" python3 navigation/navigation/navigation_node.py --mode mock --scenario "$NAV_SCENARIO"
         ;;
     mock-full)
         start_process "slam_node" python3 navigation/slam/slam_node.py
-        start_process "navigation_node" python3 navigation/navigation/navigation_node.py --scenario "$NAV_SCENARIO"
+        start_process "navigation_node" python3 navigation/navigation/navigation_node.py --mode mock --scenario "$NAV_SCENARIO"
         start_process "obstacle_avoid_node" python3 navigation/obstacle_avoid/obstacle_avoid_node.py --mode "$OBSTACLE_MODE" --scenario "$OBSTACLE_SCENARIO"
         start_process "lidar_node" python3 navigation/lidar/lidar_node.py
         if [ -n "$PATROL_ROUTE" ]; then
@@ -80,9 +80,15 @@ case "$MODE" in
         fi
         ;;
     real)
-        echo "[todo] real mode keeps the same topics and message types as mock mode."
-        echo "[todo] wire the internal providers to the real vehicle chain after the vehicle is available."
-        exit 1
+        echo "[real-ready] keeping formal topics unchanged: /scan /odom /map /pose /goal_pose /nav_status /obstacle_status"
+        echo "[real-ready] external vehicle providers should supply real /odom, SLAM /map+/pose, and Nav2-style goal execution later."
+        echo "[real-ready] placeholders to wire on the car:"
+        echo "  - ros2 launch slam_toolbox online_async_launch.py ..."
+        echo "  - ros2 launch nav2_bringup navigation_launch.py ..."
+        start_process "lidar_node" python3 navigation/lidar/lidar_node.py
+        start_process "obstacle_avoid_node" python3 navigation/obstacle_avoid/obstacle_avoid_node.py --mode real
+        start_process "slam_node_mock_provider" python3 navigation/slam/slam_node.py
+        start_process "navigation_node_real_ready" python3 navigation/navigation/navigation_node.py --mode real --scenario "$NAV_SCENARIO"
         ;;
     -h|--help|help)
         print_usage

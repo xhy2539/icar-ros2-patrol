@@ -54,7 +54,7 @@ string action
 - `navigation/lidar/lidar_node.py`：接入并监测真实 `/scan`
 - `navigation/obstacle_avoid/obstacle_avoid_node.py`：默认根据真实 `/scan` 前方扇区计算障碍状态，发布 `/obstacle_status`，危险时发布 `/cmd_vel` 停止指令；`--mode mock` 仅保留为无雷达演示兜底
 - `navigation/slam/slam_node.py`：保留 `/scan + /odom -> /map + /pose` 的正式骨架，当前地图和位姿仍为 mock 驱动
-- `navigation/navigation/navigation_node.py`：保留 `/map + /pose + /goal_pose + /scan -> /nav_status` 的正式骨架，当前导航状态仍按 mock 场景推进
+- `navigation/navigation/navigation_node.py`：保留 `/map + /pose + /goal_pose + /scan -> /nav_status` 的正式骨架；`--mode mock` 按场景推进，`--mode real` 不模拟到点，等待真实导航反馈
 - `navigation/navigation/patrol_node.py`：自动下发 A/B/C 巡检点
 - `navigation/navigation_utils.py`：导航公共工具
 - `config/navigation/mock/`：导航 mock 场景配置
@@ -84,7 +84,7 @@ string action
 
 - `/scan` 当前优先接真实雷达链路
 - `mock` 模式不会改变对外 Topic 名和消息类型
-- `real` 模式是后续真车恢复后的切换入口，不应再引入第二套协议
+- `real` 模式是后续真车恢复后的切换入口，当前提供 real-ready 启动壳，不引入第二套协议
 
 ## 可选环境变量
 
@@ -116,6 +116,7 @@ PATROL_ROUTE=A,B,C
 - 真机自动避障已默认接入真实 `/scan` 前方扇区判定，仍需补真机场景视频/日志证据
 - 真机 SLAM 建图验收
 - 真机自主导航验收
+- 真机接车步骤见 `docs/导航模块后续接车清单.md`
 
 ## 切回真车时怎么处理
 
