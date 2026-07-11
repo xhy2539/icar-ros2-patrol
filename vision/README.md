@@ -13,9 +13,11 @@ object detection and road detection will be added on top of the same ROS2 input.
 - `dataset_recorder`: saves images on demand or at a bounded interval for YOLO
   dataset collection and inspection screenshots.
 - `fake_camera`: publishes a synthetic patrol camera image for off-car tests.
-- `vision_node`: subscribes to the camera image topic and publishes JSON results
-  to `/vision/detections`. It currently includes lightweight color-object and
-  lane-line detection so the ROS2 flow can be tested before YOLO is added.
+- `vision_node`: subscribes to the camera image topic and publishes
+  `icar_interfaces/DetectionArray` results to `/vision/detections`. It also
+  publishes optional JSON debug data to `/vision/detections_json`. The node
+  includes lightweight color-object and lane-line detection for no-model tests,
+  and can optionally load an Ultralytics YOLO model through runtime parameters.
 - `target_tracker`: subscribes to `/vision/detections`, selects a target such as
   `person`, and publishes follow-control velocity hints to `/vision/target_cmd_vel`.
   It does not publish directly to `/cmd_vel` by default. It stays idle until an
@@ -26,13 +28,13 @@ object detection and road detection will be added on top of the same ROS2 input.
 The initial class table is in `config/vision_classes.json`.
 
 - Common pretrained classes: `person`, `backpack`, `handbag`, `bottle`, `chair`,
-  `stop sign`, `traffic light`.
+  `bed`, `stop sign`, `traffic light`.
 - Project/custom classes: `obstacle`, `sign_A`, `sign_B`, `sign_C`,
-  `danger_object`, `road_lane`.
+  `water`, `road_lane`.
 
 Common classes can start from a COCO-pretrained YOLO model. Custom checkpoint
-signs and project-specific danger objects need real images and annotation before
-fine-tuning.
+signs, low-position obstacles, and water/wet-floor scenes need real images and
+annotation before fine-tuning.
 
 ## Off-Car Simulation
 
@@ -68,10 +70,16 @@ ros2 run vision_patrol vision_node --ros-args \
   -p publish_annotated:=true
 ```
 
-Terminal 4 observes JSON results:
+Terminal 4 observes typed detection results:
 
 ```bash
 ros2 topic echo /vision/detections
+```
+
+Optional JSON debug output:
+
+```bash
+ros2 topic echo /vision/detections_json
 ```
 
 Optional target tracking test:
@@ -145,7 +153,8 @@ ros2 topic pub --once /vision/capture_command std_msgs/String \
 Use the team-agreed container flow. Do not run camera commands on the host.
 
 ```bash
-~/run_docker.sh
+source ~/.bashrc
+is
 id
 ```
 
@@ -172,17 +181,55 @@ Then run the placeholder vision pipeline:
 ```bash
 ros2 run vision_patrol vision_node --ros-args \
   -p image_topic:=/camera/color/image_raw \
+  -p detector_backend:=color \
   -p mode:=detect
 ```
 
 Replace `/camera/color/image_raw` with the actual topic reported by the car.
+If `/camera/color/image_raw` has no data, first confirm whether the APP service
+is occupying `/dev/video0`; coordinate before stopping APP processes.
+
+Optional YOLO runtime, when the car already has `ultralytics` and a local model:
+
+```bash
+ros2 run vision_patrol vision_node --ros-args \
+  -p image_topic:=/camera/color/image_raw \
+  -p detector_backend:=yolo \
+  -p yolo_model:=/home/jetson/models/yolo11n.pt \
+  -p yolo_device:=0 \
+  -p yolo_confidence:=0.35 \
+  -p yolo_imgsz:=640 \
+  -p target_classes:="[person,obstacle,water,sign]" \
+  -p publish_annotated:=true
+```
+
+YOLO obstacle mapping is enabled by default. Common COCO classes that can block
+the patrol path, such as `chair`, `dining table`, `backpack`, `handbag`,
+`suitcase`, `bottle`, `bed`, `couch`, `bench`, and `potted plant`, are published
+as the project class `obstacle`. The original YOLO class is still included as
+`raw_class_name` in `/vision/detections_json` for debugging.
+
+Override the mapped classes when needed:
+
+```bash
+ros2 run vision_patrol vision_node --ros-args \
+  -p detector_backend:=yolo \
+  -p yolo_model:=/home/jetson/models/yolo11n.pt \
+  -p obstacle_classes:="[chair,backpack,suitcase,bottle,dining table]" \
+  -p obstacle_min_area_ratio:=0.003
+```
+
+If the YOLO model cannot be loaded, the node logs a warning and falls back to
+the lightweight detector so the ROS2 vision chain can still be demonstrated.
 
 ## Integration Topics
 
 - Input: camera RGB image topic, expected to be similar to
   `/camera/color/image_raw`.
 - Output: `/vision/camera_status` (`std_msgs/String`, JSON).
-- Output: `/vision/detections` (`std_msgs/String`, JSON for the P0 prototype).
+- Output: `/vision/detections` (`icar_interfaces/DetectionArray`, main APP/task
+  interface).
+- Optional output: `/vision/detections_json` (`std_msgs/String`, JSON debug).
 - Input: `/vision/capture_command` (`std_msgs/String`, JSON command).
 - Output: `/vision/capture_status` (`std_msgs/String`, JSON).
 - Input: `/vision/target_tracking/command` (`std_msgs/String`, JSON command).
@@ -190,6 +237,3 @@ Replace `/camera/color/image_raw` with the actual topic reported by the car.
   velocity hint).
 - Output: `/vision/target_tracking/status` (`std_msgs/String`, JSON).
 - Optional output: `/vision/annotated_image` (`sensor_msgs/Image`).
-
-The project design document may later replace the JSON string with custom
-`DetectionArray` messages after the first camera and detection demo is stable.

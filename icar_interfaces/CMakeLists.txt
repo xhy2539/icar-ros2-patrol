@@ -27,6 +27,7 @@ set(msg_files
 set(srv_files
   "srv/ParseTask.srv"
   "srv/TaskControl.srv"
+  "srv/GenerateReport.srv"
 )
 
 # 生成消息和服务代码

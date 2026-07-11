@@ -8,6 +8,12 @@ from sensor_msgs.msg import Image
 from std_msgs.msg import String
 
 try:
+    from icar_interfaces.msg import Detection, DetectionArray
+except ImportError:
+    Detection = None
+    DetectionArray = None
+
+try:
     from cv_bridge import CvBridge
 except ImportError:
     CvBridge = None
@@ -18,6 +24,32 @@ try:
 except ImportError:
     cv2 = None
     np = None
+
+try:
+    from ultralytics import YOLO
+except ImportError:
+    YOLO = None
+
+
+DEFAULT_OBSTACLE_CLASSES = [
+    "backpack",
+    "handbag",
+    "suitcase",
+    "bottle",
+    "cup",
+    "chair",
+    "couch",
+    "bed",
+    "dining table",
+    "bench",
+    "potted plant",
+    "traffic cone",
+    "cone",
+    "box",
+    "cart",
+    "wheelchair",
+    "stroller",
+]
 
 
 def image_qos(depth=5):
@@ -36,27 +68,73 @@ class VisionNode(Node):
         super().__init__("vision_node")
         self.declare_parameter("image_topic", "/camera/color/image_raw")
         self.declare_parameter("detections_topic", "/vision/detections")
+        self.declare_parameter("detections_json_topic", "/vision/detections_json")
         self.declare_parameter("annotated_topic", "/vision/annotated_image")
         self.declare_parameter("mode", "detect")
+        self.declare_parameter("detector_backend", "auto")
+        self.declare_parameter("publish_json_debug", True)
         self.declare_parameter("publish_annotated", False)
         self.declare_parameter("enable_road_detection", False)
         self.declare_parameter("min_color_area", 600.0)
+        self.declare_parameter("yolo_model", "")
+        self.declare_parameter("yolo_device", "")
+        self.declare_parameter("yolo_confidence", 0.35)
+        self.declare_parameter("yolo_iou", 0.5)
+        self.declare_parameter("yolo_imgsz", 640)
+        self.declare_parameter("target_classes", [""])
+        self.declare_parameter("obstacle_alias_enabled", True)
+        self.declare_parameter("obstacle_classes", DEFAULT_OBSTACLE_CLASSES)
+        self.declare_parameter("obstacle_min_area_ratio", 0.003)
 
         self.image_topic = self.get_parameter("image_topic").value
         self.detections_topic = self.get_parameter("detections_topic").value
+        self.detections_json_topic = self.get_parameter("detections_json_topic").value
         self.annotated_topic = self.get_parameter("annotated_topic").value
         self.mode = self.get_parameter("mode").value
+        self.detector_backend = str(self.get_parameter("detector_backend").value).lower()
+        self.publish_json_debug = bool(self.get_parameter("publish_json_debug").value)
         self.publish_annotated = bool(self.get_parameter("publish_annotated").value)
         self.enable_road_detection = bool(
             self.get_parameter("enable_road_detection").value
         )
         self.min_color_area = float(self.get_parameter("min_color_area").value)
+        self.yolo_model_path = str(self.get_parameter("yolo_model").value).strip()
+        self.yolo_device = str(self.get_parameter("yolo_device").value).strip()
+        self.yolo_confidence = float(self.get_parameter("yolo_confidence").value)
+        self.yolo_iou = float(self.get_parameter("yolo_iou").value)
+        self.yolo_imgsz = int(self.get_parameter("yolo_imgsz").value)
+        self.target_classes = self.normalize_class_list(
+            self.get_parameter("target_classes").value
+        )
+        self.obstacle_alias_enabled = bool(
+            self.get_parameter("obstacle_alias_enabled").value
+        )
+        self.obstacle_classes = self.normalize_class_list(
+            self.get_parameter("obstacle_classes").value
+        )
+        self.obstacle_class_set = {
+            self.class_key(class_name) for class_name in self.obstacle_classes
+        }
+        self.obstacle_min_area_ratio = float(
+            self.get_parameter("obstacle_min_area_ratio").value
+        )
 
         self.bridge = CvBridge() if CvBridge else None
         self.frame_count = 0
         self.started_at = time.monotonic()
+        self.yolo_model = None
+        self.yolo_unavailable_logged = False
+        self.typed_detections_available = Detection is not None and DetectionArray is not None
 
-        self.detections_pub = self.create_publisher(String, self.detections_topic, 10)
+        detections_msg_type = DetectionArray if self.typed_detections_available else String
+        self.detections_pub = self.create_publisher(
+            detections_msg_type, self.detections_topic, 10
+        )
+        self.detections_json_pub = None
+        if self.publish_json_debug and self.typed_detections_available:
+            self.detections_json_pub = self.create_publisher(
+                String, self.detections_json_topic, 10
+            )
         self.annotated_pub = None
         if self.publish_annotated:
             self.annotated_pub = self.create_publisher(Image, self.annotated_topic, 10)
@@ -69,12 +147,48 @@ class VisionNode(Node):
         )
 
         self.get_logger().info(
-            f"Vision node mode={self.mode}, image_topic={self.image_topic}, "
+            f"Vision node mode={self.mode}, backend={self.detector_backend}, "
+            f"image_topic={self.image_topic}, "
             f"detections_topic={self.detections_topic}"
         )
+        if not self.typed_detections_available:
+            self.get_logger().warning(
+                "icar_interfaces is unavailable; publishing JSON String on "
+                f"{self.detections_topic} as a fallback"
+            )
         if self.bridge is None:
             self.get_logger().warning(
                 "cv_bridge is unavailable; publishing metadata-only detections"
+            )
+        self.load_yolo_if_requested()
+
+    def load_yolo_if_requested(self):
+        if self.detector_backend not in ("auto", "yolo"):
+            return
+        if not self.yolo_model_path:
+            if self.detector_backend == "yolo":
+                self.get_logger().warning(
+                    "detector_backend=yolo but yolo_model is empty; "
+                    "falling back to lightweight color detector"
+                )
+            return
+        if YOLO is None:
+            self.get_logger().warning(
+                "ultralytics is not installed; falling back to lightweight color detector"
+            )
+            return
+        try:
+            self.yolo_model = YOLO(self.yolo_model_path)
+            self.get_logger().info(
+                f"Loaded YOLO model: {self.yolo_model_path}; "
+                f"device={self.yolo_device or 'auto'}; "
+                f"target_classes={self.target_classes or 'all'}; "
+                f"obstacle_alias_enabled={self.obstacle_alias_enabled}"
+            )
+        except Exception as exc:  # pylint: disable=broad-except
+            self.get_logger().warning(
+                f"failed to load YOLO model '{self.yolo_model_path}': {exc}; "
+                "falling back to lightweight color detector"
             )
 
     def on_image(self, msg):
@@ -99,10 +213,15 @@ class VisionNode(Node):
                 "height": msg.height,
                 "encoding": msg.encoding,
             },
+            "detector": {
+                "backend": self.active_backend(),
+                "model": self.yolo_model_path if self.yolo_model is not None else "",
+                "target_classes": self.target_classes,
+            },
             "detections": detections,
             "road": road,
         }
-        self.detections_pub.publish(String(data=json.dumps(payload, ensure_ascii=False)))
+        self.publish_detections(msg, detections, payload)
 
         if self.annotated_pub is not None and frame is not None:
             annotated = self.draw_annotations(frame.copy(), detections, road)
@@ -125,12 +244,20 @@ class VisionNode(Node):
     def run_object_detection(self, frame):
         if frame is None or cv2 is None or np is None:
             return []
+        if self.yolo_model is not None:
+            return self.run_yolo_detection(frame)
+        if self.detector_backend == "yolo" and not self.yolo_unavailable_logged:
+            self.yolo_unavailable_logged = True
+            self.get_logger().warning(
+                "YOLO backend requested but no model is available; using color detector"
+            )
         # Lightweight simulation detector. YOLO can replace this method later.
         color_specs = [
             ("obstacle", (0, 90, 90), (10, 255, 255), "red"),
             ("obstacle", (170, 90, 90), (180, 255, 255), "red"),
             ("sign", (35, 70, 60), (90, 255, 255), "green"),
             ("person", (20, 80, 80), (34, 255, 255), "yellow"),
+            ("water", (95, 70, 60), (130, 255, 255), "blue"),
         ]
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         detections = []
@@ -154,6 +281,116 @@ class VisionNode(Node):
                     }
                 )
         return detections
+
+    def publish_detections(self, image_msg, detections, payload):
+        if self.typed_detections_available:
+            typed_msg = DetectionArray()
+            typed_msg.header = image_msg.header
+            typed_msg.detections = [
+                self.to_detection_msg(det) for det in detections
+            ]
+            self.detections_pub.publish(typed_msg)
+
+            if self.detections_json_pub is not None:
+                self.detections_json_pub.publish(
+                    String(data=json.dumps(payload, ensure_ascii=False))
+                )
+            return
+
+        self.detections_pub.publish(String(data=json.dumps(payload, ensure_ascii=False)))
+
+    @staticmethod
+    def to_detection_msg(det):
+        msg = Detection()
+        bbox = det.get("bbox") or [0, 0, 0, 0]
+        x1, y1, x2, y2 = [int(v) for v in bbox[:4]]
+        msg.class_name = str(det.get("class_name", "unknown"))
+        msg.confidence = float(det.get("confidence", 0.0) or 0.0)
+        msg.x_min = x1
+        msg.y_min = y1
+        msg.x_max = x2
+        msg.y_max = y2
+        msg.image_path = str(det.get("image_path", ""))
+        return msg
+
+    def run_yolo_detection(self, frame):
+        kwargs = {
+            "imgsz": self.yolo_imgsz,
+            "conf": self.yolo_confidence,
+            "iou": self.yolo_iou,
+            "verbose": False,
+        }
+        if self.yolo_device:
+            kwargs["device"] = self.yolo_device
+        try:
+            results = self.yolo_model.predict(frame, **kwargs)
+        except Exception as exc:  # pylint: disable=broad-except
+            self.get_logger().warning(f"YOLO inference failed: {exc}")
+            return []
+        if not results:
+            return []
+
+        result = results[0]
+        names = getattr(result, "names", {}) or {}
+        boxes = getattr(result, "boxes", None)
+        if boxes is None:
+            return []
+
+        detections = []
+        track_ids = getattr(boxes, "id", None)
+        height, width = frame.shape[:2]
+        for index, box in enumerate(boxes):
+            cls_id = int(box.cls[0].item())
+            confidence = float(box.conf[0].item())
+            x1, y1, x2, y2 = [int(round(v)) for v in box.xyxy[0].tolist()]
+            raw_class_name = str(names.get(cls_id, cls_id))
+            class_name, is_obstacle = self.map_yolo_class(
+                raw_class_name,
+                [x1, y1, x2, y2],
+                width,
+                height,
+            )
+            if class_name is None:
+                continue
+            if not self.keep_detection_class(raw_class_name, class_name):
+                continue
+            det = {
+                "class_name": class_name,
+                "confidence": round(confidence, 3),
+                "bbox": [x1, y1, x2, y2],
+                "source": "yolo_obstacle" if is_obstacle else "yolo",
+                "model": self.yolo_model_path,
+                "raw_class_name": raw_class_name,
+            }
+            if track_ids is not None and index < len(track_ids):
+                det["track_id"] = int(track_ids[index].item())
+            detections.append(det)
+        return detections
+
+    def map_yolo_class(self, raw_class_name, bbox, width, height):
+        """Map COCO/custom YOLO classes that block passage to project obstacle."""
+        if not self.obstacle_alias_enabled:
+            return raw_class_name, False
+        if self.class_key(raw_class_name) not in self.obstacle_class_set:
+            return raw_class_name, False
+
+        if self.obstacle_min_area_ratio > 0:
+            x1, y1, x2, y2 = [float(v) for v in bbox]
+            bbox_area = max(0.0, x2 - x1) * max(0.0, y2 - y1)
+            frame_area = float(max(1, width * height))
+            if bbox_area / frame_area < self.obstacle_min_area_ratio:
+                return None, False
+
+        return "obstacle", True
+
+    def keep_detection_class(self, raw_class_name, class_name):
+        if not self.target_classes:
+            return True
+        target_keys = {self.class_key(item) for item in self.target_classes}
+        return (
+            self.class_key(class_name) in target_keys
+            or self.class_key(raw_class_name) in target_keys
+        )
 
     def run_road_detection(self, frame):
         if not self.enable_road_detection or frame is None or cv2 is None or np is None:
@@ -207,6 +444,9 @@ class VisionNode(Node):
                 continue
             x1, y1, x2, y2 = [int(v) for v in bbox]
             label = det.get("class_name", "object")
+            raw_label = det.get("raw_class_name", "")
+            if raw_label and raw_label != label:
+                label = f"{label}:{raw_label}"
             conf = det.get("confidence", 0.0)
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
             cv2.putText(
@@ -239,6 +479,25 @@ class VisionNode(Node):
                 cv2.LINE_AA,
             )
         return frame
+
+    def active_backend(self):
+        if self.yolo_model is not None:
+            return "yolo"
+        return "color"
+
+    @staticmethod
+    def normalize_class_list(value):
+        if isinstance(value, str):
+            if not value.strip():
+                return []
+            return [item.strip() for item in value.split(",") if item.strip()]
+        if isinstance(value, (list, tuple)):
+            return [str(item).strip() for item in value if str(item).strip()]
+        return []
+
+    @staticmethod
+    def class_key(value):
+        return str(value).strip().lower()
 
 
 def main(args=None):

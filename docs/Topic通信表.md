@@ -221,7 +221,7 @@ QoS:      Best Effort
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `header` | std_msgs/Header | 时间戳 |
-| `detections[i].class_name` | string | 目标类别 (person/obstacle/sign) |
+| `detections[i].class_name` | string | 目标类别 (person/obstacle/water/sign) |
 | `detections[i].confidence` | float32 | 置信度 0.0-1.0 |
 | `detections[i].bbox.x_min` | int32 | 边界框左上 x |
 | `detections[i].bbox.y_min` | int32 | 边界框左上 y |

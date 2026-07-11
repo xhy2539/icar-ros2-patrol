@@ -10,7 +10,7 @@ set -e
 
 CONTAINER="${ICAR_CONTAINER:-icar_ros2}"
 WS="/root/ros2_ws"
-PKGS="icar_interfaces task_manager"
+PKGS="icar_interfaces task_manager cloud_bridge vision"
 
 echo "=== 同步代码到容器 ==="
 cd "$(dirname "$0")/.."
