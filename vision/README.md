@@ -199,8 +199,24 @@ ros2 run vision_patrol vision_node --ros-args \
   -p yolo_device:=0 \
   -p yolo_confidence:=0.35 \
   -p yolo_imgsz:=640 \
-  -p target_classes:="[person,bottle,chair,backpack]" \
+  -p target_classes:="[person,obstacle,water,sign]" \
   -p publish_annotated:=true
+```
+
+YOLO obstacle mapping is enabled by default. Common COCO classes that can block
+the patrol path, such as `chair`, `dining table`, `backpack`, `handbag`,
+`suitcase`, `bottle`, `bed`, `couch`, `bench`, and `potted plant`, are published
+as the project class `obstacle`. The original YOLO class is still included as
+`raw_class_name` in `/vision/detections_json` for debugging.
+
+Override the mapped classes when needed:
+
+```bash
+ros2 run vision_patrol vision_node --ros-args \
+  -p detector_backend:=yolo \
+  -p yolo_model:=/home/jetson/models/yolo11n.pt \
+  -p obstacle_classes:="[chair,backpack,suitcase,bottle,dining table]" \
+  -p obstacle_min_area_ratio:=0.003
 ```
 
 If the YOLO model cannot be loaded, the node logs a warning and falls back to

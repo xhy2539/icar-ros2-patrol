@@ -37,6 +37,24 @@
       "source": "COCO pretrained YOLO"
     },
     {
+      "class_name": "dining table",
+      "label_zh": "桌子",
+      "trackable": false,
+      "source": "COCO pretrained YOLO"
+    },
+    {
+      "class_name": "couch",
+      "label_zh": "沙发",
+      "trackable": false,
+      "source": "COCO pretrained YOLO"
+    },
+    {
+      "class_name": "suitcase",
+      "label_zh": "箱包",
+      "trackable": true,
+      "source": "COCO pretrained YOLO"
+    },
+    {
       "class_name": "stop sign",
       "label_zh": "停止标志",
       "trackable": true,
@@ -89,7 +107,8 @@
   ],
   "notes": [
     "养老院夜巡视觉主线收敛为普通障碍物和积水/湿滑区域。",
-    "person/backpack/bottle/chair/bed 等常规目标可先直接调用 COCO 预训练 YOLO。",
+    "person/backpack/bottle/chair/bed/dining table/couch/suitcase 等常规目标可先直接调用 COCO 预训练 YOLO。",
+    "vision_node 会把配置中的可阻挡通行类别映射为项目统一类别 obstacle，同时在 /vision/detections_json 中保留 raw_class_name 便于调试。",
     "摔倒老人不作为视觉模块主识别目标，后续按雷达/地图建模或系统融合异常处理。",
     "obstacle/water 如需更稳定识别，需要采集低机位现场图片并标注后训练或微调。",
     "water 更适合 OpenCV 颜色/反光规则或分割模型，不建议只用普通检测框解决。"

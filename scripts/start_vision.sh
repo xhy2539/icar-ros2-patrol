@@ -39,6 +39,10 @@ YOLO_CONFIDENCE=${YOLO_CONFIDENCE:-0.35}
 YOLO_IOU=${YOLO_IOU:-0.5}
 YOLO_IMGSZ=${YOLO_IMGSZ:-640}
 DETECTION_CLASSES=${DETECTION_CLASSES:-}
+OBSTACLE_ALIAS_ENABLED=${OBSTACLE_ALIAS_ENABLED:-true}
+DEFAULT_OBSTACLE_CLASSES="backpack,handbag,suitcase,bottle,cup,chair,couch,bed,dining table,bench,potted plant,traffic cone,cone,box,cart,wheelchair,stroller"
+OBSTACLE_CLASSES=${OBSTACLE_CLASSES:-$DEFAULT_OBSTACLE_CLASSES}
+OBSTACLE_MIN_AREA_RATIO=${OBSTACLE_MIN_AREA_RATIO:-0.003}
 CAPTURE_COMMAND_TOPIC=${CAPTURE_COMMAND_TOPIC:-/vision/capture_command}
 CAPTURE_STATUS_TOPIC=${CAPTURE_STATUS_TOPIC:-/vision/capture_status}
 SAVE_DIR=${SAVE_DIR:-/tmp/icar_vision_dataset}
@@ -95,6 +99,7 @@ else
     if [ -n "$DETECTION_CLASSES" ]; then
         DETECTION_CLASSES_PARAM="[$DETECTION_CLASSES]"
     fi
+    OBSTACLE_CLASSES_PARAM="[$OBSTACLE_CLASSES]"
 
     ros2 run vision_patrol vision_node --ros-args \
         -p image_topic:="$IMAGE_TOPIC" \
@@ -107,6 +112,9 @@ else
         -p yolo_iou:="$YOLO_IOU" \
         -p yolo_imgsz:="$YOLO_IMGSZ" \
         -p target_classes:="$DETECTION_CLASSES_PARAM" \
+        -p obstacle_alias_enabled:="$OBSTACLE_ALIAS_ENABLED" \
+        -p obstacle_classes:="$OBSTACLE_CLASSES_PARAM" \
+        -p obstacle_min_area_ratio:="$OBSTACLE_MIN_AREA_RATIO" \
         -p publish_annotated:="$PUBLISH_ANNOTATED" \
         -p enable_road_detection:="$ENABLE_ROAD"
 fi

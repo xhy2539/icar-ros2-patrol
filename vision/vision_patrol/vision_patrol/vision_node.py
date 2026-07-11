@@ -31,6 +31,27 @@ except ImportError:
     YOLO = None
 
 
+DEFAULT_OBSTACLE_CLASSES = [
+    "backpack",
+    "handbag",
+    "suitcase",
+    "bottle",
+    "cup",
+    "chair",
+    "couch",
+    "bed",
+    "dining table",
+    "bench",
+    "potted plant",
+    "traffic cone",
+    "cone",
+    "box",
+    "cart",
+    "wheelchair",
+    "stroller",
+]
+
+
 def image_qos(depth=5):
     return QoSProfile(
         history=HistoryPolicy.KEEP_LAST,
@@ -61,6 +82,9 @@ class VisionNode(Node):
         self.declare_parameter("yolo_iou", 0.5)
         self.declare_parameter("yolo_imgsz", 640)
         self.declare_parameter("target_classes", [""])
+        self.declare_parameter("obstacle_alias_enabled", True)
+        self.declare_parameter("obstacle_classes", DEFAULT_OBSTACLE_CLASSES)
+        self.declare_parameter("obstacle_min_area_ratio", 0.003)
 
         self.image_topic = self.get_parameter("image_topic").value
         self.detections_topic = self.get_parameter("detections_topic").value
@@ -81,6 +105,18 @@ class VisionNode(Node):
         self.yolo_imgsz = int(self.get_parameter("yolo_imgsz").value)
         self.target_classes = self.normalize_class_list(
             self.get_parameter("target_classes").value
+        )
+        self.obstacle_alias_enabled = bool(
+            self.get_parameter("obstacle_alias_enabled").value
+        )
+        self.obstacle_classes = self.normalize_class_list(
+            self.get_parameter("obstacle_classes").value
+        )
+        self.obstacle_class_set = {
+            self.class_key(class_name) for class_name in self.obstacle_classes
+        }
+        self.obstacle_min_area_ratio = float(
+            self.get_parameter("obstacle_min_area_ratio").value
         )
 
         self.bridge = CvBridge() if CvBridge else None
@@ -146,7 +182,8 @@ class VisionNode(Node):
             self.get_logger().info(
                 f"Loaded YOLO model: {self.yolo_model_path}; "
                 f"device={self.yolo_device or 'auto'}; "
-                f"target_classes={self.target_classes or 'all'}"
+                f"target_classes={self.target_classes or 'all'}; "
+                f"obstacle_alias_enabled={self.obstacle_alias_enabled}"
             )
         except Exception as exc:  # pylint: disable=broad-except
             self.get_logger().warning(
@@ -301,24 +338,59 @@ class VisionNode(Node):
 
         detections = []
         track_ids = getattr(boxes, "id", None)
+        height, width = frame.shape[:2]
         for index, box in enumerate(boxes):
             cls_id = int(box.cls[0].item())
-            class_name = str(names.get(cls_id, cls_id))
-            if self.target_classes and class_name not in self.target_classes:
-                continue
             confidence = float(box.conf[0].item())
             x1, y1, x2, y2 = [int(round(v)) for v in box.xyxy[0].tolist()]
+            raw_class_name = str(names.get(cls_id, cls_id))
+            class_name, is_obstacle = self.map_yolo_class(
+                raw_class_name,
+                [x1, y1, x2, y2],
+                width,
+                height,
+            )
+            if class_name is None:
+                continue
+            if not self.keep_detection_class(raw_class_name, class_name):
+                continue
             det = {
                 "class_name": class_name,
                 "confidence": round(confidence, 3),
                 "bbox": [x1, y1, x2, y2],
-                "source": "yolo",
+                "source": "yolo_obstacle" if is_obstacle else "yolo",
                 "model": self.yolo_model_path,
+                "raw_class_name": raw_class_name,
             }
             if track_ids is not None and index < len(track_ids):
                 det["track_id"] = int(track_ids[index].item())
             detections.append(det)
         return detections
+
+    def map_yolo_class(self, raw_class_name, bbox, width, height):
+        """Map COCO/custom YOLO classes that block passage to project obstacle."""
+        if not self.obstacle_alias_enabled:
+            return raw_class_name, False
+        if self.class_key(raw_class_name) not in self.obstacle_class_set:
+            return raw_class_name, False
+
+        if self.obstacle_min_area_ratio > 0:
+            x1, y1, x2, y2 = [float(v) for v in bbox]
+            bbox_area = max(0.0, x2 - x1) * max(0.0, y2 - y1)
+            frame_area = float(max(1, width * height))
+            if bbox_area / frame_area < self.obstacle_min_area_ratio:
+                return None, False
+
+        return "obstacle", True
+
+    def keep_detection_class(self, raw_class_name, class_name):
+        if not self.target_classes:
+            return True
+        target_keys = {self.class_key(item) for item in self.target_classes}
+        return (
+            self.class_key(class_name) in target_keys
+            or self.class_key(raw_class_name) in target_keys
+        )
 
     def run_road_detection(self, frame):
         if not self.enable_road_detection or frame is None or cv2 is None or np is None:
@@ -372,6 +444,9 @@ class VisionNode(Node):
                 continue
             x1, y1, x2, y2 = [int(v) for v in bbox]
             label = det.get("class_name", "object")
+            raw_label = det.get("raw_class_name", "")
+            if raw_label and raw_label != label:
+                label = f"{label}:{raw_label}"
             conf = det.get("confidence", 0.0)
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
             cv2.putText(
@@ -419,6 +494,10 @@ class VisionNode(Node):
         if isinstance(value, (list, tuple)):
             return [str(item).strip() for item in value if str(item).strip()]
         return []
+
+    @staticmethod
+    def class_key(value):
+        return str(value).strip().lower()
 
 
 def main(args=None):
