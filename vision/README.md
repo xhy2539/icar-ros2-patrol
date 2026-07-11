@@ -148,6 +148,34 @@ ros2 topic pub --once /vision/capture_command std_msgs/String \
   "{data: '{\"action\":\"stop\"}'}"
 ```
 
+## Local Webcam Test
+
+For quick local validation without ROS2 or a VM, use the Windows Python webcam
+script:
+
+```bash
+cd D:\北交大两周项目\code_repos\icar-ros2-patrol-yolo-obstacle
+python vision\local_webcam_detect.py --backend yolo --model yolo11n.pt --camera 0
+```
+
+The first run may download `yolo11n.pt`. Put common blocking objects such as a
+chair, backpack, suitcase, bottle, bed, couch, or table in front of the camera;
+the script publishes them visually as `obstacle:<raw_yolo_class>` on the preview
+window. Press `s` to save a screenshot and JSON result, and `q` to quit.
+
+Headless one-frame check:
+
+```bash
+python vision\local_webcam_detect.py --backend yolo --model yolo11n.pt \
+  --camera 0 --frames 1 --no-window
+```
+
+Fallback without a YOLO model:
+
+```bash
+python vision\local_webcam_detect.py --backend color --camera 0
+```
+
 ## Car Usage
 
 Use the team-agreed container flow. Do not run camera commands on the host.
