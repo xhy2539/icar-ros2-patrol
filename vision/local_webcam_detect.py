@@ -32,6 +32,14 @@ DEFAULT_OBSTACLE_CLASSES = [
     "stroller",
 ]
 
+DEFAULT_WATER_CLASSES = [
+    "water puddle",
+    "puddle",
+    "standing water",
+    "wet floor",
+    "water on floor",
+]
+
 
 def parse_list(value):
     if not value:
@@ -59,7 +67,10 @@ class LocalWebcamDetector:
     def __init__(self, args):
         self.args = args
         self.model = None
+        self.water_model = None
+        self.water_uses_world_prompts = False
         self.obstacle_classes = {class_key(item) for item in args.obstacle_classes}
+        self.water_classes = [item for item in args.water_classes if item]
         self.target_classes = {class_key(item) for item in args.target_classes}
         self.save_dir = Path(args.save_dir)
         self.save_dir.mkdir(parents=True, exist_ok=True)
@@ -69,21 +80,46 @@ class LocalWebcamDetector:
 
     def load_model(self):
         if self.args.backend == "color":
+            self.load_water_model()
             return
-        if not self.args.model:
-            if self.args.backend == "yolo":
-                raise RuntimeError("--backend yolo requires --model, for example yolo11n.pt")
+        if self.args.model:
+            if YOLO is None:
+                if self.args.backend == "yolo":
+                    raise RuntimeError("ultralytics is not installed")
+            else:
+                self.model = YOLO(self.args.model)
+        elif self.args.backend == "yolo":
+            raise RuntimeError("--backend yolo requires --model, for example yolo11n.pt")
+
+        self.load_water_model()
+
+    def load_water_model(self):
+        if self.args.water_backend == "none":
+            return
+        if not self.args.water_model:
             return
         if YOLO is None:
-            if self.args.backend == "yolo":
-                raise RuntimeError("ultralytics is not installed")
-            return
-        self.model = YOLO(self.args.model)
+            raise RuntimeError("ultralytics is required for --water-model")
+        self.water_model = YOLO(self.args.water_model)
+        set_classes = getattr(self.water_model, "set_classes", None)
+        if callable(set_classes) and self.water_classes:
+            set_classes(self.water_classes)
+            self.water_uses_world_prompts = True
+        elif self.args.water_backend == "world":
+            print(
+                "warning: --water-backend world was requested, but this model "
+                "does not support set_classes"
+            )
 
     def detect(self, frame):
+        detections = []
         if self.model is not None:
-            return self.detect_yolo(frame)
-        return self.detect_color(frame)
+            detections.extend(self.detect_yolo(frame))
+        else:
+            detections.extend(self.detect_color(frame))
+        if self.water_model is not None:
+            detections.extend(self.detect_water(frame))
+        return detections
 
     def detect_yolo(self, frame):
         results = self.model.predict(
@@ -136,6 +172,60 @@ class LocalWebcamDetector:
         if bbox_area / frame_area < self.args.obstacle_min_area_ratio:
             return None, "yolo_obstacle_too_small"
         return "obstacle", "yolo_obstacle"
+
+    def detect_water(self, frame):
+        results = self.water_model.predict(
+            frame,
+            imgsz=self.args.water_imgsz,
+            conf=self.args.water_conf,
+            iou=self.args.water_iou,
+            device=self.args.water_device or self.args.device or None,
+            verbose=False,
+        )
+        if not results:
+            return []
+
+        result = results[0]
+        names = getattr(result, "names", {}) or {}
+        boxes = getattr(result, "boxes", None)
+        if boxes is None:
+            return []
+
+        height, width = frame.shape[:2]
+        frame_area = float(max(1, width * height))
+        detections = []
+        for box in boxes:
+            cls_id = int(box.cls[0].item())
+            raw_class = str(names.get(cls_id, cls_id))
+            confidence = float(box.conf[0].item())
+            x1, y1, x2, y2 = [int(round(v)) for v in box.xyxy[0].tolist()]
+            bbox_area = max(0.0, float(x2 - x1)) * max(0.0, float(y2 - y1))
+            if (
+                self.args.water_min_area_ratio > 0
+                and bbox_area / frame_area < self.args.water_min_area_ratio
+            ):
+                continue
+            water_class = self.args.water_class_name
+            if (
+                self.target_classes
+                and class_key(water_class) not in self.target_classes
+                and class_key(raw_class) not in self.target_classes
+            ):
+                continue
+            detections.append(
+                {
+                    "class_name": water_class,
+                    "raw_class_name": raw_class,
+                    "confidence": round(confidence, 3),
+                    "bbox": [x1, y1, x2, y2],
+                    "source": (
+                        "yolo_world_water"
+                        if self.water_uses_world_prompts
+                        else "yolo_water"
+                    ),
+                }
+            )
+        return detections
 
     def detect_color(self, frame):
         color_specs = [
@@ -198,7 +288,7 @@ class LocalWebcamDetector:
         self.last_print_at = now
         payload = {
             "frame": self.frame_index,
-            "backend": "yolo" if self.model is not None else "color",
+            "backend": self.active_backend(),
             "detections": detections,
         }
         print(json.dumps(payload, ensure_ascii=False))
@@ -210,6 +300,12 @@ class LocalWebcamDetector:
         cv2.imwrite(str(image_path), frame)
         json_path.write_text(json.dumps(detections, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"saved {image_path}")
+
+    def active_backend(self):
+        backend = "yolo" if self.model is not None else "color"
+        if self.water_model is not None:
+            backend = f"{backend}+water_{self.args.water_backend}"
+        return backend
 
 
 def open_camera(camera_index, width, height):
@@ -246,6 +342,19 @@ def build_arg_parser():
         help="Comma list of YOLO classes to publish as obstacle",
     )
     parser.add_argument("--obstacle-min-area-ratio", type=float, default=0.003)
+    parser.add_argument("--water-backend", choices=["none", "auto", "world", "yolo"], default="auto")
+    parser.add_argument("--water-model", default="", help="YOLO-World/custom water model path")
+    parser.add_argument(
+        "--water-classes",
+        default=",".join(DEFAULT_WATER_CLASSES),
+        help="Comma list of YOLO-World text prompts for puddle/water detection",
+    )
+    parser.add_argument("--water-class-name", default="water")
+    parser.add_argument("--water-conf", type=float, default=0.15)
+    parser.add_argument("--water-iou", type=float, default=0.5)
+    parser.add_argument("--water-imgsz", type=int, default=640)
+    parser.add_argument("--water-device", default="")
+    parser.add_argument("--water-min-area-ratio", type=float, default=0.002)
     parser.add_argument("--min-color-area", type=float, default=600.0)
     parser.add_argument("--save-dir", default="local_detection_samples")
     parser.add_argument("--frames", type=int, default=0, help="Stop after N frames; 0 means live")
@@ -258,6 +367,8 @@ def main():
     args = build_arg_parser().parse_args()
     args.target_classes = parse_list(args.target_classes)
     args.obstacle_classes = parse_list(args.obstacle_classes)
+    args.water_classes = parse_list(args.water_classes)
+    args.water_class_name = args.water_class_name.strip() or "water"
 
     detector = LocalWebcamDetector(args)
     cap = open_camera(args.camera, args.width, args.height)

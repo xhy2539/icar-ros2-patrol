@@ -51,6 +51,14 @@ DEFAULT_OBSTACLE_CLASSES = [
     "stroller",
 ]
 
+DEFAULT_WATER_CLASSES = [
+    "water puddle",
+    "puddle",
+    "standing water",
+    "wet floor",
+    "water on floor",
+]
+
 
 def image_qos(depth=5):
     return QoSProfile(
@@ -85,6 +93,15 @@ class VisionNode(Node):
         self.declare_parameter("obstacle_alias_enabled", True)
         self.declare_parameter("obstacle_classes", DEFAULT_OBSTACLE_CLASSES)
         self.declare_parameter("obstacle_min_area_ratio", 0.003)
+        self.declare_parameter("water_detector_backend", "auto")
+        self.declare_parameter("water_model", "")
+        self.declare_parameter("water_classes", DEFAULT_WATER_CLASSES)
+        self.declare_parameter("water_confidence", 0.15)
+        self.declare_parameter("water_iou", 0.5)
+        self.declare_parameter("water_imgsz", 640)
+        self.declare_parameter("water_device", "")
+        self.declare_parameter("water_min_area_ratio", 0.002)
+        self.declare_parameter("water_class_name", "water")
 
         self.image_topic = self.get_parameter("image_topic").value
         self.detections_topic = self.get_parameter("detections_topic").value
@@ -118,11 +135,30 @@ class VisionNode(Node):
         self.obstacle_min_area_ratio = float(
             self.get_parameter("obstacle_min_area_ratio").value
         )
+        self.water_detector_backend = str(
+            self.get_parameter("water_detector_backend").value
+        ).lower()
+        self.water_model_path = str(self.get_parameter("water_model").value).strip()
+        self.water_classes = self.normalize_class_list(
+            self.get_parameter("water_classes").value
+        )
+        self.water_confidence = float(self.get_parameter("water_confidence").value)
+        self.water_iou = float(self.get_parameter("water_iou").value)
+        self.water_imgsz = int(self.get_parameter("water_imgsz").value)
+        self.water_device = str(self.get_parameter("water_device").value).strip()
+        self.water_min_area_ratio = float(
+            self.get_parameter("water_min_area_ratio").value
+        )
+        self.water_class_name = (
+            str(self.get_parameter("water_class_name").value).strip() or "water"
+        )
 
         self.bridge = CvBridge() if CvBridge else None
         self.frame_count = 0
         self.started_at = time.monotonic()
         self.yolo_model = None
+        self.water_model = None
+        self.water_uses_world_prompts = False
         self.yolo_unavailable_logged = False
         self.typed_detections_available = Detection is not None and DetectionArray is not None
 
@@ -161,6 +197,7 @@ class VisionNode(Node):
                 "cv_bridge is unavailable; publishing metadata-only detections"
             )
         self.load_yolo_if_requested()
+        self.load_water_model_if_requested()
 
     def load_yolo_if_requested(self):
         if self.detector_backend not in ("auto", "yolo"):
@@ -191,6 +228,40 @@ class VisionNode(Node):
                 "falling back to lightweight color detector"
             )
 
+    def load_water_model_if_requested(self):
+        if self.water_detector_backend == "none":
+            return
+        if not self.water_model_path:
+            return
+        if YOLO is None:
+            self.get_logger().warning(
+                "ultralytics is not installed; water detector is disabled"
+            )
+            return
+        try:
+            self.water_model = YOLO(self.water_model_path)
+            set_classes = getattr(self.water_model, "set_classes", None)
+            if callable(set_classes) and self.water_classes:
+                set_classes(self.water_classes)
+                self.water_uses_world_prompts = True
+            elif self.water_detector_backend == "world":
+                self.get_logger().warning(
+                    "water_detector_backend=world but this model does not support "
+                    "set_classes; use a YOLO-World checkpoint or a custom water model"
+                )
+            self.get_logger().info(
+                f"Loaded water detector: {self.water_model_path}; "
+                f"backend={self.water_detector_backend}; "
+                f"classes={self.water_classes or 'model default'}; "
+                f"device={self.water_device or self.yolo_device or 'auto'}"
+            )
+        except Exception as exc:  # pylint: disable=broad-except
+            self.water_model = None
+            self.get_logger().warning(
+                f"failed to load water model '{self.water_model_path}': {exc}; "
+                "water detector is disabled"
+            )
+
     def on_image(self, msg):
         self.frame_count += 1
         frame = self.to_cv_frame(msg)
@@ -217,6 +288,10 @@ class VisionNode(Node):
                 "backend": self.active_backend(),
                 "model": self.yolo_model_path if self.yolo_model is not None else "",
                 "target_classes": self.target_classes,
+                "water_model": (
+                    self.water_model_path if self.water_model is not None else ""
+                ),
+                "water_classes": self.water_classes,
             },
             "detections": detections,
             "road": road,
@@ -245,13 +320,21 @@ class VisionNode(Node):
         if frame is None or cv2 is None or np is None:
             return []
         if self.yolo_model is not None:
-            return self.run_yolo_detection(frame)
-        if self.detector_backend == "yolo" and not self.yolo_unavailable_logged:
-            self.yolo_unavailable_logged = True
-            self.get_logger().warning(
-                "YOLO backend requested but no model is available; using color detector"
-            )
-        # Lightweight simulation detector. YOLO can replace this method later.
+            detections = self.run_yolo_detection(frame)
+        else:
+            if self.detector_backend == "yolo" and not self.yolo_unavailable_logged:
+                self.yolo_unavailable_logged = True
+                self.get_logger().warning(
+                    "YOLO backend requested but no model is available; using color detector"
+                )
+            detections = self.run_color_detection(frame)
+
+        if self.water_model is not None:
+            detections.extend(self.run_water_detection(frame))
+        return detections
+
+    def run_color_detection(self, frame):
+        # Lightweight simulation detector for no-model ROS2 chain checks.
         color_specs = [
             ("obstacle", (0, 90, 90), (10, 255, 255), "red"),
             ("obstacle", (170, 90, 90), (180, 255, 255), "red"),
@@ -365,6 +448,62 @@ class VisionNode(Node):
             if track_ids is not None and index < len(track_ids):
                 det["track_id"] = int(track_ids[index].item())
             detections.append(det)
+        return detections
+
+    def run_water_detection(self, frame):
+        kwargs = {
+            "imgsz": self.water_imgsz,
+            "conf": self.water_confidence,
+            "iou": self.water_iou,
+            "verbose": False,
+        }
+        device = self.water_device or self.yolo_device
+        if device:
+            kwargs["device"] = device
+        try:
+            results = self.water_model.predict(frame, **kwargs)
+        except Exception as exc:  # pylint: disable=broad-except
+            self.get_logger().warning(f"water detector inference failed: {exc}")
+            return []
+        if not results:
+            return []
+
+        result = results[0]
+        names = getattr(result, "names", {}) or {}
+        boxes = getattr(result, "boxes", None)
+        if boxes is None:
+            return []
+
+        height, width = frame.shape[:2]
+        frame_area = float(max(1, width * height))
+        detections = []
+        for box in boxes:
+            cls_id = int(box.cls[0].item())
+            confidence = float(box.conf[0].item())
+            x1, y1, x2, y2 = [int(round(v)) for v in box.xyxy[0].tolist()]
+            bbox_area = max(0.0, float(x2 - x1)) * max(0.0, float(y2 - y1))
+            if (
+                self.water_min_area_ratio > 0
+                and bbox_area / frame_area < self.water_min_area_ratio
+            ):
+                continue
+            raw_class_name = str(names.get(cls_id, cls_id))
+            if not self.keep_detection_class(raw_class_name, self.water_class_name):
+                continue
+            detections.append(
+                {
+                    "class_name": self.water_class_name,
+                    "confidence": round(confidence, 3),
+                    "bbox": [x1, y1, x2, y2],
+                    "source": (
+                        "yolo_world_water"
+                        if self.water_uses_world_prompts
+                        else "yolo_water"
+                    ),
+                    "model": self.water_model_path,
+                    "raw_class_name": raw_class_name,
+                }
+            )
         return detections
 
     def map_yolo_class(self, raw_class_name, bbox, width, height):
@@ -481,9 +620,12 @@ class VisionNode(Node):
         return frame
 
     def active_backend(self):
+        suffix = ""
+        if self.water_model is not None:
+            suffix = f"+water_{self.water_detector_backend}"
         if self.yolo_model is not None:
-            return "yolo"
-        return "color"
+            return f"yolo{suffix}"
+        return f"color{suffix}"
 
     @staticmethod
     def normalize_class_list(value):
