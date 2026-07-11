@@ -41,6 +41,8 @@ from icar_interfaces.msg import (
     EnvData,
     SensorAlert,
 )
+from icar_interfaces.srv import TaskControl
+from task_manager.task_control_logic import plan_task_control
 
 
 # ---------------------------------------------------------------------------
@@ -63,10 +65,10 @@ class PatrolState(Enum):
 ALLOWED_TRANSITIONS = {
     PatrolState.PENDING:    [PatrolState.RUNNING, PatrolState.CANCELLED],
     PatrolState.RUNNING:    [PatrolState.NAVIGATING, PatrolState.CANCELLED, PatrolState.FAILED],
-    PatrolState.NAVIGATING: [PatrolState.CHECKPOINT, PatrolState.FAILED],
-    PatrolState.CHECKPOINT: [PatrolState.DETECTING, PatrolState.COLLECTING, PatrolState.FAILED],
-    PatrolState.DETECTING:  [PatrolState.COLLECTING, PatrolState.FAILED],
-    PatrolState.COLLECTING: [PatrolState.NAVIGATING, PatrolState.COMPLETED, PatrolState.FAILED],
+    PatrolState.NAVIGATING: [PatrolState.CHECKPOINT, PatrolState.CANCELLED, PatrolState.FAILED],
+    PatrolState.CHECKPOINT: [PatrolState.DETECTING, PatrolState.COLLECTING, PatrolState.CANCELLED, PatrolState.FAILED],
+    PatrolState.DETECTING:  [PatrolState.COLLECTING, PatrolState.CANCELLED, PatrolState.FAILED],
+    PatrolState.COLLECTING: [PatrolState.NAVIGATING, PatrolState.COMPLETED, PatrolState.CANCELLED, PatrolState.FAILED],
     PatrolState.COMPLETED:  [PatrolState.PENDING],   # 允许复位接受新任务
     PatrolState.FAILED:     [PatrolState.PENDING],   # 允许复位接受新任务
     PatrolState.CANCELLED:  [PatrolState.PENDING],   # 允许复位接受新任务
@@ -138,6 +140,10 @@ class TaskManagerNode(Node):
 
         self.alert_sub = self.create_subscription(
             SensorAlert, '/sensor/alert', self._on_sensor_alert, reliable_qos)
+
+        # ---- 服务 ----
+        self.task_control_srv = self.create_service(
+            TaskControl, '/task/control', self._on_task_control)
 
         # ---- 发布者 ----
         self.status_pub = self.create_publisher(
@@ -269,6 +275,41 @@ class TaskManagerNode(Node):
         })
 
         self._transition_to(PatrolState.RUNNING)
+
+    def _on_task_control(self, request, response):
+        """LLM/APP/cloud safe control entry; never exposes raw /cmd_vel control."""
+        plan = plan_task_control(
+            action=request.action,
+            state=self.state.value,
+            task_id=self.current_task_id,
+            route=self.route,
+            route_index=self.route_index,
+            emergency_stop_active=self.emergency_stop_active,
+        )
+
+        if plan.should_stop:
+            self._emergency_stop(request.reason or plan.message)
+
+        if plan.emergency_stop_active is not None:
+            self.emergency_stop_active = plan.emergency_stop_active
+
+        if plan.next_state:
+            self._transition_to(PatrolState(plan.next_state))
+
+        self._log_event(plan.event_type, {
+            "action": request.action,
+            "reason": request.reason,
+            "payload_json": request.payload_json,
+            "result": plan.message,
+        }, severity=plan.severity)
+        self._publish_status()
+
+        response.success = plan.success
+        response.message = plan.message
+        response.task_id = plan.task_id
+        response.status = self.state.value
+        response.data_json = plan.data_json
+        return response
 
     def _on_nav_status(self, msg: NavStatus):
         """导航状态更新"""

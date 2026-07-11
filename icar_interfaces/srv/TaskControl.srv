@@ -1,0 +1,11 @@
+# TaskControl.srv - safe task control entry for app/cloud/LLM gateway
+
+string action        # get_status/status, stop/emergency_stop, cancel, reset
+string reason        # operator or LLM-visible reason
+string payload_json  # optional structured metadata from caller
+---
+bool success
+string message
+string task_id
+string status
+string data_json
