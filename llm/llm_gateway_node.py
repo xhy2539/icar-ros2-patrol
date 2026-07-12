@@ -1,6 +1,10 @@
 """
-LLM Gateway Node - LLM模块主入口
-=================================
+LLM Gateway Node - LLM模块主入口（⚠️ 已合并到 ROS2 Package）
+===========================================================
+本文件是早期原型，仅供开发测试参考。
+生产节点：llm/llm_gateway/llm_gateway/llm_gateway_node.py
+启动方式：ros2 run llm_gateway llm_gateway_node
+
 功能：
   - 将用户自然语言指令通过DeepSeek API转换为结构化任务
   - 支持两种模式：

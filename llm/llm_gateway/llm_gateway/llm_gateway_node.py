@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""ROS2 LLM gateway.
+"""ROS2 LLM gateway — 合并版。
 
-The node keeps the LLM layer behind services. It never publishes /cmd_vel.
-The first implementation is a deterministic fallback so integration tests can
-run without network or model-server availability.
+- /llm/parse_task:  DeepSeek API 优先，规则兜底
+- /llm/generate_report: DeepSeek API 优先，模板兜底
+- 订阅 /task/log 累积日志用于报告生成
+
+安全约束：不发布 /cmd_vel，不绕过 task_manager_node。
 """
 
 import json
@@ -17,28 +19,74 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy
 from icar_interfaces.msg import TaskLog
 from icar_interfaces.srv import GenerateReport, ParseTask
 
+# ---------------------------------------------------------------------------
+# 可选依赖
+# ---------------------------------------------------------------------------
+_DEEPSEEK_AVAILABLE = False
+DeepSeekClient = None
+extract_json_from_response = None
 
+try:
+    from .deepseek_client import DeepSeekClient as _DeepSeekClient
+    DeepSeekClient = _DeepSeekClient
+    _DEEPSEEK_AVAILABLE = True
+except ImportError:
+    pass
+
+try:
+    from .json_protocol import extract_json_from_response as _extract
+    extract_json_from_response = _extract
+except ImportError:
+    pass
+
+if extract_json_from_response is None:
+    def extract_json_from_response(text: str) -> str:
+        """从 LLM 响应中提取首个 JSON 对象。"""
+        start = text.find("{")
+        end = text.rfind("}") + 1
+        if start == -1 or end == 0:
+            raise ValueError("No JSON found in response")
+        return text[start:end]
+
+
+# ---------------------------------------------------------------------------
+# 常量
+# ---------------------------------------------------------------------------
 DEFAULT_ACTIONS = ["navigate", "avoid_obstacle", "detect_object", "collect_sensor"]
 ALLOWED_ACTIONS = set(DEFAULT_ACTIONS)
 KNOWN_POINTS = ("A", "B", "C", "D", "E", "F")
 
 
+# ---------------------------------------------------------------------------
+# 节点
+# ---------------------------------------------------------------------------
 class LlmGatewayNode(Node):
     def __init__(self):
         super().__init__("llm_gateway_node")
-        self.declare_parameter("provider", "rule")
+
+        # 参数
+        self.declare_parameter("provider", "auto")       # auto | deepseek | rule
         self.declare_parameter("default_route", ["A", "B", "C"])
         self.declare_parameter("max_logs_per_task", 200)
 
-        self.provider = str(self.get_parameter("provider").value)
+        self._provider_cfg = str(self.get_parameter("provider").value)
         self.default_route = list(self.get_parameter("default_route").value)
         self.max_logs_per_task = int(self.get_parameter("max_logs_per_task").value)
 
-        qos = QoSProfile(depth=50, reliability=ReliabilityPolicy.RELIABLE)
+        # DeepSeek 客户端（延迟初始化）
+        self._client = None
+        self._api_ok = False
+
+        # 日志缓存
         self.logs_by_task = defaultdict(list)
+
+        # 订阅
+        qos = QoSProfile(depth=50, reliability=ReliabilityPolicy.RELIABLE)
         self.task_log_sub = self.create_subscription(
             TaskLog, "/task/log", self._on_task_log, qos
         )
+
+        # 服务
         self.parse_srv = self.create_service(
             ParseTask, "/llm/parse_task", self._on_parse_task
         )
@@ -46,10 +94,52 @@ class LlmGatewayNode(Node):
             GenerateReport, "/llm/generate_report", self._on_generate_report
         )
 
+        # 启动信息
+        effective = self._resolve_provider()
         self.get_logger().info(
-            f"llm_gateway_node ready, provider={self.provider}, "
-            "services=[/llm/parse_task,/llm/generate_report]"
+            f"llm_gateway_node ready, provider={effective}, "
+            f"api_available={self._api_ok}, "
+            f"services=[/llm/parse_task, /llm/generate_report]"
         )
+
+    # ── provider 决策 ──────────────────────────────────────────
+
+    def _resolve_provider(self) -> str:
+        """返回实际使用的 provider 名称。"""
+        if self._provider_cfg == "rule":
+            return "rule"
+
+        if self._provider_cfg == "deepseek":
+            self._ensure_client()
+            if self._api_ok:
+                return "deepseek"
+            self.get_logger().warn("provider=deepseek but API unavailable, falling back to rule")
+            return "rule"
+
+        # auto：有 API 就用，没有就规则
+        self._ensure_client()
+        if self._api_ok:
+            return "deepseek"
+        return "rule"
+
+    def _ensure_client(self):
+        if self._client is not None:
+            return
+        if not _DEEPSEEK_AVAILABLE:
+            self._api_ok = False
+            return
+        try:
+            self._client = DeepSeekClient()
+            self._api_ok = self._client.available
+        except Exception:
+            self._api_ok = False
+
+    @property
+    def _use_api(self) -> bool:
+        return self._api_ok and self._client is not None \
+            and self._resolve_provider() == "deepseek"
+
+    # ── /task/log 订阅 ─────────────────────────────────────────
 
     def _on_task_log(self, msg: TaskLog):
         record = {
@@ -67,6 +157,8 @@ class LlmGatewayNode(Node):
         if len(bucket) > self.max_logs_per_task:
             del bucket[: len(bucket) - self.max_logs_per_task]
 
+    # ── /llm/parse_task ────────────────────────────────────────
+
     def _on_parse_task(self, request, response):
         text = request.input_text.strip()
         if not text:
@@ -75,34 +167,48 @@ class LlmGatewayNode(Node):
             response.error_msg = "input_text is empty"
             return response
 
-        task = self._parse_task_by_rule(text)
+        task = None
+        used_provider = "rule"
+
+        if self._use_api:
+            task = self._parse_via_api(text)
+            if task is not None:
+                used_provider = "deepseek"
+
+        if task is None:
+            task = self._parse_task_by_rule(text)
+
+        # 统一注入 provider 信息
+        task.setdefault("params", {})
+        task["params"]["provider"] = used_provider
+
         response.task_json = json.dumps(task, ensure_ascii=False)
         response.success = True
         response.error_msg = ""
-        self.get_logger().info(f"parse_task: {text} -> {response.task_json}")
+        self.get_logger().info(
+            f"parse_task (provider={used_provider}): '{text[:60]}...' -> "
+            f"route={task.get('route')}, actions={task.get('actions')}"
+        )
         return response
 
-    def _on_generate_report(self, request, response):
-        logs = []
-        if request.logs_json.strip():
-            parsed = self._loads_json(request.logs_json)
-            if isinstance(parsed, list):
-                logs = parsed
-            elif isinstance(parsed, dict):
-                logs = parsed.get("logs", [])
-        elif request.task_id:
-            logs = list(self.logs_by_task.get(request.task_id, []))
+    def _parse_via_api(self, text: str):
+        """调用 DeepSeek 解析，成功返回 dict，失败返回 None。"""
+        try:
+            raw = self._client.parse_patrol_task(text)
+            if raw is None:
+                return None
+            json_str = extract_json_from_response(raw)
+            result = json.loads(json_str)
+            # 基本校验
+            if "task_type" not in result and "route" not in result:
+                self.get_logger().warn(f"API returned unexpected format: {json_str[:100]}")
+                return None
+            return result
+        except Exception as e:
+            self.get_logger().warn(f"DeepSeek parse failed, falling back to rule: {e}")
+            return None
 
-        if not logs:
-            response.report_text = ""
-            response.success = False
-            response.error_msg = "no logs available"
-            return response
-
-        response.report_text = self._build_report(request.task_id, logs)
-        response.success = True
-        response.error_msg = ""
-        return response
+    # ── 规则解析（与旧版兼容）──────────────────────────────────
 
     def _parse_task_by_rule(self, text):
         route = self._extract_route(text) or self.default_route
@@ -110,7 +216,6 @@ class LlmGatewayNode(Node):
         safety_rule = self._extract_safety_rule(text)
         params = {
             "source": "llm_gateway",
-            "provider": self.provider,
             "raw_text": text,
         }
         if "语音" in text or "说" in text:
@@ -138,14 +243,7 @@ class LlmGatewayNode(Node):
         if route:
             return route
 
-        cn_points = {
-            "一": "A",
-            "二": "B",
-            "三": "C",
-            "四": "D",
-            "五": "E",
-            "六": "F",
-        }
+        cn_points = {"一": "A", "二": "B", "三": "C", "四": "D", "五": "E", "六": "F"}
         for key, value in cn_points.items():
             if f"{key}号" in text or f"{key}点" in text:
                 route.append(value)
@@ -175,6 +273,68 @@ class LlmGatewayNode(Node):
             rules.append("收到停止指令立即停止")
         return "；".join(rules) if rules else "遵循 task_manager 安全白名单"
 
+    # ── /llm/generate_report ───────────────────────────────────
+
+    def _on_generate_report(self, request, response):
+        logs = []
+        if request.logs_json.strip():
+            parsed = self._loads_json(request.logs_json)
+            if isinstance(parsed, list):
+                logs = parsed
+            elif isinstance(parsed, dict):
+                logs = parsed.get("logs", [])
+        elif request.task_id:
+            logs = list(self.logs_by_task.get(request.task_id, []))
+
+        if not logs:
+            response.report_text = ""
+            response.success = False
+            response.error_msg = "no logs available"
+            return response
+
+        used_provider = "template"
+        report_text = None
+
+        if self._use_api:
+            report_text = self._report_via_api(request.task_id, logs)
+            if report_text is not None:
+                used_provider = "deepseek"
+
+        if report_text is None:
+            report_text = self._build_report(request.task_id, logs)
+
+        response.report_text = report_text
+        response.success = True
+        response.error_msg = ""
+        self.get_logger().info(
+            f"generate_report (provider={used_provider}): "
+            f"task_id={request.task_id}, logs={len(logs)}"
+        )
+        return response
+
+    def _report_via_api(self, task_id, logs):
+        """调用 DeepSeek 生成报告，成功返回文本，失败返回 None。"""
+        try:
+            # 将结构化日志扁平化为文本
+            log_lines = []
+            for record in logs:
+                ts = record.get("timestamp", {})
+                sec = ts.get("sec", 0)
+                log_lines.append(
+                    f"[{sec}] {record.get('event_type','?')} "
+                    f"severity={record.get('severity','INFO')} "
+                    f"data={json.dumps(record.get('data',{}), ensure_ascii=False)}"
+                )
+            log_text = "\n".join(log_lines)
+
+            report = self._client.generate_report(log_text)
+            return report
+        except Exception as e:
+            self.get_logger().warn(f"DeepSeek report failed, falling back to template: {e}")
+            return None
+
+    # ── 模板报告生成（与旧版兼容）──────────────────────────────
+
     def _build_report(self, task_id, logs):
         checkpoints = []
         detections = []
@@ -203,7 +363,7 @@ class LlmGatewayNode(Node):
             if severity == "ERROR":
                 errors.append(data)
 
-        route_text = " -> ".join(checkpoints) if checkpoints else "未记录到到点事件"
+        route_text = " -> ".join(checkpoints) if checkpoints else "未记录到点事件"
         detection_text = "、".join(sorted(set(detections))) if detections else "无目标记录"
         task_text = task_id or self._infer_task_id(logs)
         result = "异常结束" if errors else "完成/未发现致命错误"
@@ -217,6 +377,8 @@ class LlmGatewayNode(Node):
             f"- 错误数量: {len(errors)}\n"
             f"- 日志事件数: {event_count}"
         )
+
+    # ── 工具方法 ──────────────────────────────────────────────
 
     @staticmethod
     def _infer_task_id(logs):
@@ -238,6 +400,9 @@ class LlmGatewayNode(Node):
             return {"raw": text}
 
 
+# ---------------------------------------------------------------------------
+# 入口
+# ---------------------------------------------------------------------------
 def main(args=None):
     rclpy.init(args=args)
     node = LlmGatewayNode()
