@@ -24,11 +24,7 @@ import uuid
 from enum import Enum
 
 import rclpy
-from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from builtin_interfaces.msg import Time as RosTime
-from geometry_msgs.msg import Twist
-from std_msgs.msg import Header
 
 # 自定义消息接口
 from icar_interfaces.msg import (
@@ -40,6 +36,12 @@ from icar_interfaces.msg import (
     DetectionArray,
     EnvData,
     SensorAlert,
+)
+from task_manager.navigation_goal_logic import (
+    UnknownCheckpointError,
+    goal_to_pose_payload,
+    load_navigation_checkpoints,
+    resolve_route_goals,
 )
 from icar_interfaces.srv import TaskControl
 from task_manager.task_control_logic import plan_task_control
@@ -106,6 +108,9 @@ class TaskManagerNode(Node):
         self.last_env_data = None      # 最新传感器数据
         self.last_detections = None    # 最新检测结果
         self.emergency_stop_active = False
+        self.checkpoints = load_navigation_checkpoints()
+        self.route_goals = []
+        self.goal_sent_for_index = None
 
         # ---- QoS ----
         reliable_qos = QoSProfile(
@@ -141,9 +146,6 @@ class TaskManagerNode(Node):
         self.alert_sub = self.create_subscription(
             SensorAlert, '/sensor/alert', self._on_sensor_alert, reliable_qos)
 
-        # ---- 服务 ----
-        self.task_control_srv = self.create_service(
-            TaskControl, '/task/control', self._on_task_control)
 
         # ---- 发布者 ----
         self.status_pub = self.create_publisher(
@@ -154,6 +156,9 @@ class TaskManagerNode(Node):
 
         self.cmd_vel_pub = self.create_publisher(
             Twist, '/cmd_vel', reliable_qos)
+
+        self.goal_pose_pub = self.create_publisher(
+            PoseStamped, '/goal_pose', reliable_qos)
 
         # ---- 定时器：状态机主循环 (10 Hz) ----
         self.loop_timer = self.create_timer(0.1, self._state_machine_loop)
@@ -267,6 +272,8 @@ class TaskManagerNode(Node):
         self.route = list(msg.route) if msg.route else []
         self.route_index = 0
         self.emergency_stop_active = False
+        self.route_goals = []
+        self.goal_sent_for_index = None
 
         self._log_event("TASK_RECEIVED", {
             "task_type": msg.task_type,
@@ -276,40 +283,6 @@ class TaskManagerNode(Node):
 
         self._transition_to(PatrolState.RUNNING)
 
-    def _on_task_control(self, request, response):
-        """LLM/APP/cloud safe control entry; never exposes raw /cmd_vel control."""
-        plan = plan_task_control(
-            action=request.action,
-            state=self.state.value,
-            task_id=self.current_task_id,
-            route=self.route,
-            route_index=self.route_index,
-            emergency_stop_active=self.emergency_stop_active,
-        )
-
-        if plan.should_stop:
-            self._emergency_stop(request.reason or plan.message)
-
-        if plan.emergency_stop_active is not None:
-            self.emergency_stop_active = plan.emergency_stop_active
-
-        if plan.next_state:
-            self._transition_to(PatrolState(plan.next_state))
-
-        self._log_event(plan.event_type, {
-            "action": request.action,
-            "reason": request.reason,
-            "payload_json": request.payload_json,
-            "result": plan.message,
-        }, severity=plan.severity)
-        self._publish_status()
-
-        response.success = plan.success
-        response.message = plan.message
-        response.task_id = plan.task_id
-        response.status = self.state.value
-        response.data_json = plan.data_json
-        return response
 
     def _on_nav_status(self, msg: NavStatus):
         """导航状态更新"""
@@ -419,11 +392,23 @@ class TaskManagerNode(Node):
             self._transition_to(PatrolState.FAILED)
             return
 
+        try:
+            self.route_goals = resolve_route_goals(self.route, self.checkpoints)
+        except UnknownCheckpointError as error:
+            self._log_event("TASK_REJECTED", {
+                "reason": "unknown_checkpoint",
+                "checkpoint": error.name,
+                "route": self.route,
+            }, severity="ERROR")
+            self._transition_to(PatrolState.FAILED)
+            return
+
         self._log_event("TASK_START", {
             "route": self.route,
             "total_checkpoints": len(self.route),
         })
         self.route_index = 0
+        self.goal_sent_for_index = None
         self._transition_to(PatrolState.NAVIGATING)
 
     def _handle_navigating(self):
@@ -431,9 +416,32 @@ class TaskManagerNode(Node):
         NAVIGATING → CHECKPOINT (由 _on_nav_status 触发)
         这里只做首次进入时的目标点下发
         """
-        # 目标点下发由 app_control_node 或本节点通过 /goal_pose 实现
-        # 导航到达事件由 _on_nav_status 回调处理
-        pass
+        if self.route_index >= len(self.route_goals):
+            self._transition_to(PatrolState.FAILED)
+            return
+        if self.goal_sent_for_index == self.route_index:
+            return
+
+        goal = self.route_goals[self.route_index]
+        payload = goal_to_pose_payload(goal)
+        message = PoseStamped()
+        message.header.stamp = self.get_clock().now().to_msg()
+        message.header.frame_id = payload["frame_id"]
+        message.pose.position.x = payload["position"]["x"]
+        message.pose.position.y = payload["position"]["y"]
+        message.pose.position.z = payload["position"]["z"]
+        message.pose.orientation.x = payload["orientation"]["x"]
+        message.pose.orientation.y = payload["orientation"]["y"]
+        message.pose.orientation.z = payload["orientation"]["z"]
+        message.pose.orientation.w = payload["orientation"]["w"]
+        self.goal_pose_pub.publish(message)
+        self.goal_sent_for_index = self.route_index
+        self._log_event("NAV_GOAL_SENT", {
+            "checkpoint": goal.name,
+            "x": goal.x,
+            "y": goal.y,
+            "yaw": goal.yaw,
+        })
 
     def _handle_checkpoint(self):
         """
@@ -518,6 +526,7 @@ class TaskManagerNode(Node):
         self.route_index += 1
         if self.route_index < len(self.route):
             # 前往下一个巡检点
+            self.goal_sent_for_index = None
             self._transition_to(PatrolState.NAVIGATING)
         else:
             # 所有巡检点已完成

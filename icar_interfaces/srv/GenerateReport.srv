@@ -1,8 +1,9 @@
 # GenerateReport.srv - LLM patrol report generation service
+# Server: llm_gateway_node
 
-string logs_json      # serialized task logs, detections, navigation, and sensor results
-string context_json   # optional scene/task metadata for report generation
+string task_id              # Optional task id. If empty, use logs_json only.
+string logs_json            # Optional JSON array of task logs.
 ---
-bool success
-string report_text
-string error_msg
+string report_text          # Generated patrol report text.
+bool success                # Whether report generation succeeded.
+string error_msg            # Error message when failed.

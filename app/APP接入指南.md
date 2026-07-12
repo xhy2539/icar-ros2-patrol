@@ -126,6 +126,43 @@ ws.send("stop");      // 停止
 // 预留 WebSocket 订阅 /task/status
 ```
 
+## 统一语音入口与意图路由
+
+正式 APP 只显示一个“开始对话”入口，不让老人选择半双工、全双工或控制模式。
+APP 将平台 ASR 或语音网关得到的用户文本发布到 `/voice/user_text`：
+
+```json
+{
+  "text": "请开始巡检二楼走廊",
+  "session_id": "voice_20260711_001",
+  "timestamp": 1783753200
+}
+```
+
+`voice_command_router_node` 自动发布 `/voice/intent`：
+
+```json
+{
+  "intent": "robot_task",
+  "confidence": 0.9,
+  "requires_confirmation": true,
+  "interaction": "confirm",
+  "text": "请开始巡检二楼走廊",
+  "source": "voice"
+}
+```
+
+意图处理规则：
+
+| intent | APP 行为 | 是否等待 LLM |
+|---|---|---|
+| `chat` | 保持语音对话 | 是 |
+| `robot_task` | 显示/播报任务确认，确认后下发任务 | 是 |
+| `care_alert` | 通知工作人员并向老人反馈 | 否 |
+| `emergency` | 立即打断播放、触发急停和告警 | 否 |
+
+APP 不发送 `/cmd_vel`。运动任务始终经过任务确认、`task_manager` 和安全白名单。
+
 ## 四、注意事项
 
 1. **必须在同一局域网**，小车和手机连同一个 WiFi/热点。

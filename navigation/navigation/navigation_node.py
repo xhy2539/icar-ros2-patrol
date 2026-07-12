@@ -17,12 +17,14 @@ for path in (CURRENT_DIR, PARENT_DIR):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from navigation_utils import clamp, distance_between, load_checkpoints, load_nav_scenarios, quaternion_to_yaw
+from navigation_utils import distance_between, load_checkpoints, load_nav_scenarios, quaternion_to_yaw
+from navigation_mode_logic import plan_navigation_status
 
 
 class NavigationNode(Node):
-    def __init__(self, scenario_name: str):
+    def __init__(self, scenario_name: str, mode: str):
         super().__init__("navigation_node")
+        self.mode = mode
         _, checkpoints = load_checkpoints()
         scenario_config = load_nav_scenarios()
 
@@ -56,7 +58,7 @@ class NavigationNode(Node):
         self.create_subscription(LaserScan, "/scan", self.on_scan, 10)
         self.timer = self.create_timer(0.5, self.on_timer)
 
-        self.get_logger().info(f"Navigation node started in mock data mode: {self.scenario_name}")
+        self.get_logger().info(f"Navigation node started in {self.mode} mode: {self.scenario_name}")
 
     def on_goal_pose(self, message: PoseStamped):
         self.active_goal = {
@@ -150,43 +152,43 @@ class NavigationNode(Node):
         fail_after_sec = self.scenario.get("fail_after_sec")
         obstacle_fail_after_sec = float(self.scenario.get("obstacle_fail_after_sec", 999.0))
 
-        progress = clamp(elapsed / duration_sec, 0.0, 1.0)
         total_distance = distance_between(self.goal_start_pose, self.active_goal)
-        distance_remain = total_distance * (1.0 - progress)
-
         risk_level = self.current_obstacle.risk_level if self.current_obstacle else "safe"
         if risk_level == "danger":
             if self.danger_since is None:
                 self.danger_since = now
-            if now - self.danger_since >= obstacle_fail_after_sec:
-                self.finish_goal("FAILED", "navigation failed because obstacle remained danger too long", progress)
-                self.publish_status("FAILED", progress, max(distance_remain, 0.0), self.result_message)
-                return
-            self.publish_status("NAVIGATING", progress, distance_remain, "obstacle detected, holding navigation state")
+            danger_elapsed = now - self.danger_since
+        else:
+            self.danger_since = None
+            danger_elapsed = 0.0
+
+        plan = plan_navigation_status(
+            mode=self.mode,
+            elapsed_sec=elapsed,
+            duration_sec=duration_sec,
+            total_distance=total_distance,
+            obstacle_risk=risk_level,
+            danger_elapsed_sec=danger_elapsed,
+            obstacle_fail_after_sec=obstacle_fail_after_sec,
+            fail_after_sec=fail_after_sec,
+        )
+
+        if plan.status in ("ARRIVED", "FAILED"):
+            self.finish_goal(plan.status, plan.message, plan.progress)
+            self.publish_status(plan.status, plan.progress, plan.distance_remain, self.result_message)
             return
 
-        self.danger_since = None
-
-        if fail_after_sec is not None and elapsed >= float(fail_after_sec):
-            self.finish_goal("FAILED", "navigation timeout in mock scenario", progress)
-            self.publish_status("FAILED", progress, max(distance_remain, 0.0), self.result_message)
-            return
-
-        if elapsed >= duration_sec:
-            self.finish_goal("ARRIVED", "mock goal reached", 1.0)
-            self.publish_status("ARRIVED", 1.0, 0.0, self.result_message)
-            return
-
-        self.publish_status("NAVIGATING", progress, distance_remain, "mock navigation in progress")
+        self.publish_status(plan.status, plan.progress, plan.distance_remain, plan.message)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Navigation node running with mock data mode")
+    parser = argparse.ArgumentParser(description="Navigation node running with mock or real-ready mode")
+    parser.add_argument("--mode", choices=["mock", "real"], default="mock", help="mock simulates results; real waits for external navigation feedback")
     parser.add_argument("--scenario", default="success", help="Navigation scenario defined in nav_scenarios.yaml")
     args = parser.parse_args()
 
     rclpy.init()
-    node = NavigationNode(args.scenario)
+    node = NavigationNode(args.scenario, args.mode)
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
