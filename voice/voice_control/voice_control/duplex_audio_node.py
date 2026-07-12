@@ -168,12 +168,35 @@ class DuplexAudioNode(Node):
             device=input_device,
             callback=self._on_input,
         )
-        self._output_stream = sd.RawOutputStream(
-            samplerate=24000,
-            channels=1,
-            dtype="float32",
-            device=output_device,
-        )
+        # 尝试 24kHz，失败则回退到设备原生采样率 + 重采样
+        self._output_samplerate = 24000
+        self._resample_ratio = 1.0
+        try:
+            self._output_stream = sd.RawOutputStream(
+                samplerate=24000,
+                channels=1,
+                dtype="float32",
+                device=output_device,
+            )
+        except Exception:
+            # 回退：用 sounddevice 查询设备支持的采样率
+            try:
+                dev_info = sd.query_devices(device=output_device)
+                fallback_sr = int(dev_info.get("default_samplerate", 44100))
+            except Exception:
+                fallback_sr = 44100
+            self._output_samplerate = fallback_sr
+            self._resample_ratio = fallback_sr / 24000.0
+            self._output_stream = sd.RawOutputStream(
+                samplerate=fallback_sr,
+                channels=1,
+                dtype="float32",
+                device=output_device,
+            )
+            self.get_logger().info(
+                f"output device does not support 24kHz, "
+                f"resampling to {fallback_sr}Hz"
+            )
         self._input_stream.start()
         self._output_stream.start()
         threading.Thread(target=self._playback_worker, daemon=True).start()
@@ -271,6 +294,16 @@ class DuplexAudioNode(Node):
             except queue.Empty:
                 continue
             try:
+                if self._resample_ratio != 1.0:
+                    samples = np.frombuffer(data, dtype=np.float32)
+                    if len(samples) > 0:
+                        target_len = int(len(samples) * self._resample_ratio)
+                        resampled = np.interp(
+                            np.linspace(0, len(samples) - 1, target_len),
+                            np.arange(len(samples)),
+                            samples,
+                        ).astype(np.float32)
+                        data = resampled.tobytes()
                 self._output_stream.write(data)
             except Exception as exc:
                 self.get_logger().warning(f"audio playback failed: {exc}")
