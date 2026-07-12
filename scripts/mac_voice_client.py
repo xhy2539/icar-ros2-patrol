@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Mac → MiniCPM-o → 小车音箱 (全双工). 空格键=静音/取消静音"""
-import asyncio, websockets, json, base64, threading, socket, sys, time, subprocess, re
+import asyncio, websockets, json, base64, threading, socket, sys, time, subprocess, re, shlex
 import numpy as np, sounddevice as sd
 from pynput import keyboard as kb
 
@@ -22,13 +22,21 @@ def send_task_to_car(command_text):
     task_type = 'patrol'
     params = json.dumps({'source': 'voice', 'command': command_text}, ensure_ascii=False)
 
+    route_yaml = "[" + ",".join(route) + "]"
+    msg_yaml = (
+        f"{{task_type: {task_type}, route: {route_yaml}, "
+        f"params: {json.dumps(params, ensure_ascii=False)}}}"
+    )
+    ros_cmd = (
+        "source /opt/ros/foxy/setup.bash && "
+        "source /root/icar_ros2_ws/icar_ws/install/setup.bash && "
+        "ros2 topic pub --once /task/request icar_interfaces/msg/TaskRequest "
+        f"{shlex.quote(msg_yaml)}"
+    )
+    docker_cmd = f"docker exec icar_ros2 bash -c {shlex.quote(ros_cmd)}"
     cmd = (
-        f'sshpass -p "yahboom" ssh -o StrictHostKeyChecking=no jetson@{CAR_IP} '
-        f'"docker exec icar_ros2 bash -c '
-        f'\\'source /root/icar_ros2_ws/icar_ws/install/setup.bash && '
-        f'ros2 topic pub --once /task/request icar_interfaces/msg/TaskRequest '
-        f'\\"{{task_type: {task_type}, route: {str(route).replace(chr(32),\"\")}, params: {repr(params)}}}\\"\\''
-        f'"'
+        f'sshpass -p "yahboom" ssh -o StrictHostKeyChecking=no '
+        f"jetson@{CAR_IP} {shlex.quote(docker_cmd)}"
     )
     try:
         subprocess.run(cmd, shell=True, timeout=10, capture_output=True)
