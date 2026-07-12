@@ -185,7 +185,7 @@ class _MainScreenState extends State<MainScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('1. 确保手机和小车在同一网络下 (小车 IP: 10.90.164.83)',
+              Text('1. 连接 WiFi 热点 ohcar121 (密码 12345678)，小车 IP: 192.168.137.218',
                   style: TextStyle(color: AppColors.blueGrayDark, fontSize: 13)),
               SizedBox(height: 8),
               Text('2. 在控制页面输入小车 IP 地址并点击连接',

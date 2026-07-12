@@ -20,7 +20,7 @@ enum CarConnectionState {
 /// 用法：
 /// ```dart
 /// final service = CarWebSocketService();
-/// await service.connect('10.90.164.83');
+/// await service.connect('192.168.137.218');
 /// service.send('forward');
 /// ```
 class CarWebSocketService {
