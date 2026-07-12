@@ -589,10 +589,13 @@ class LlmGatewayNode(Node):
 
     def _build_report(self, task_id, logs):
         checkpoints = []
-        detections = []
+        detections_per_point = {}     # {checkpoint: [class_names]}
         warnings = []
         errors = []
+        current_point = "?"
         event_count = 0
+        start_time = ""
+        end_time = ""
 
         for record in logs:
             event_count += 1
@@ -601,38 +604,140 @@ class LlmGatewayNode(Node):
             data = record.get("data", {})
             if isinstance(data, str):
                 data = self._loads_json(data)
+            ts = record.get("timestamp", {})
+            sec = ts.get("sec", 0)
+
+            if event_type == "TASK_START" and not start_time:
+                start_time = self._fmt_time(sec)
+            if event_type in ("TASK_END", "COMPLETED") and not end_time:
+                end_time = self._fmt_time(sec)
 
             if event_type in ("CHECKPOINT_REACHED", "NAV_END"):
                 checkpoint = data.get("checkpoint") or data.get("target")
                 if checkpoint:
-                    checkpoints.append(str(checkpoint))
+                    cp = str(checkpoint)
+                    checkpoints.append(cp)
+                    current_point = cp
+                    if cp not in detections_per_point:
+                        detections_per_point[cp] = []
             if event_type == "VISION_DETECT":
                 for det in data.get("detections", []):
                     name = det.get("class") or det.get("class_name") or "unknown"
-                    detections.append(str(name))
+                    name_cn = self._translate_class(name)
+                    detections_per_point.setdefault(current_point, []).append(name_cn)
+                    detections.append(name_cn)
             if event_type == "ANOMALY" or severity == "WARN":
                 warnings.append(data)
             if severity == "ERROR":
                 errors.append(data)
 
-        route_text = " -> ".join(checkpoints) if checkpoints else "未记录到点事件"
-        detection_text = "、".join(sorted(set(detections))) if detections else "无目标记录"
-        task_text = task_id or self._infer_task_id(logs)
-        result = "异常结束" if errors else "完成/未发现致命错误"
+        # ── 构建护工友好报告 ──
+        lines = []
+        lines.append("══════════════════════════════════")
+        lines.append("      巡 检 交 班 报 告")
+        lines.append("══════════════════════════════════")
+        lines.append("")
 
-        return (
-            f"巡检报告 task_id={task_text}\n"
-            f"- 巡检结果: {result}\n"
-            f"- 巡检路线: {route_text}\n"
-            f"- 视觉结果: {detection_text}\n"
-            f"- 告警数量: {len(warnings)}\n"
-            f"- 错误数量: {len(errors)}\n"
-            f"- 日志事件数: {event_count}"
-        )
+        # 时间
+        if start_time:
+            lines.append(f"巡检时间: {start_time}")
+            if end_time:
+                lines.append(f"结束时间: {end_time}")
+            lines.append("")
+
+        # 一句话总结
+        has_problem = bool(errors) or bool(warnings)
+        if errors:
+            lines.append("【结论】本次巡检发现严重问题，需要立即处理！")
+        elif warnings:
+            lines.append("【结论】巡检基本正常，有少量注意事项。")
+        else:
+            lines.append("【结论】一切正常，无需额外处理。")
+        lines.append("")
+
+        # 巡视区域
+        if checkpoints:
+            lines.append(f"巡视区域（共{len(checkpoints)}处）: {' → '.join(checkpoints)}")
+            lines.append("")
+
+        # 各点详情
+        for cp in checkpoints:
+            lines.append(f"  {cp}点:")
+            dets = detections_per_point.get(cp, [])
+            if dets:
+                lines.append(f"    看到: {'、'.join(dets)}")
+            else:
+                lines.append(f"    未见异常")
+            lines.append("")
+
+        # 注意事项
+        if warnings:
+            lines.append("【需要注意】")
+            for w in warnings:
+                wtype = w.get("type", "")
+                if "temperature" in str(w) or "温度" in str(w):
+                    lines.append(f"  - 温度偏高，建议检查该区域通风和空调")
+                elif "smoke" in str(w) or "烟雾" in str(w):
+                    lines.append(f"  - ⚠️ 检测到烟雾，请立即到现场查看！")
+                elif "obstacle" in str(w) or "障碍" in str(w):
+                    lines.append(f"  - 走廊有障碍物，建议清理通道")
+                elif "water" in str(w) or "积水" in str(w):
+                    lines.append(f"  - 地面有积水，注意防滑，建议放置警示牌")
+                else:
+                    msg = w.get("message", str(w)[:80])
+                    lines.append(f"  - {msg}")
+            lines.append("")
+
+        if errors:
+            lines.append("【需要立即处理】")
+            for e in errors:
+                lines.append(f"  ⚠️ {e.get('message', str(e)[:100])}")
+            lines.append("")
+
+        # 交接建议
+        lines.append("【交接建议】")
+        if errors:
+            lines.append("  请接班同事优先处理以上紧急事项。")
+        elif warnings:
+            lines.append("  请接班同事留意以上注意事项，其余正常。")
+        else:
+            lines.append("  一切正常，按常规流程接班即可。")
+        lines.append("")
+        lines.append(f"（本报告由智能巡检系统自动生成，共记录{event_count}条事件）")
+
+        return "\n".join(lines)
 
     # ═══════════════════════════════════════════════════════════
     # 工具方法
     # ═══════════════════════════════════════════════════════════
+
+    @staticmethod
+    def _fmt_time(sec: int) -> str:
+        """将 Unix 时间戳转为可读时间字符串。"""
+        import datetime
+        try:
+            return datetime.datetime.fromtimestamp(sec).strftime("%Y-%m-%d %H:%M:%S")
+        except (OSError, ValueError):
+            return str(sec)
+
+    @staticmethod
+    def _translate_class(name: str) -> str:
+        """将英文类别名转成护工能看懂的中文。"""
+        mapping = {
+            "person": "行人",
+            "people": "行人",
+            "obstacle": "障碍物",
+            "water": "积水",
+            "puddle": "积水",
+            "sign": "标识牌",
+            "vehicle": "车辆",
+            "traffic_light": "信号灯",
+            "fallen_person": "跌倒的人（紧急！）",
+            "fire": "火焰（紧急！）",
+            "smoke": "烟雾（紧急！）",
+            "unknown": "未识别物体",
+        }
+        return mapping.get(name.lower(), name)
 
     @staticmethod
     def _infer_task_id(logs):
