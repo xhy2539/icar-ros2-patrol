@@ -29,8 +29,20 @@ def main():
     args = parser.parse_args()
 
     data_yaml = ROOT_DIR / "datasets" / "water_public" / "data.yaml"
-    if not data_yaml.exists():
-        raise SystemExit("Dataset missing. Run scripts/download_water_dataset.sh first.")
+    required_dirs = [
+        ROOT_DIR / "datasets" / "water_public" / split / kind
+        for split in ("train", "valid")
+        for kind in ("images", "labels")
+    ]
+    missing = [path for path in required_dirs if not path.is_dir()]
+    if not data_yaml.exists() or missing:
+        raise SystemExit(
+            "Dataset missing or incomplete. Run scripts/download_water_dataset.sh first."
+        )
+    if not any((required_dirs[0]).iterdir()) or not any((required_dirs[1]).iterdir()):
+        raise SystemExit(
+            "Training images or labels are empty. Run scripts/download_water_dataset.sh again."
+        )
 
     local_base = ROOT_DIR / "models" / "base" / "yolo11n-seg.pt"
     model = YOLO(str(local_base) if local_base.exists() else "yolo11n-seg.pt")

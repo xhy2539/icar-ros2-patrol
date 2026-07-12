@@ -141,7 +141,9 @@ class LocalWebcamDetector:
 
         height, width = frame.shape[:2]
         detections = []
-        for box in boxes:
+        masks = getattr(result, "masks", None)
+        mask_polygons = getattr(masks, "xy", None) if masks is not None else None
+        for index, box in enumerate(boxes):
             cls_id = int(box.cls[0].item())
             raw_class = str(names.get(cls_id, cls_id))
             confidence = float(box.conf[0].item())
@@ -212,8 +214,7 @@ class LocalWebcamDetector:
                 and class_key(raw_class) not in self.target_classes
             ):
                 continue
-            detections.append(
-                {
+            detection = {
                     "class_name": water_class,
                     "raw_class_name": raw_class,
                     "confidence": round(confidence, 3),
@@ -224,8 +225,35 @@ class LocalWebcamDetector:
                         else "yolo_water"
                     ),
                 }
-            )
+            polygon = self.mask_polygon(mask_polygons, index, width, height)
+            if polygon:
+                contour = np.asarray(polygon, dtype=np.float32)
+                detection["polygon"] = polygon
+                detection["mask_area_ratio"] = round(
+                    float(cv2.contourArea(contour)) / frame_area, 6
+                )
+            detections.append(detection)
         return detections
+
+    @staticmethod
+    def mask_polygon(mask_polygons, index, width, height, max_points=100):
+        if mask_polygons is None or index >= len(mask_polygons):
+            return []
+        points = np.asarray(mask_polygons[index], dtype=np.float32)
+        if len(points) < 3:
+            return []
+        epsilon = max(1.0, 0.002 * cv2.arcLength(points, True))
+        points = cv2.approxPolyDP(points, epsilon, True).reshape(-1, 2)
+        if len(points) > max_points:
+            step = int(np.ceil(len(points) / max_points))
+            points = points[::step]
+        return [
+            [
+                int(np.clip(round(x), 0, max(0, width - 1))),
+                int(np.clip(round(y), 0, max(0, height - 1))),
+            ]
+            for x, y in points
+        ]
 
     def detect_color(self, frame):
         color_specs = [
@@ -267,6 +295,13 @@ class LocalWebcamDetector:
                 label = f"{class_name}:{raw_class}"
             label = f"{label} {det['confidence']:.2f}"
             color = color_for_class(class_name)
+            polygon = det.get("polygon") or []
+            if len(polygon) >= 3:
+                contour = np.asarray(polygon, dtype=np.int32).reshape((-1, 1, 2))
+                overlay = frame.copy()
+                cv2.fillPoly(overlay, [contour], color)
+                cv2.addWeighted(overlay, 0.2, frame, 0.8, 0, frame)
+                cv2.polylines(frame, [contour], True, color, 2)
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
             cv2.putText(frame, label, (x1, max(18, y1 - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2, cv2.LINE_AA)
         cv2.putText(
