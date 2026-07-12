@@ -206,9 +206,8 @@ class CarController extends ChangeNotifier {
     if (ok) {
       _currentAction = '已连接';
       _addMessage('WebSocket 连接成功');
-      // 自动订阅视觉 Topic
-      _service.subscribeVisionTopics();
-      _addMessage('已订阅视觉 Topic (detections, capture_status, camera)');
+      // TODO: 等车端 app.py 支持 JSON 路由后恢复自动订阅
+      // _service.subscribeVisionTopics();
     } else {
       _currentAction = '连接失败';
       _addMessage('WebSocket 连接失败');
@@ -481,6 +480,9 @@ class CarController extends ChangeNotifier {
       _messages.removeRange(0, _messages.length - 200);
     }
   }
+
+  /// 公开的日志写入接口，供页面层调用
+  void addMessage(String msg) => _addMessage(msg);
 
   @override
   void dispose() {

@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../theme/app_theme.dart';
 import '../services/car_controller.dart';
 import '../services/vision_models.dart';
@@ -31,6 +31,12 @@ class _VisionPageState extends State<VisionPage> {
   /// WebSocket 帧图像（base64 JPEG），如果有则优先显示
   Uint8List? _wsFrameBytes;
 
+  /// 视频流日志去重标记
+  bool _videoLoadLogged = false;
+  bool _videoFirstFrameLogged = false;
+  bool _videoErrorLogged = false;
+  int _wsFrameCount = 0;
+
   /// 自动截图状态
   bool _autoCapture = false;
   double _captureInterval = 3.0;
@@ -55,7 +61,15 @@ class _VisionPageState extends State<VisionPage> {
   }
 
   void _onCtrlChanged() {
-    if (mounted) setState(() {});
+    if (mounted) {
+      if (!_ctrl.isConnected) {
+        _videoLoadLogged = false;
+        _videoFirstFrameLogged = false;
+        _videoErrorLogged = false;
+        _wsFrameCount = 0;
+      }
+      setState(() {});
+    }
   }
 
   void _onDetections(DetectionArray arr) {
@@ -73,6 +87,12 @@ class _VisionPageState extends State<VisionPage> {
         setState(() {
           _wsFrameBytes = Uint8List.fromList(bytes);
         });
+        _wsFrameCount++;
+        if (_wsFrameCount == 1) {
+          _ctrl.addMessage('[视频] 收到 WS 帧 (${bytes.length} bytes)');
+        } else if (_wsFrameCount % 100 == 0) {
+          _ctrl.addMessage('[视频] 已收到 $_wsFrameCount 帧');
+        }
       }
     } catch (_) {
       // base64 解码失败，忽略
@@ -96,6 +116,8 @@ class _VisionPageState extends State<VisionPage> {
               _buildDetectionPanel(),
               const SizedBox(height: 12),
               _buildCaptureStatus(),
+              const SizedBox(height: 12),
+              _buildLogPanel(),
             ],
           ),
         ),
@@ -222,6 +244,10 @@ class _VisionPageState extends State<VisionPage> {
         fit: BoxFit.cover,
         gaplessPlayback: true,
         errorBuilder: (context, error, stackTrace) {
+          if (!_videoErrorLogged) {
+            _videoErrorLogged = true;
+            _ctrl.addMessage('[视频] MJPEG 流加载失败: $error');
+          }
           return Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -249,7 +275,17 @@ class _VisionPageState extends State<VisionPage> {
           );
         },
         loadingBuilder: (context, child, loadingProgress) {
-          if (loadingProgress == null) return child;
+          if (loadingProgress == null) {
+            if (!_videoFirstFrameLogged) {
+              _videoFirstFrameLogged = true;
+              _ctrl.addMessage('[视频] MJPEG 流已接通');
+            }
+            return child;
+          }
+          if (!_videoLoadLogged) {
+            _videoLoadLogged = true;
+            _ctrl.addMessage('[视频] 正在请求 MJPEG 流: $url');
+          }
           return Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -918,6 +954,129 @@ class _VisionPageState extends State<VisionPage> {
       default:
         return className;
     }
+  }
+
+  // ═══════════════════════════════════════════
+  // 通信日志面板
+  // ═══════════════════════════════════════════
+
+  Widget _buildLogPanel() {
+    final logs = _ctrl.messages.reversed.take(50).toList();
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: AppColors.blueGray.withValues(alpha: 0.2),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.terminal, color: AppColors.bluePurple, size: 20),
+              const SizedBox(width: 8),
+              const Text(
+                '通信日志',
+                style: TextStyle(
+                  color: AppColors.bluePurple,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              IconButton(
+                onPressed: logs.isEmpty
+                    ? null
+                    : () {
+                        final allLogs = _ctrl.messages.join('\n');
+                        Clipboard.setData(ClipboardData(text: allLogs));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('日志已复制到剪贴板'),
+                            duration: Duration(seconds: 2),
+                          ),
+                        );
+                      },
+                icon: const Icon(Icons.copy, size: 18),
+                color: AppColors.bluePurple,
+                tooltip: '复制全部日志',
+                constraints: const BoxConstraints(
+                  minWidth: 36,
+                  minHeight: 36,
+                ),
+                padding: EdgeInsets.zero,
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                onPressed: logs.isEmpty ? null : _ctrl.clearMessages,
+                icon: const Icon(Icons.delete_outline, size: 18),
+                color: AppColors.blueGray,
+                tooltip: '清空日志',
+                constraints: const BoxConstraints(
+                  minWidth: 36,
+                  minHeight: 36,
+                ),
+                padding: EdgeInsets.zero,
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            height: 180,
+            decoration: BoxDecoration(
+              color: AppColors.surfaceAlt,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: logs.isEmpty
+                ? const Center(
+                    child: Text(
+                      '暂无日志',
+                      style: TextStyle(
+                        color: AppColors.blueGray,
+                        fontSize: 12,
+                      ),
+                    ),
+                  )
+                : ListView.builder(
+                    reverse: true,
+                    padding: const EdgeInsets.all(8),
+                    itemCount: logs.length,
+                    itemBuilder: (context, index) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 1),
+                        child: Text(
+                          logs[index],
+                          style: TextStyle(
+                            color: logs[index].contains('[错误]')
+                                ? AppColors.errorRed
+                                : logs[index].contains('[收到]')
+                                    ? AppColors.successGreen
+                                    : logs[index].contains('[调试]')
+                                        ? AppColors.blueGray
+                                        : AppColors.darkNavyLight,
+                            fontSize: 11,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
