@@ -1,6 +1,14 @@
 import json
 import time
 
+try:
+    from ultralytics import YOLO
+
+    YOLO_IMPORT_ERROR = None
+except Exception as exc:  # pylint: disable=broad-except
+    YOLO = None
+    YOLO_IMPORT_ERROR = exc
+
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
@@ -24,12 +32,6 @@ try:
 except ImportError:
     cv2 = None
     np = None
-
-try:
-    from ultralytics import YOLO
-except ImportError:
-    YOLO = None
-
 
 DEFAULT_OBSTACLE_CLASSES = [
     "backpack",
@@ -101,6 +103,7 @@ class VisionNode(Node):
         self.declare_parameter("water_imgsz", 640)
         self.declare_parameter("water_device", "")
         self.declare_parameter("water_min_area_ratio", 0.002)
+        self.declare_parameter("water_frame_stride", 1)
         self.declare_parameter("water_class_name", "water")
 
         self.image_topic = self.get_parameter("image_topic").value
@@ -149,6 +152,9 @@ class VisionNode(Node):
         self.water_min_area_ratio = float(
             self.get_parameter("water_min_area_ratio").value
         )
+        self.water_frame_stride = max(
+            1, int(self.get_parameter("water_frame_stride").value)
+        )
         self.water_class_name = (
             str(self.get_parameter("water_class_name").value).strip() or "water"
         )
@@ -160,6 +166,8 @@ class VisionNode(Node):
         self.water_model = None
         self.water_uses_world_prompts = False
         self.yolo_unavailable_logged = False
+        self.last_water_detections = []
+        self.last_water_frame_count = 0
         self.typed_detections_available = Detection is not None and DetectionArray is not None
 
         detections_msg_type = DetectionArray if self.typed_detections_available else String
@@ -210,8 +218,10 @@ class VisionNode(Node):
                 )
             return
         if YOLO is None:
+            detail = f": {YOLO_IMPORT_ERROR}" if YOLO_IMPORT_ERROR else ""
             self.get_logger().warning(
-                "ultralytics is not installed; falling back to lightweight color detector"
+                "ultralytics is not available"
+                f"{detail}; falling back to lightweight color detector"
             )
             return
         try:
@@ -234,8 +244,9 @@ class VisionNode(Node):
         if not self.water_model_path:
             return
         if YOLO is None:
+            detail = f": {YOLO_IMPORT_ERROR}" if YOLO_IMPORT_ERROR else ""
             self.get_logger().warning(
-                "ultralytics is not installed; water detector is disabled"
+                f"ultralytics is not available{detail}; water detector is disabled"
             )
             return
         try:
@@ -330,7 +341,15 @@ class VisionNode(Node):
             detections = self.run_color_detection(frame)
 
         if self.water_model is not None:
-            detections.extend(self.run_water_detection(frame))
+            should_run_water = (
+                self.last_water_frame_count == 0
+                or self.frame_count - self.last_water_frame_count
+                >= self.water_frame_stride
+            )
+            if should_run_water:
+                self.last_water_detections = self.run_water_detection(frame)
+                self.last_water_frame_count = self.frame_count
+            detections.extend(self.last_water_detections)
         return detections
 
     def run_color_detection(self, frame):

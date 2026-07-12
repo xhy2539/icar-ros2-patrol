@@ -187,6 +187,23 @@ The first water run may download the YOLO-World checkpoint and text encoder
 dependencies. Water detections are shown as `water:<raw_prompt>` in the preview
 and JSON output.
 
+Optional nursing-home fall hazard check for stairs, steps, curbs, thresholds,
+ramps, ledges, and floor height changes:
+
+```bash
+python vision\local_webcam_detect.py --backend yolo --model yolo11n.pt \
+  --water-model yolov8s-world.pt \
+  --fall-hazard-backend world \
+  --fall-hazard-model yolov8s-world.pt \
+  --fall-hazard-frame-stride 5 \
+  --camera 0
+```
+
+Fall-risk detections are shown as `fall_hazard:<raw_prompt>` in the preview and
+JSON output. This is an RGB open-vocabulary check; final car-side height-change
+judgement should also use Astra depth data to confirm the actual vertical
+drop/rise.
+
 Fallback without a YOLO model:
 
 ```bash
