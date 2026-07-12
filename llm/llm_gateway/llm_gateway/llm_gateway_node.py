@@ -11,8 +11,6 @@ Subscriptions (缓存最新值):
   - /task/status          → 当前任务状态
   - /nav_status           → 导航进度
   - /obstacle_status      → 障碍物/安全
-  - /sensor/env_data      → 环境传感器
-  - /sensor/alert         → 异常告警
   - /vision/detections    → 视觉检测结果
 
 安全约束：不发布 /cmd_vel，不绕过 task_manager_node。
@@ -28,7 +26,7 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy
 
 from icar_interfaces.msg import (
     TaskLog, TaskStatus, NavStatus, ObstacleStatus,
-    DetectionArray, EnvData, SensorAlert,
+    DetectionArray,
 )
 from icar_interfaces.srv import GenerateReport, ParseTask
 
@@ -70,8 +68,6 @@ KNOWN_POINTS = ("A", "B", "C", "D", "E", "F")
 
 # 信息查询关键词（用于规则检测）
 INFO_KEYWORDS = {
-    "environment": ("温度", "湿度", "烟雾", "PM2.5", "pm2.5", "环境", "空气",
-                    "光照", "气压", "多少度", "热不热", "冷不冷"),
     "vision": ("看到", "摄像头", "检测到", "画面", "有没有人",
                "前面有", "有什么"),
     "navigation": ("在哪", "位置", "到了吗", "导航", "还有多远",
@@ -107,10 +103,7 @@ class LlmGatewayNode(Node):
         self._latest_task_status = None   # dict: {task_id, status, current_step, total_steps, message}
         self._latest_nav_status = None    # dict: {status, progress, distance_remain, message}
         self._latest_obstacle = None      # dict: {is_obstacle, min_distance, direction, risk_level, action}
-        self._latest_sensor = None        # dict: {temperature, humidity, smoke, pm25, light, pressure}
         self._latest_detections = None    # list of dict: [{class_name, confidence, bbox, image_path}, ...]
-        self._latest_alerts = []          # list of dict: [{sensor_type, current_value, threshold, severity, message}, ...]
-        self._max_alerts = 20
 
         # ── QoS ──
         reliable_qos = QoSProfile(depth=50, reliability=ReliabilityPolicy.RELIABLE)
@@ -129,12 +122,6 @@ class LlmGatewayNode(Node):
         self.obstacle_sub = self.create_subscription(
             ObstacleStatus, "/obstacle_status", self._on_obstacle_status, reliable_qos)
 
-        self.sensor_sub = self.create_subscription(
-            EnvData, "/sensor/env_data", self._on_env_data, reliable_qos)
-
-        self.alert_sub = self.create_subscription(
-            SensorAlert, "/sensor/alert", self._on_sensor_alert, reliable_qos)
-
         self.vision_sub = self.create_subscription(
             DetectionArray, "/vision/detections", self._on_detections, best_effort_qos)
 
@@ -150,7 +137,7 @@ class LlmGatewayNode(Node):
             f"llm_gateway_node ready, provider={effective}, "
             f"api_available={self._api_ok}, "
             f"services=[/llm/parse_task, /llm/generate_report], "
-            f"subscriptions=7 topics"
+            f"subscriptions=5 topics"
         )
 
     # ── provider 决策 ──────────────────────────────────────────
@@ -229,28 +216,6 @@ class LlmGatewayNode(Node):
             "risk_level": msg.risk_level,
             "action": msg.action,
         }
-
-    def _on_env_data(self, msg: EnvData):
-        self._latest_sensor = {
-            "temperature": round(msg.temperature, 1),
-            "humidity": round(msg.humidity, 1),
-            "smoke": round(msg.smoke, 1),
-            "pm25": round(msg.pm25, 1),
-            "light": round(msg.light, 1),
-            "pressure": round(msg.pressure, 1),
-        }
-
-    def _on_sensor_alert(self, msg: SensorAlert):
-        alert = {
-            "sensor_type": msg.sensor_type,
-            "current_value": round(msg.current_value, 2),
-            "threshold": round(msg.threshold, 2),
-            "severity": msg.severity,
-            "message": msg.message,
-        }
-        self._latest_alerts.append(alert)
-        if len(self._latest_alerts) > self._max_alerts:
-            self._latest_alerts = self._latest_alerts[-self._max_alerts:]
 
     def _on_detections(self, msg: DetectionArray):
         dets = []
@@ -352,8 +317,6 @@ class LlmGatewayNode(Node):
             "task_status": self._latest_task_status or {},
             "nav_status": self._latest_nav_status or {},
             "obstacle_status": self._latest_obstacle or {},
-            "sensor": self._latest_sensor or {},
-            "sensor_alerts": self._latest_alerts[-5:] if self._latest_alerts else [],
             "detections": self._latest_detections or [],
         }
 
@@ -362,22 +325,10 @@ class LlmGatewayNode(Node):
         """规则模板：当 DeepSeek 不可用时生成简短回答。"""
         parts = []
 
-        if query_type in ("environment", "all"):
-            sensor = context.get("sensor", {})
-            if sensor:
-                parts.append(
-                    f"当前环境：温度 {sensor.get('temperature', '?')}℃，"
-                    f"湿度 {sensor.get('humidity', '?')}%，"
-                    f"烟雾 {sensor.get('smoke', '?')}ppm，"
-                    f"PM2.5 {sensor.get('pm25', '?')}μg/m³"
-                )
-            else:
-                parts.append("环境传感器暂无数据")
-
         if query_type in ("vision", "all"):
             detections = context.get("detections", [])
             if detections:
-                names = [d["class_name"] for d in detections]
+                names = [self._translate_class(d["class_name"]) for d in detections]
                 parts.append(f"最近检测到: {'、'.join(names)}")
             elif query_type == "vision":
                 parts.append("视觉模块暂无检测数据")
@@ -386,7 +337,7 @@ class LlmGatewayNode(Node):
             nav = context.get("nav_status", {})
             if nav:
                 parts.append(
-                    f"导航状态: {nav.get('status', '?')}，"
+                    f"导航状态: {self._translate_status(nav.get('status', '?'))}，"
                     f"剩余距离 {nav.get('distance_remain', '?')}m — "
                     f"{nav.get('message', '')}"
                 )
@@ -399,8 +350,8 @@ class LlmGatewayNode(Node):
                 if obs.get("is_obstacle"):
                     parts.append(
                         f"⚠ 检测到障碍物，距离 {obs.get('min_distance', '?')}m，"
-                        f"方位 {obs.get('direction', '?')}，"
-                        f"风险 {obs.get('risk_level', '?')}"
+                        f"方位 {self._translate_status(obs.get('direction', '?'))}，"
+                        f"风险等级: {self._translate_status(obs.get('risk_level', '?'))}"
                     )
                 else:
                     parts.append("前方安全，未检测到障碍物")
@@ -411,16 +362,11 @@ class LlmGatewayNode(Node):
             ts = context.get("task_status", {})
             if ts:
                 parts.append(
-                    f"任务状态: {ts.get('status', '?')}，"
+                    f"任务状态: {self._translate_status(ts.get('status', '?'))}，"
                     f"步骤 {ts.get('current_step', 0)}/{ts.get('total_steps', 0)}"
                 )
             elif query_type == "status":
                 parts.append("任务状态暂无数据")
-
-        alerts = context.get("sensor_alerts", [])
-        if alerts and query_type in ("environment", "safety", "status", "all"):
-            alert_msgs = [a.get("message", "") for a in alerts[-3:]]
-            parts.append(f"最近告警: {'; '.join(alert_msgs)}")
 
         return "\n".join(parts) if parts else f"关于「{question}」，暂无相关数据。"
 
@@ -675,11 +621,7 @@ class LlmGatewayNode(Node):
             lines.append("【需要注意】")
             for w in warnings:
                 wtype = w.get("type", "")
-                if "temperature" in str(w) or "温度" in str(w):
-                    lines.append(f"  - 温度偏高，建议检查该区域通风和空调")
-                elif "smoke" in str(w) or "烟雾" in str(w):
-                    lines.append(f"  - ⚠️ 检测到烟雾，请立即到现场查看！")
-                elif "obstacle" in str(w) or "障碍" in str(w):
+                if "obstacle" in str(w) or "障碍" in str(w):
                     lines.append(f"  - 走廊有障碍物，建议清理通道")
                 elif "water" in str(w) or "积水" in str(w):
                     lines.append(f"  - 地面有积水，注意防滑，建议放置警示牌")
@@ -721,6 +663,40 @@ class LlmGatewayNode(Node):
             return str(sec)
 
     @staticmethod
+    def _translate_status(value: str) -> str:
+        """将英文枚举值转成护工能看懂的中文。"""
+        mapping = {
+            # 任务状态
+            "PENDING": "等待任务",
+            "RUNNING": "任务已启动",
+            "NAVIGATING": "正在导航",
+            "CHECKPOINT": "已到达巡检点",
+            "DETECTING": "正在视觉检测",
+            "COLLECTING": "正在采集数据",
+            "COMPLETED": "任务完成",
+            "FAILED": "任务失败",
+            "CANCELLED": "任务已取消",
+            # 导航状态
+            "IDLE": "空闲",
+            "ARRIVED": "已到达",
+            # 风险等级
+            "safe": "安全",
+            "warning": "注意",
+            "danger": "危险",
+            # 障碍物方位
+            "front": "前方",
+            "left": "左侧",
+            "right": "右侧",
+            "back": "后方",
+            # 建议动作
+            "none": "无需操作",
+            "slow_down": "减速慢行",
+            "stop": "立即停止",
+            "turn": "转向避让",
+        }
+        return mapping.get(str(value), str(value))
+
+    @staticmethod
     def _translate_class(name: str) -> str:
         """将英文类别名转成护工能看懂的中文。"""
         mapping = {
@@ -734,7 +710,6 @@ class LlmGatewayNode(Node):
             "traffic_light": "信号灯",
             "fallen_person": "跌倒的人（紧急！）",
             "fire": "火焰（紧急！）",
-            "smoke": "烟雾（紧急！）",
             "unknown": "未识别物体",
         }
         return mapping.get(name.lower(), name)

@@ -134,14 +134,6 @@ class RobotTools:
 
     # ── 信息查询工具（读取节点缓存的最新数据）─────────────────
 
-    def query_environment(self) -> dict:
-        """查询环境传感器数据。"""
-        if self.node and hasattr(self.node, '_latest_sensor'):
-            data = self.node._latest_sensor
-            if data:
-                return {"success": True, "message": "environment data", "data": data}
-        return {"success": False, "message": "no sensor data available", "data": {}}
-
     def query_vision(self) -> dict:
         """查询最近的视觉检测结果。"""
         if self.node and hasattr(self.node, '_latest_detections'):
@@ -221,11 +213,6 @@ class RobotTools:
                     "description": "复位原因"
                 }
             }
-        },
-        {
-            "tool_name": "query_environment",
-            "description": "查询环境传感器实时数据（温度/湿度/烟雾/PM2.5/光照/气压）",
-            "parameters": {}
         },
         {
             "tool_name": "query_vision",
