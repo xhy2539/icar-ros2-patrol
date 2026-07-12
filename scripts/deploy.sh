@@ -17,9 +17,9 @@ CAR_IP="${ICAR_IP:-10.90.164.83}"
 CAR_USER="${ICAR_USER:-jetson}"
 CAR_PASS="${ICAR_PASS:-yahboom}"
 CONTAINER="icar_ros2"
-WS_DIR="/root/ros2_ws"
+WS_DIR="/root/icar_ros2_ws/icar_ws"
 REPO_DIR="icar-ros2-patrol"
-PACKAGES="icar_interfaces task_manager cloud_bridge vision scripts"
+PACKAGES="icar_interfaces task_manager cloud_bridge vision llm voice scripts"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
