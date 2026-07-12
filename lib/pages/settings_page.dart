@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/app_theme.dart';
+import '../services/car_controller.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -9,12 +11,97 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  String _carIp = '10.90.164.83';
-  int _rosbridgePort = 9090;
-  double _defaultSpeed = 0.5;
-  bool _autoReconnect = true;
-  bool _hapticFeedback = true;
+  final CarController _ctrl = CarController.instance;
+
+  late String _carIp;
+  late int _wsPort;
+  late double _defaultSpeed;
+  late bool _autoReconnect;
+  late bool _hapticFeedback;
   bool _vibrateOnAlert = true;
+
+  bool _dirty = false; // 是否有未保存的更改
+  bool _saving = false;
+
+  late final TextEditingController _ipCtrl;
+  late final TextEditingController _portCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _carIp = _ctrl.host;
+    _wsPort = _ctrl.port;
+    _defaultSpeed = _ctrl.speed;
+    _autoReconnect = _ctrl.autoReconnect;
+    _hapticFeedback = _ctrl.hapticEnabled;
+
+    _ipCtrl = TextEditingController(text: _carIp);
+    _portCtrl = TextEditingController(text: _wsPort.toString());
+
+    _loadPersisted();
+  }
+
+  @override
+  void dispose() {
+    _ipCtrl.dispose();
+    _portCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadPersisted() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _carIp = prefs.getString('car_ip') ?? _ctrl.host;
+      _wsPort = prefs.getInt('ws_port') ?? _ctrl.port;
+      _defaultSpeed = prefs.getDouble('default_speed') ?? _ctrl.speed;
+      _autoReconnect = prefs.getBool('auto_reconnect') ?? _ctrl.autoReconnect;
+      _hapticFeedback = prefs.getBool('haptic_feedback') ?? _ctrl.hapticEnabled;
+      _vibrateOnAlert = prefs.getBool('vibrate_on_alert') ?? true;
+
+      _ipCtrl.text = _carIp;
+      _portCtrl.text = _wsPort.toString();
+    });
+  }
+
+  void _markDirty() {
+    if (!_dirty) setState(() => _dirty = true);
+  }
+
+  Future<void> _saveAndApply() async {
+    setState(() => _saving = true);
+
+    // 持久化
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('car_ip', _carIp);
+    await prefs.setInt('ws_port', _wsPort);
+    await prefs.setDouble('default_speed', _defaultSpeed);
+    await prefs.setBool('auto_reconnect', _autoReconnect);
+    await prefs.setBool('haptic_feedback', _hapticFeedback);
+    await prefs.setBool('vibrate_on_alert', _vibrateOnAlert);
+
+    // 应用到 CarController
+    await _ctrl.updateSettings(
+      host: _carIp,
+      port: _wsPort,
+      speed: _defaultSpeed,
+      autoReconnect: _autoReconnect,
+      hapticEnabled: _hapticFeedback,
+    );
+
+    setState(() {
+      _dirty = false;
+      _saving = false;
+    });
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('设置已保存并应用'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -24,17 +111,37 @@ class _SettingsPageState extends State<SettingsPage> {
           padding: const EdgeInsets.symmetric(vertical: 16),
           child: Column(
             children: [
-              // 连接设置
               _buildConnectionSettings(),
               const SizedBox(height: 16),
-              // 控制设置
               _buildControlSettings(),
               const SizedBox(height: 16),
-              // 通知设置
               _buildNotificationSettings(),
               const SizedBox(height: 16),
-              // 关于
               _buildAboutSection(),
+              const SizedBox(height: 16),
+              // 保存按钮
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 44,
+                  child: ElevatedButton.icon(
+                    onPressed: _dirty && !_saving ? _saveAndApply : null,
+                    icon: _saving
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white),
+                          )
+                        : const Icon(Icons.save, size: 20),
+                    label: Text(_dirty ? '保存并应用' : '已保存'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.bluePurple,
+                    ),
+                  ),
+                ),
+              ),
             ],
           ),
         ),
@@ -48,27 +155,30 @@ class _SettingsPageState extends State<SettingsPage> {
       icon: Icons.settings_ethernet,
       child: Column(
         children: [
-          // IP 地址
           _buildTextField(
             label: '小车 IP 地址',
-            value: _carIp,
+            controller: _ipCtrl,
             icon: Icons.dns,
-            onChanged: (value) => _carIp = value,
+            onChanged: (value) {
+              _carIp = value;
+              _markDirty();
+            },
           ),
           const SizedBox(height: 16),
-          // WebSocket 端口
           _buildTextField(
             label: 'WebSocket 端口',
-            value: _rosbridgePort.toString(),
+            controller: _portCtrl,
             icon: Icons.lan,
             keyboardType: TextInputType.number,
             onChanged: (value) {
               int? port = int.tryParse(value);
-              if (port != null) _rosbridgePort = port;
+              if (port != null && port > 0 && port < 65536) {
+                _wsPort = port;
+                _markDirty();
+              }
             },
           ),
           const SizedBox(height: 16),
-          // WiFi 热点信息
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
@@ -80,7 +190,8 @@ class _SettingsPageState extends State<SettingsPage> {
               children: [
                 Row(
                   children: [
-                    Icon(Icons.info_outline, color: AppColors.bluePurple, size: 16),
+                    Icon(Icons.info_outline,
+                        color: AppColors.bluePurple, size: 16),
                     SizedBox(width: 8),
                     Text(
                       'WiFi 热点配置',
@@ -94,7 +205,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 SizedBox(height: 8),
                 Text(
-                  '网络: 10.90.164.83\nVNC 密码: yahboom\n底盘串口: /dev/myserial (ttyUSB1)',
+                  '热点: ohcar / 88888888\nVNC 密码: yahboom\n底盘串口: /dev/myserial (ttyUSB1)',
                   style: TextStyle(
                     color: AppColors.blueGrayDark,
                     fontSize: 12,
@@ -115,7 +226,6 @@ class _SettingsPageState extends State<SettingsPage> {
       icon: Icons.tune,
       child: Column(
         children: [
-          // 默认速度
           Row(
             children: [
               const Icon(Icons.speed, color: AppColors.blueGray, size: 18),
@@ -140,25 +250,32 @@ class _SettingsPageState extends State<SettingsPage> {
             min: 0.1,
             max: 1.0,
             divisions: 9,
-            onChanged: (value) => setState(() => _defaultSpeed = value),
+            onChanged: (value) {
+              setState(() => _defaultSpeed = value);
+              _markDirty();
+            },
           ),
           const Divider(height: 24),
-          // 自动重连
           _buildSwitchRow(
             icon: Icons.sync,
             label: '自动重连',
             subtitle: '断线后自动尝试重新连接',
             value: _autoReconnect,
-            onChanged: (value) => setState(() => _autoReconnect = value),
+            onChanged: (value) {
+              setState(() => _autoReconnect = value);
+              _markDirty();
+            },
           ),
           const SizedBox(height: 16),
-          // 触觉反馈
           _buildSwitchRow(
             icon: Icons.vibration,
             label: '触觉反馈',
             subtitle: '按下按钮时震动反馈',
             value: _hapticFeedback,
-            onChanged: (value) => setState(() => _hapticFeedback = value),
+            onChanged: (value) {
+              setState(() => _hapticFeedback = value);
+              _markDirty();
+            },
           ),
         ],
       ),
@@ -174,7 +291,10 @@ class _SettingsPageState extends State<SettingsPage> {
         label: '超标震动提醒',
         subtitle: '传感器数据超标时震动提醒',
         value: _vibrateOnAlert,
-        onChanged: (value) => setState(() => _vibrateOnAlert = value),
+        onChanged: (value) {
+          setState(() => _vibrateOnAlert = value);
+          _markDirty();
+        },
       ),
     );
   }
@@ -192,6 +312,8 @@ class _SettingsPageState extends State<SettingsPage> {
           _buildInfoRow('项目', '2026 小学期实训'),
           const Divider(height: 16),
           _buildInfoRow('技术栈', 'Flutter + WebSocket'),
+          const Divider(height: 16),
+          _buildInfoRow('当前连接', '${_ctrl.host}:${_ctrl.port}'),
         ],
       ),
     );
@@ -199,7 +321,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _buildTextField({
     required String label,
-    required String value,
+    required TextEditingController controller,
     required IconData icon,
     required ValueChanged<String> onChanged,
     TextInputType? keyboardType,
@@ -217,7 +339,7 @@ class _SettingsPageState extends State<SettingsPage> {
         SizedBox(
           width: 150,
           child: TextField(
-            controller: TextEditingController(text: value),
+            controller: controller,
             style: const TextStyle(color: AppColors.darkNavy, fontSize: 14),
             keyboardType: keyboardType,
             decoration: InputDecoration(
@@ -251,11 +373,13 @@ class _SettingsPageState extends State<SettingsPage> {
             children: [
               Text(
                 label,
-                style: const TextStyle(color: AppColors.darkNavy, fontSize: 14),
+                style:
+                    const TextStyle(color: AppColors.darkNavy, fontSize: 14),
               ),
               Text(
                 subtitle,
-                style: const TextStyle(color: AppColors.blueGrayDark, fontSize: 11),
+                style: const TextStyle(
+                    color: AppColors.blueGrayDark, fontSize: 11),
               ),
             ],
           ),

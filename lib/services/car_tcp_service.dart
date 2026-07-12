@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'vision_models.dart';
 
 /// 小车连接状态
 enum CarConnectionState {
@@ -61,8 +63,40 @@ class CarWebSocketService {
   /// 接收数据的 StreamController
   final _responseController = StreamController<String>.broadcast();
 
+  /// 视觉检测结果流
+  final _detectionController = StreamController<DetectionArray>.broadcast();
+
+  /// 截图状态流
+  final _captureStatusController = StreamController<CaptureStatus>.broadcast();
+
+  /// 摄像头帧流（base64 编码的 JPEG）
+  final _imageFrameController = StreamController<String>.broadcast();
+
+  /// LLM parse_task 结果流
+  final _parseTaskController = StreamController<Map<String, dynamic>>.broadcast();
+
+  /// LLM generate_report 结果流
+  final _reportController = StreamController<Map<String, dynamic>>.broadcast();
+
   /// 接收到的响应数据流
   Stream<String> get responseStream => _responseController.stream;
+
+  /// 视觉检测结果流
+  Stream<DetectionArray> get detectionStream => _detectionController.stream;
+
+  /// 截图状态流
+  Stream<CaptureStatus> get captureStatusStream =>
+      _captureStatusController.stream;
+
+  /// 摄像头帧流
+  Stream<String> get imageFrameStream => _imageFrameController.stream;
+
+  /// LLM parse_task 结果流
+  Stream<Map<String, dynamic>> get parseTaskStream =>
+      _parseTaskController.stream;
+
+  /// LLM generate_report 结果流
+  Stream<Map<String, dynamic>> get reportStream => _reportController.stream;
 
   /// 状态变更回调
   void Function(CarConnectionState)? onStateChanged;
@@ -203,15 +237,104 @@ class CarWebSocketService {
     }
   }
 
+  /// 发送 JSON 数据
+  bool sendJson(Map<String, dynamic> data) {
+    final jsonStr = jsonEncode(data);
+    if (!isConnected || _channel == null) {
+      onError?.call('未连接，无法发送 JSON');
+      return false;
+    }
+    try {
+      _channel!.sink.add(jsonStr);
+      onLog?.call('→ JSON: $jsonStr');
+      return true;
+    } catch (e) {
+      onError?.call('JSON 发送失败: $e');
+      return false;
+    }
+  }
+
+  /// 订阅视觉 Topic
+  ///
+  /// 向后端发送订阅请求。后端收到后应开始推送对应 Topic 的数据。
+  /// 支持的 topic: detections, capture_status, camera, detections_json
+  bool subscribeTopic(String topic) {
+    return sendJson({'subscribe': topic});
+  }
+
+  /// 订阅所有视觉相关 Topic（连接成功后调用）
+  void subscribeVisionTopics() {
+    subscribeTopic('detections');
+    subscribeTopic('capture_status');
+    subscribeTopic('camera');
+  }
+
   // ═══════════════════════════════════════════
   // 数据接收
   // ═══════════════════════════════════════════
 
   void _onMessage(dynamic data) {
+    // 二进制帧 → 当作摄像头帧（base64）
+    if (data is List<int>) {
+      final b64 = base64Encode(data);
+      _imageFrameController.add(b64);
+      onLog?.call('← 收到二进制帧 (${data.length} bytes)');
+      return;
+    }
+
     final raw = data.toString().trim();
+    if (raw.isEmpty) return;
+
+    // 尝试 JSON 解析并按 topic 路由
+    try {
+      if (raw.startsWith('{')) {
+        final json = jsonDecode(raw) as Map<String, dynamic>;
+        final topic = json['topic']?.toString() ?? '';
+        if (_routeJsonMessage(topic, json)) {
+          return; // 已路由到专用流，不再进入 responseStream
+        }
+      }
+    } catch (_) {
+      // 非 JSON，走原有 responseStream
+    }
+
     onLog?.call('← 收到消息: "$raw" (类型=${data.runtimeType}, 长度=${raw.length})');
-    if (raw.isNotEmpty) {
-      _responseController.add(raw);
+    _responseController.add(raw);
+  }
+
+  /// 路由 JSON 消息到专用流，返回 true 表示已处理
+  bool _routeJsonMessage(String topic, Map<String, dynamic> json) {
+    switch (topic) {
+      case 'detections':
+      case '/vision/detections':
+        _detectionController.add(DetectionArray.fromJson(json));
+        return true;
+      case 'capture_status':
+      case '/vision/capture_status':
+        _captureStatusController.add(CaptureStatus.fromJson(json));
+        return true;
+      case 'camera':
+      case '/camera/color/image_raw':
+        final b64 = json['data']?.toString() ?? '';
+        if (b64.isNotEmpty) _imageFrameController.add(b64);
+        return true;
+      case 'detections_json':
+      case '/vision/detections_json':
+        onLog?.call('← [调试JSON] $json');
+        _responseController.add('[vision_debug] $json');
+        return true;
+      case 'parse_task_result':
+      case '/llm/parse_task':
+        _parseTaskController.add(json);
+        onLog?.call('← [LLM] parse_task 结果: success=${json['success']}');
+        return true;
+      case 'generate_report_result':
+      case '/llm/generate_report':
+        _reportController.add(json);
+        onLog?.call('← [LLM] generate_report 结果: success=${json['success']}');
+        return true;
+      default:
+        return false;
     }
   }
 
@@ -290,5 +413,10 @@ class CarWebSocketService {
   Future<void> dispose() async {
     await disconnect();
     await _responseController.close();
+    await _detectionController.close();
+    await _captureStatusController.close();
+    await _imageFrameController.close();
+    await _parseTaskController.close();
+    await _reportController.close();
   }
 }

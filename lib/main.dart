@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'theme/app_theme.dart';
 import 'pages/control_page.dart';
+import 'pages/vision_page.dart';
 import 'pages/status_page.dart';
 import 'pages/sensor_page.dart';
-import 'pages/mission_log_page.dart';
+import 'pages/mission_page.dart';
 import 'pages/settings_page.dart';
 import 'services/car_controller.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
@@ -22,6 +24,15 @@ void main() {
   );
   // 初始化小车控制器单例
   CarController.instance;
+  // 从 SharedPreferences 加载持久化设置
+  final prefs = await SharedPreferences.getInstance();
+  await CarController.instance.updateSettings(
+    host: prefs.getString('car_ip'),
+    port: prefs.getInt('ws_port'),
+    speed: prefs.getDouble('default_speed'),
+    autoReconnect: prefs.getBool('auto_reconnect'),
+    hapticEnabled: prefs.getBool('haptic_feedback'),
+  );
   runApp(const ICarApp());
 }
 
@@ -51,17 +62,19 @@ class _MainScreenState extends State<MainScreen> {
 
   final List<Widget> _pages = const [
     ControlPage(),
+    VisionPage(),
     StatusPage(),
     SensorPage(),
-    MissionLogPage(),
+    MissionPage(),
     SettingsPage(),
   ];
 
   final List<String> _titles = [
     'iCar 控制台',
+    '视觉监控',
     '状态监控',
     '传感器数据',
-    '任务日志',
+    '智能任务',
     '设置',
   ];
 
@@ -104,15 +117,16 @@ class _MainScreenState extends State<MainScreen> {
         ),
         child: SafeArea(
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
                 _buildNavItem(0, Icons.gamepad, '控制'),
-                _buildNavItem(1, Icons.monitor, '状态'),
-                _buildNavItem(2, Icons.sensors, '传感器'),
-                _buildNavItem(3, Icons.list_alt, '日志'),
-                _buildNavItem(4, Icons.settings, '设置'),
+                _buildNavItem(1, Icons.visibility, '视觉'),
+                _buildNavItem(2, Icons.monitor, '状态'),
+                _buildNavItem(3, Icons.sensors, '传感器'),
+                _buildNavItem(4, Icons.auto_awesome, '任务'),
+                _buildNavItem(5, Icons.settings, '设置'),
               ],
             ),
           ),
@@ -131,12 +145,12 @@ class _MainScreenState extends State<MainScreen> {
       behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
           color: isSelected
               ? AppColors.orange.withValues(alpha: 0.12)
               : Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(10),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -144,14 +158,14 @@ class _MainScreenState extends State<MainScreen> {
             Icon(
               icon,
               color: isSelected ? AppColors.orange : AppColors.blueGray,
-              size: isSelected ? 24 : 22,
+              size: isSelected ? 22 : 20,
             ),
-            const SizedBox(height: 2),
+            const SizedBox(height: 1),
             Text(
               label,
               style: TextStyle(
                 color: isSelected ? AppColors.orange : AppColors.blueGray,
-                fontSize: 11,
+                fontSize: 10,
                 fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
               ),
             ),

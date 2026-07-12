@@ -45,7 +45,7 @@ class _ControlPageState extends State<ControlPage> {
     HapticFeedback.mediumImpact();
   }
 
-  /// 点击方向键：切换运动状态（再点同方向或点停止键才停）
+  /// 按下方向键：发送方向指令，持续运动
   void _onPress(String direction) {
     if (!_ctrl.isConnected) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -57,17 +57,17 @@ class _ControlPageState extends State<ControlPage> {
       );
       return;
     }
-    if (_activeDirection == direction) {
-      // 再次点击同一方向 → 停止
-      _ctrl.sendCommand('stop');
-      setState(() => _activeDirection = '');
-      HapticFeedback.lightImpact();
-    } else {
-      // 点击新方向 → 直接发送（不需要先 stop，车端会切换）
-      _ctrl.sendCommand(direction);
-      setState(() => _activeDirection = direction);
-      HapticFeedback.heavyImpact();
-    }
+    _ctrl.sendCommand(direction);
+    setState(() => _activeDirection = direction);
+    HapticFeedback.heavyImpact();
+  }
+
+  /// 松开方向键：发送 stop
+  void _onRelease() {
+    if (_activeDirection.isEmpty) return;
+    _ctrl.sendCommand('stop');
+    setState(() => _activeDirection = '');
+    HapticFeedback.lightImpact();
   }
 
   /// 单次点击 stop
@@ -270,7 +270,7 @@ class _ControlPageState extends State<ControlPage> {
           ),
           const SizedBox(height: 2),
           Text(
-            '点击方向键运动，再点或按停止键结束',
+            '按住方向键运动，松手即停',
             style: TextStyle(
               color: AppColors.blueGray.withValues(alpha: 0.7),
               fontSize: 11,
@@ -392,7 +392,7 @@ class _ControlPageState extends State<ControlPage> {
     );
   }
 
-  /// 点击切换按钮：点一下开始运动，再点同方向停止
+  /// 长按运动按钮：按下发送指令，松手发 stop
   Widget _buildHoldButton({
     required IconData icon,
     required String label,
@@ -404,7 +404,9 @@ class _ControlPageState extends State<ControlPage> {
     final Color activeColor = color ?? AppColors.orange;
 
     return GestureDetector(
-      onTap: () => _onPress(direction),
+      onTapDown: (_) => _onPress(direction),
+      onTapUp: (_) => _onRelease(),
+      onTapCancel: _onRelease,
       child: Container(
         width: size,
         height: size,

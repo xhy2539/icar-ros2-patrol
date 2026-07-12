@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'car_tcp_service.dart';
 import 'car_commands.dart';
+import 'vision_models.dart';
 
 /// 小车控制器 - 全局状态管理
 ///
@@ -21,6 +22,10 @@ class CarController extends ChangeNotifier {
     _service.onError = _onError;
     _service.onLog = _onLog;
     _service.responseStream.listen(_onResponse);
+    _service.detectionStream.listen(_onDetection);
+    _service.captureStatusStream.listen(_onCaptureStatus);
+    _service.parseTaskStream.listen(_onParseTaskResult);
+    _service.reportStream.listen(_onReportResult);
   }
 
   final CarWebSocketService _service = CarWebSocketService();
@@ -69,6 +74,103 @@ class CarController extends ChangeNotifier {
   bool _autoReconnect = true;
   bool get autoReconnect => _autoReconnect;
 
+  /// 触觉反馈开关
+  bool _hapticEnabled = true;
+  bool get hapticEnabled => _hapticEnabled;
+  set hapticEnabled(bool v) {
+    _hapticEnabled = v;
+    notifyListeners();
+  }
+
+  /// 从设置页批量更新配置
+  ///
+  /// 如果当前未连接，只保存配置；如果已连接且 IP/端口变化，会断开旧连接并用新地址重连。
+  Future<void> updateSettings({
+    String? host,
+    int? port,
+    double? speed,
+    bool? autoReconnect,
+    bool? hapticEnabled,
+  }) async {
+    bool needReconnect = false;
+
+    if (host != null && host.isNotEmpty && host != _host) {
+      _host = host;
+      needReconnect = true;
+    }
+    if (port != null && port != _port) {
+      _port = port;
+      needReconnect = true;
+    }
+    if (speed != null) {
+      _speed = speed.clamp(0.0, 1.0);
+    }
+    if (autoReconnect != null) {
+      _autoReconnect = autoReconnect;
+      if (autoReconnect) {
+        _service.enableAutoReconnect();
+      } else {
+        _service.disableAutoReconnect();
+      }
+    }
+    if (hapticEnabled != null) {
+      _hapticEnabled = hapticEnabled;
+    }
+
+    // 如果已连接且地址变了，重连
+    if (needReconnect && isConnected) {
+      await disconnect();
+      await connect(_host, _port);
+    }
+
+    notifyListeners();
+  }
+
+  // ═══════════════════════════════════════════
+  // 视觉状态
+  // ═══════════════════════════════════════════
+
+  /// 最新检测结果
+  DetectionArray _latestDetections = DetectionArray(detections: []);
+  DetectionArray get latestDetections => _latestDetections;
+
+  /// 最新截图状态
+  CaptureStatus? _latestCaptureStatus;
+  CaptureStatus? get latestCaptureStatus => _latestCaptureStatus;
+
+  /// 视觉检测流
+  Stream<DetectionArray> get detectionStream => _service.detectionStream;
+
+  /// 截图状态流
+  Stream<CaptureStatus> get captureStatusStream =>
+      _service.captureStatusStream;
+
+  /// 摄像头帧流（base64 JPEG）
+  Stream<String> get imageFrameStream => _service.imageFrameStream;
+
+  // ═══════════════════════════════════════════
+  // LLM 状态
+  // ═══════════════════════════════════════════
+
+  /// LLM parse_task 流
+  Stream<Map<String, dynamic>> get parseTaskStream =>
+      _service.parseTaskStream;
+
+  /// LLM generate_report 流
+  Stream<Map<String, dynamic>> get reportStream => _service.reportStream;
+
+  /// 最新 parse_task 结果
+  Map<String, dynamic>? _latestParseResult;
+  Map<String, dynamic>? get latestParseResult => _latestParseResult;
+
+  /// 最新巡检报告
+  String _latestReport = '';
+  String get latestReport => _latestReport;
+
+  /// LLM 请求是否正在等待响应
+  bool _llmLoading = false;
+  bool get llmLoading => _llmLoading;
+
   // ═══════════════════════════════════════════
   // URL 工具（供 UI 使用）
   // ═══════════════════════════════════════════
@@ -78,6 +180,9 @@ class CarController extends ChangeNotifier {
 
   /// YOLO 视频流 URL
   String get yoloVideoUrl => CarWebSocketService.buildYoloVideoUrl(_host, _port);
+
+  /// 带标注的视频流 URL（YOLO 检测框叠加）
+  String get annotatedVideoUrl => yoloVideoUrl;
 
   /// WebSocket 连接 URL
   String get wsUrl => _service.buildWsUrl(_host, _port);
@@ -101,6 +206,9 @@ class CarController extends ChangeNotifier {
     if (ok) {
       _currentAction = '已连接';
       _addMessage('WebSocket 连接成功');
+      // 自动订阅视觉 Topic
+      _service.subscribeVisionTopics();
+      _addMessage('已订阅视觉 Topic (detections, capture_status, camera)');
     } else {
       _currentAction = '连接失败';
       _addMessage('WebSocket 连接失败');
@@ -186,12 +294,28 @@ class CarController extends ChangeNotifier {
     return ok;
   }
 
-  /// 发送截图
+  /// 发送截图（单次）
   bool sendScreenshot() {
-    if (!isConnected) return false;
-    // TODO: 确认截图指令
-    final ok = _service.send('screenshot');
-    if (ok) _addMessage('截图指令已发送');
+    return sendCaptureCommand({'action': 'capture_once', 'tag': 'manual'});
+  }
+
+  /// 发送截图控制命令
+  ///
+  /// 支持的 action:
+  ///   - `capture_once` + `tag`: 单次截图
+  ///   - `set_interval` + `interval_sec`: 定时截图
+  ///   - `stop`: 停止定时截图
+  ///   - `set_max_images` + `max_images`: 设置最大保存数
+  bool sendCaptureCommand(Map<String, dynamic> command) {
+    if (!isConnected) {
+      _addMessage('未连接，无法发送截图命令');
+      notifyListeners();
+      return false;
+    }
+    final ok = _service.sendJson(command);
+    if (ok) {
+      _addMessage('截图命令: $command');
+    }
     notifyListeners();
     return ok;
   }
@@ -202,6 +326,61 @@ class CarController extends ChangeNotifier {
     // TODO: 确认录制指令
     final ok = _service.send('record');
     if (ok) _addMessage('录制指令已发送');
+    notifyListeners();
+    return ok;
+  }
+
+  /// 发送 LLM parse_task 请求（自然语言 → 结构化任务 JSON）
+  bool sendParseTask(String inputText) {
+    if (!isConnected) {
+      _addMessage('未连接，无法发送 LLM 请求');
+      notifyListeners();
+      return false;
+    }
+    _llmLoading = true;
+    _addMessage('[LLM] 发送 parse_task: "$inputText"');
+    final ok = _service.sendJson({
+      'action': 'parse_task',
+      'input_text': inputText,
+    });
+    if (!ok) {
+      _llmLoading = false;
+    }
+    notifyListeners();
+    return ok;
+  }
+
+  /// 发送 LLM generate_report 请求（任务日志 → 巡检报告）
+  bool sendGenerateReport(String taskId) {
+    if (!isConnected) {
+      _addMessage('未连接，无法生成报告');
+      notifyListeners();
+      return false;
+    }
+    _llmLoading = true;
+    _addMessage('[LLM] 请求生成报告: task_id=$taskId');
+    final ok = _service.sendJson({
+      'action': 'generate_report',
+      'task_id': taskId,
+    });
+    if (!ok) {
+      _llmLoading = false;
+    }
+    notifyListeners();
+    return ok;
+  }
+
+  /// 发送已解析的任务给 task_manager（/task/request）
+  bool sendParsedTaskToManager(Map<String, dynamic> taskJson) {
+    if (!isConnected) return false;
+    _addMessage('[LLM] 发送任务到 task_manager: ${taskJson['task_type']}');
+    final ok = _service.sendJson({
+      'action': 'task_request',
+      'task': taskJson,
+    });
+    if (ok) {
+      _currentAction = '任务下发中';
+    }
     notifyListeners();
     return ok;
   }
@@ -251,7 +430,45 @@ class CarController extends ChangeNotifier {
 
   void _onResponse(String raw) {
     _lastResponse = raw;
-    _addMessage('[收到] $raw');
+    // 截断过长的消息，避免日志刷屏
+    final display = raw.length > 200 ? '${raw.substring(0, 200)}...' : raw;
+    _addMessage('[收到] $display');
+    notifyListeners();
+  }
+
+  void _onDetection(DetectionArray arr) {
+    _latestDetections = arr;
+    notifyListeners();
+    // 不写入日志面板，避免高频刷新
+  }
+
+  void _onCaptureStatus(CaptureStatus status) {
+    _latestCaptureStatus = status;
+    _addMessage('[截图] ${status.description}');
+    notifyListeners();
+  }
+
+  void _onParseTaskResult(Map<String, dynamic> result) {
+    _llmLoading = false;
+    _latestParseResult = result;
+    final success = result['success'] == true;
+    if (success) {
+      _addMessage('[LLM] parse_task 成功');
+    } else {
+      _addMessage('[LLM] parse_task 失败: ${result['error_msg'] ?? '未知错误'}');
+    }
+    notifyListeners();
+  }
+
+  void _onReportResult(Map<String, dynamic> result) {
+    _llmLoading = false;
+    final success = result['success'] == true;
+    if (success) {
+      _latestReport = result['report_text']?.toString() ?? '';
+      _addMessage('[LLM] 报告生成成功');
+    } else {
+      _addMessage('[LLM] 报告生成失败: ${result['error_msg'] ?? '未知错误'}');
+    }
     notifyListeners();
   }
 
