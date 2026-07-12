@@ -26,6 +26,8 @@ datasets/water_public/train/
 datasets/water_public/valid/
 datasets/water_public/test/
 datasets/water_public/*.cache
+datasets/water_public/README.dataset.txt
+datasets/water_public/README.roboflow.txt
 runs/
 
 # 模型文件较大，建议放网盘、Release 或 Git LFS
