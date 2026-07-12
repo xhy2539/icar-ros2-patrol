@@ -205,7 +205,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 SizedBox(height: 8),
                 Text(
-                  '热点: ohcar / 88888888\nVNC 密码: yahboom\n底盘串口: /dev/myserial (ttyUSB1)',
+                  '热点: ohcar121 / 12345678\nVNC 密码: yahboom\n底盘串口: /dev/myserial (ttyUSB1)',
                   style: TextStyle(
                     color: AppColors.blueGrayDark,
                     fontSize: 12,

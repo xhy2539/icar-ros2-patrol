@@ -40,7 +40,7 @@ class CarController extends ChangeNotifier {
 
   /// 当前 IP
   String get host => _host;
-  String _host = '10.90.164.83';
+  String _host = '192.168.137.218';
 
   /// 当前端口
   int get port => _port;
