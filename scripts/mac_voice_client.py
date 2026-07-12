@@ -1,10 +1,40 @@
 #!/usr/bin/env python3
 """Mac → MiniCPM-o → 小车音箱 (全双工). 空格键=静音/取消静音"""
-import asyncio, websockets, json, base64, threading, socket, sys, time
+import asyncio, websockets, json, base64, threading, socket, sys, time, subprocess, re
 import numpy as np, sounddevice as sd
 from pynput import keyboard as kb
 
 mic_muted = False
+
+def send_task_to_car(command_text):
+    """解析语音命令并发送到小车 task_manager"""
+    # 提取巡检点
+    points = re.findall(r'[A-F]点|[A-F](?![a-zA-Z])|一二三四五六', command_text)
+    route = []
+    cn_map = {'一':'A','二':'B','三':'C','四':'D','五':'E','六':'F'}
+    for p in points:
+        p = p.replace('点','')
+        route.append(cn_map.get(p, p))
+    route = list(dict.fromkeys(route))  # 去重保序
+    if not route:
+        route = ['A']  # 默认A点
+
+    task_type = 'patrol'
+    params = json.dumps({'source': 'voice', 'command': command_text}, ensure_ascii=False)
+
+    cmd = (
+        f'sshpass -p "yahboom" ssh -o StrictHostKeyChecking=no jetson@{CAR_IP} '
+        f'"docker exec icar_ros2 bash -c '
+        f'\\'source /root/icar_ros2_ws/icar_ws/install/setup.bash && '
+        f'ros2 topic pub --once /task/request icar_interfaces/msg/TaskRequest '
+        f'\\"{{task_type: {task_type}, route: {str(route).replace(chr(32),\"\")}, params: {repr(params)}}}\\"\\''
+        f'"'
+    )
+    try:
+        subprocess.run(cmd, shell=True, timeout=10, capture_output=True)
+        print(f"\n✅ 已发送任务到小车: 路线={route}")
+    except Exception as e:
+        print(f"\n❌ 发送失败: {e}")
 
 CAR_IP = "192.168.137.218"
 CAR_PORT = 9999
@@ -131,7 +161,8 @@ async def main():
                 print()
                 if "执行任务：" in turn_text:
                     cmd = turn_text.split("执行任务：")[1].strip().split("。")[0]
-                    print(f"🚗 任务: {cmd}")
+                    print(f"\n🚗 任务: {cmd}")
+                    threading.Thread(target=send_task_to_car, args=(cmd,), daemon=True).start()
                 turn_text = ""
 
     except KeyboardInterrupt: pass

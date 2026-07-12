@@ -24,6 +24,7 @@ import uuid
 from enum import Enum
 
 import rclpy
+from rclpy.node import Node
 from builtin_interfaces.msg import Time as RosTime
 
 # 自定义消息接口
