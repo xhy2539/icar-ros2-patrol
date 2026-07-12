@@ -1,0 +1,8 @@
+# GenerateReport.srv - LLM patrol report generation service
+
+string logs_json      # serialized task logs, detections, navigation, and sensor results
+string context_json   # optional scene/task metadata for report generation
+---
+bool success
+string report_text
+string error_msg

@@ -207,18 +207,31 @@ Inside `icar_ros2`, confirm the real camera topic first:
 
 ```bash
 source /opt/ros/foxy/setup.bash
-m1
+source /root/icar_ros2_ws/software/library_ws/install/setup.bash
+source /root/icar_ros2_ws/icar_ws/install/setup.bash
+export ROS_DOMAIN_ID=32
+ros2 launch astra_camera astro_pro_plus.launch.xml
 ros2 topic list | grep -E "image|camera|depth|rgb|color|astra|points"
 ```
+
+For the Astra Plus on car `192.168.180.83`, `astra.launch.xml` started depth and
+IR only and logged `color is not enable`. Use
+`astro_pro_plus.launch.xml` for the RGB UVC stream. Real data checked on
+2026-07-12:
+
+- `/camera/color/image_raw`: `sensor_msgs/Image`, 640x480, `rgb8`, about 16.9 fps,
+  `camera_color_optical_frame`.
+- `/camera/depth/image_raw`: 640x480, `16UC1`, about 30.2 fps.
+- `/camera/ir/image_raw`: 640x480, `mono8`, about 30.1 fps.
 
 When the topic is known, build this repo in the ROS2 workspace and run:
 
 ```bash
-colcon build --symlink-install --packages-select vision_patrol
+colcon build --symlink-install --packages-select icar_interfaces vision_patrol
 source install/setup.bash
 ros2 run vision_patrol camera_probe --ros-args \
   -p image_topic:=/camera/color/image_raw \
-  -p save_first_frame:=true
+  -p save_first_frame:=false
 ```
 
 Then run the placeholder vision pipeline:
@@ -233,6 +246,10 @@ ros2 run vision_patrol vision_node --ros-args \
 Replace `/camera/color/image_raw` with the actual topic reported by the car.
 If `/camera/color/image_raw` has no data, first confirm whether the APP service
 is occupying `/dev/video0`; coordinate before stopping APP processes.
+If `/dev/sensors` points to a missing `/dev/ttyUSB2`, do not rewrite the unified
+soft links. For vision-only checks, the `icar_ros2` container can be started
+without mounting `/dev/sensors`; restore the standard container flow when the
+sensor device is present again.
 
 Optional YOLO runtime, when the car already has `ultralytics` and a local model:
 
