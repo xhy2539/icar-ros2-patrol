@@ -183,18 +183,57 @@ class RobotTools:
 
     # ── 音频播放 ──────────────────────────────────────────────
 
+    @classmethod
+    def list_available_audio(cls) -> List[str]:
+        """列出所有可播放的音频名称（预定义 + 目录下自动发现的）。"""
+        names = set(AUDIO_REGISTRY.keys())
+        if os.path.isdir(AUDIO_DIR):
+            for f in os.listdir(AUDIO_DIR):
+                base, ext = os.path.splitext(f)
+                if ext.lower() in ('.wav', '.mp3'):
+                    names.add(base)
+        return sorted(names)
+
+    @classmethod
+    def _resolve_audio_path(cls, name: str, file_path: str = "") -> str:
+        """将 name 或 file_path 解析为文件绝对路径。返回空字符串表示找不到。"""
+        if file_path:
+            return file_path if os.path.exists(file_path) else ""
+
+        # 1) 预定义注册表
+        if name in AUDIO_REGISTRY:
+            target = os.path.join(AUDIO_DIR, AUDIO_REGISTRY[name])
+            if os.path.exists(target):
+                return target
+
+        # 2) 自动扫描 AUDIO_DIR 下的 name.wav / name.mp3
+        if os.path.isdir(AUDIO_DIR):
+            for ext in ('.wav', '.mp3', '.WAV', '.MP3'):
+                target = os.path.join(AUDIO_DIR, name + ext)
+                if os.path.exists(target):
+                    return target
+
+        return ""
+
     def play_audio(self, name: str = "beep", file_path: str = "",
                    volume: float = 1.0, blocking: bool = False) -> dict:
-        """通过音箱播放音频文件（不依赖 ROS2）。"""
-        if file_path:
-            target = file_path
-        elif name in AUDIO_REGISTRY:
-            target = os.path.join(AUDIO_DIR, AUDIO_REGISTRY[name])
-        else:
+        """通过音箱播放音频文件（不依赖 ROS2）。
+
+        音频来源（按优先级）：
+        1. file_path 直接指定文件路径
+        2. name 匹配 AUDIO_REGISTRY 预定义名称
+        3. name 匹配 audio/ 目录下的 .wav/.mp3 文件（自动发现）
+
+        只需把 .wav/.mp3 文件放入 audio/ 目录，LLM 即可用文件名（不含扩展名）播放。
+        """
+        target = self._resolve_audio_path(name, file_path)
+
+        if not target:
+            available = self.list_available_audio()
             return {
                 "success": False,
-                "message": f"Unknown audio name: '{name}'. "
-                           f"Available: {list(AUDIO_REGISTRY.keys())}"
+                "message": f"Audio not found: '{name}'. "
+                           f"Available ({len(available)}): {available}"
             }
 
         if not os.path.exists(target):
@@ -315,12 +354,12 @@ class RobotTools:
         },
         {
             "tool_name": "play_audio",
-            "description": "通过小车音箱播放音频。常用音频名称：welcome(欢迎)、start_patrol(开始巡检)、complete(完成)、alert(告警)、beep(提示音)、stop(停止)、danger(危险)、info(信息)、error(错误)、bye(再见)。也可指定自定义文件路径。",
+            "description": "通过小车音箱播放音频。常用预定义名称：welcome(欢迎)、start_patrol(开始巡检)、complete(完成)、alert(告警)、beep(提示音)、stop(停止)、danger(危险)、info(信息)、error(错误)、bye(再见)。也可使用 audio/ 目录下任意 .wav/.mp3 文件名（不含扩展名），或通过 file_path 指定绝对路径。",
             "parameters": {
                 "name": {
                     "type": "string",
                     "required": False,
-                    "description": "预定义音频名称：welcome/start_patrol/complete/alert/beep/stop/danger/info/error/bye"
+                    "description": "音频名称。支持预定义名称，也支持 audio/ 目录下任意文件名（不含扩展名），如 bird、music。默认 beep。"
                 },
                 "file_path": {
                     "type": "string",
