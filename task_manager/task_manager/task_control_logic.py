@@ -104,11 +104,14 @@ def plan_task_control(
             data_json=json.dumps(payload, ensure_ascii=False),
             should_stop=True,
             next_state="CANCELLED",
-            emergency_stop_active=False,
+            emergency_stop_active=True,
         )
 
     if normalized_action == "reset":
-        if normalized_state not in RESETTABLE_STATES:
+        can_reset = normalized_state in RESETTABLE_STATES or (
+            normalized_state == "PENDING" and emergency_stop_active
+        )
+        if not can_reset:
             return TaskControlPlan(
                 success=False,
                 message=f"cannot reset task while state is {normalized_state}",
@@ -125,7 +128,7 @@ def plan_task_control(
             task_id=task_id,
             status="PENDING",
             data_json=json.dumps(payload, ensure_ascii=False),
-            next_state="PENDING",
+            next_state=None if normalized_state == "PENDING" else "PENDING",
             emergency_stop_active=False,
         )
 

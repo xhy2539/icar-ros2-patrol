@@ -28,6 +28,7 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from builtin_interfaces.msg import Time as RosTime
 from geometry_msgs.msg import PoseStamped, Twist
+from std_msgs.msg import Bool
 
 # 自定义消息接口
 from icar_interfaces.msg import (
@@ -160,6 +161,9 @@ class TaskManagerNode(Node):
         self.cmd_vel_pub = self.create_publisher(
             Twist, '/cmd_vel', reliable_qos)
 
+        self.safety_stop_pub = self.create_publisher(
+            Bool, '/safety_stop', reliable_qos)
+
         self.goal_pose_pub = self.create_publisher(
             PoseStamped, '/goal_pose', reliable_qos)
 
@@ -248,6 +252,7 @@ class TaskManagerNode(Node):
         stop_msg.linear.x = 0.0
         stop_msg.angular.z = 0.0
         self.cmd_vel_pub.publish(stop_msg)
+        self.safety_stop_pub.publish(Bool(data=True))
         self.emergency_stop_active = True
 
     def _check_safety(self) -> bool:
@@ -270,15 +275,15 @@ class TaskManagerNode(Node):
 
     def _on_task_request(self, msg: TaskRequest):
         """接收 APP 下发的任务请求"""
-        if self.state != PatrolState.PENDING:
+        if self.state != PatrolState.PENDING or self.emergency_stop_active:
             self.get_logger().warn(
-                f"当前状态 {self.state.value}，无法接受新任务")
+                f"当前状态 {self.state.value}, "
+                f"emergency_stop={self.emergency_stop_active}，无法接受新任务")
             return
 
         self.current_task_id = f"task_{uuid.uuid4().hex[:8]}"
         self.route = list(msg.route) if msg.route else []
         self.route_index = 0
-        self.emergency_stop_active = False
         self.route_goals = []
         self.goal_sent_for_index = None
 
@@ -388,6 +393,11 @@ class TaskManagerNode(Node):
         # 执行计划中的副作用
         if plan.should_stop:
             self._emergency_stop(f"LLM requested: {request.action}")
+        if plan.success and plan.emergency_stop_active is not None:
+            self.emergency_stop_active = plan.emergency_stop_active
+            self.safety_stop_pub.publish(
+                Bool(data=plan.emergency_stop_active)
+            )
         if plan.next_state:
             try:
                 next_s = PatrolState(plan.next_state)

@@ -1,4 +1,4 @@
-from llm_gateway.tool_intent import parse_tool_intent
+from llm_gateway.tool_intent import is_reset_confirmation, parse_tool_intent
 
 
 def test_emergency_stop_is_local_fast_path():
@@ -22,3 +22,8 @@ def test_tracking_start_and_stop_are_distinct():
 
 def test_unknown_text_is_left_for_model():
     assert parse_tool_intent("今天天气怎么样") is None
+
+
+def test_reset_requires_explicit_confirmation():
+    assert is_reset_confirmation("现场安全，确认复位")
+    assert not is_reset_confirmation("重新开始")

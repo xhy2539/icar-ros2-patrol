@@ -15,6 +15,14 @@ def _clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
 
 
+def is_emergency_stop_text(text: str) -> bool:
+    """Recognize only explicit stop phrases; tracking/audio stop is not an e-stop."""
+    compact = "".join(str(text).strip().lower().split())
+    exact = {"停", "停车", "停下", "别动", "不要动", "马上停车", "立即停车"}
+    urgent_markers = ("急停", "紧急停车", "紧急停止", "立即停下", "马上停下")
+    return compact in exact or any(marker in compact for marker in urgent_markers)
+
+
 def parse_command(
     raw: str, max_linear: float = 0.35, max_angular: float = 1.2
 ) -> Motion:

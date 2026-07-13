@@ -18,20 +18,31 @@ docker exec "$CONTAINER" pkill -f '/app_control/lib/app_control/app_bridge_node'
 docker exec "$CONTAINER" pkill -f '/app_control/lib/app_control/velocity_mux_node' 2>/dev/null || true
 docker exec "$CONTAINER" pkill -f 'ros2 run app_control app_bridge_node' 2>/dev/null || true
 docker exec "$CONTAINER" pkill -f 'ros2 run app_control velocity_mux_node' 2>/dev/null || true
+docker exec "$CONTAINER" pkill -f '/task_manager/lib/task_manager/task_manager_node' 2>/dev/null || true
+docker exec "$CONTAINER" pkill -f '/llm_gateway/lib/llm_gateway/llm_gateway_node' 2>/dev/null || true
+docker exec "$CONTAINER" pkill -f 'ros2 run task_manager task_manager_node' 2>/dev/null || true
+docker exec "$CONTAINER" pkill -f 'ros2 run llm_gateway llm_gateway_node' 2>/dev/null || true
 
 run_ros_node() {
-  local executable="$1"
-  local logfile="$2"
+  local package="$1"
+  local executable="$2"
+  local logfile="$3"
+  shift 3
+  local ros_args="$*"
   docker exec "$CONTAINER" bash -lc \
     "source /opt/ros/foxy/setup.bash
      source $APP_WS/install/setup.bash
      export ROS_DOMAIN_ID=$ROS_DOMAIN_ID
-     nohup ros2 run app_control $executable </dev/null >$logfile 2>&1 &"
+     export PYTHONPATH=$APP_WS/src/llm:\${PYTHONPATH:-}
+     nohup ros2 run $package $executable $ros_args </dev/null >$logfile 2>&1 &"
 }
 
-run_ros_node velocity_mux_node /tmp/velocity_mux.log
+run_ros_node app_control velocity_mux_node /tmp/velocity_mux.log
 sleep 1
-run_ros_node app_bridge_node /tmp/app_bridge.log
+run_ros_node task_manager task_manager_node /tmp/task_manager.log
+run_ros_node llm_gateway llm_gateway_node /tmp/llm_gateway.log \
+  --ros-args -p tool_mode:=true -p provider:=auto
+run_ros_node app_control app_bridge_node /tmp/app_bridge.log
 
 docker exec "$CONTAINER" pkill -x yahboom_joy_X3 2>/dev/null || true
 docker exec "$CONTAINER" bash -lc \

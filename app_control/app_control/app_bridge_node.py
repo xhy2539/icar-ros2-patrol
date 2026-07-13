@@ -20,9 +20,9 @@ from icar_interfaces.msg import (
 )
 from icar_interfaces.srv import GenerateReport, ParseTask
 from rclpy.node import Node
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 
-from .command_parser import Motion, parse_command
+from .command_parser import Motion, is_emergency_stop_text, parse_command
 
 
 class AppBridgeNode(Node):
@@ -60,6 +60,9 @@ class AppBridgeNode(Node):
         )
         self._llm_command_publisher = self.create_publisher(
             String, "/llm/user_command", 10
+        )
+        self._safety_stop_publisher = self.create_publisher(
+            Bool, "/safety_stop", 10
         )
         self._parse_task_client = self.create_client(ParseTask, "/llm/parse_task")
         self._report_client = self.create_client(
@@ -321,6 +324,19 @@ class AppBridgeNode(Node):
             return
 
         request_id = str(data.get("request_id", "")).strip() or uuid.uuid4().hex
+        if is_emergency_stop_text(input_text):
+            # Do not wait for a model or even for llm_gateway availability.
+            self._stop_now()
+            self._safety_stop_publisher.publish(Bool(data=True))
+            self._send(
+                client,
+                {
+                    "topic": "command_ack",
+                    "action": "emergency_stop",
+                    "request_id": request_id,
+                    "ok": True,
+                },
+            )
         message = String()
         message.data = json.dumps(
             {

@@ -19,6 +19,14 @@ def _extract_route(text: str, default_route: List[str]) -> List[str]:
     return route or list(default_route)
 
 
+def is_reset_confirmation(text: str) -> bool:
+    compact = re.sub(r"\s+", "", str(text)).lower()
+    return any(
+        marker in compact
+        for marker in ("确认复位", "确认重置", "确认安全", "confirmreset")
+    )
+
+
 def parse_tool_intent(
     user_input: str, default_route: Optional[List[str]] = None
 ) -> Optional[Dict[str, object]]:
@@ -51,7 +59,7 @@ def parse_tool_intent(
     ):
         return {"tool_name": "cancel_task", "arguments": {"reason": text}}
 
-    if any(word in compact for word in ("确认复位", "确认重置", "安全后复位")):
+    if is_reset_confirmation(compact) or "安全后复位" in compact:
         return {"tool_name": "reset_task", "arguments": {"reason": text}}
 
     if any(word in compact for word in stop_words):
@@ -94,4 +102,3 @@ def parse_tool_intent(
         return {"tool_name": "play_audio", "arguments": {"name": name}}
 
     return None
-

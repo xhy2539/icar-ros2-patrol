@@ -31,6 +31,8 @@ from icar_interfaces.msg import (
 )
 from icar_interfaces.srv import GenerateReport, ParseTask
 
+from .tool_intent import is_reset_confirmation, parse_tool_intent
+
 # ---------------------------------------------------------------------------
 # 可选依赖 — RobotTools（工具调用模式）
 # ---------------------------------------------------------------------------
@@ -887,6 +889,14 @@ class LlmGatewayNode(Node):
         tool_name = tool_call.get("tool_name", "")
         arguments = tool_call.get("arguments", {})
 
+        if tool_name == "reset_task" and not is_reset_confirmation(user_input):
+            return {
+                "success": False,
+                "tool_name": tool_name,
+                "message": "解除急停需要明确说“确认复位”",
+                "provider": provider,
+            }
+
         tool_map = {
             "start_patrol":       self._tool_start_patrol,
             "get_robot_status":   self._tool_get_status,
@@ -932,14 +942,25 @@ class LlmGatewayNode(Node):
         return self._robot_tools.reset_task(reason)
 
     def _tool_start_patrol(self, route: list, user_text: str = "") -> dict:
-        if self._latest_task_status:
-            status = str(self._latest_task_status.get("status", ""))
-            if status != "PENDING":
-                return {
-                    "success": False,
-                    "message": f"当前任务状态为 {status}，请先取消或复位后再启动巡检",
-                    "data": self._latest_task_status,
-                }
+        status_result = self._robot_tools.get_robot_status()
+        if not status_result.get("success"):
+            return {
+                "success": False,
+                "message": "无法确认 task_manager 安全状态，拒绝启动巡检",
+                "data": status_result,
+            }
+        status_data = self._loads_json(status_result.get("data_json", "{}"))
+        status = str(status_data.get("status", status_result.get("status", "")))
+        if status != "PENDING" or status_data.get("emergency_stop_active"):
+            return {
+                "success": False,
+                "message": (
+                    f"当前任务状态为 {status or 'UNKNOWN'}"
+                    f"，急停={bool(status_data.get('emergency_stop_active'))}，"
+                    "请先确认安全并复位"
+                ),
+                "data": status_data,
+            }
         return self._robot_tools.start_patrol(route, user_text)
 
     def _tool_query_vision(self) -> dict:

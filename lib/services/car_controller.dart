@@ -27,6 +27,7 @@ class CarController extends ChangeNotifier {
     _service.captureStatusStream.listen(_onCaptureStatus);
     _service.parseTaskStream.listen(_onParseTaskResult);
     _service.reportStream.listen(_onReportResult);
+    _service.llmCommandStream.listen(_onLlmCommandResult);
     _service.obstacleStream.listen(_onObstacleStatus);
     _service.navStatusStream.listen(_onNavStatus);
     _service.taskStatusStream.listen(_onTaskStatus);
@@ -165,6 +166,10 @@ class CarController extends ChangeNotifier {
   /// LLM generate_report 流
   Stream<Map<String, dynamic>> get reportStream => _service.reportStream;
 
+  /// 可执行 LLM 指挥结果流
+  Stream<Map<String, dynamic>> get llmCommandStream =>
+      _service.llmCommandStream;
+
   /// 最新 parse_task 结果
   Map<String, dynamic>? _latestParseResult;
   Map<String, dynamic>? get latestParseResult => _latestParseResult;
@@ -172,6 +177,10 @@ class CarController extends ChangeNotifier {
   /// 最新巡检报告
   String _latestReport = '';
   String get latestReport => _latestReport;
+
+  /// 最新可执行工具结果
+  Map<String, dynamic>? _latestLlmCommandResult;
+  Map<String, dynamic>? get latestLlmCommandResult => _latestLlmCommandResult;
 
   /// LLM 请求是否正在等待响应
   bool _llmLoading = false;
@@ -400,6 +409,32 @@ class CarController extends ChangeNotifier {
     return ok;
   }
 
+  /// 发送自然语言到 LLM 工具通道；结果会带相同 request_id 返回。
+  String? sendLlmCommand(String inputText) {
+    final text = inputText.trim();
+    if (!isConnected || text.isEmpty) {
+      _addMessage(!isConnected ? '未连接，无法发送 LLM 指挥' : 'LLM 指令不能为空');
+      notifyListeners();
+      return null;
+    }
+    final requestId =
+        'app_${DateTime.now().microsecondsSinceEpoch.toRadixString(16)}';
+    _llmLoading = true;
+    _addMessage('[LLM 指挥] $text');
+    final ok = _service.sendJson({
+      'action': 'llm_command',
+      'request_id': requestId,
+      'input_text': text,
+    });
+    if (!ok) {
+      _llmLoading = false;
+      notifyListeners();
+      return null;
+    }
+    notifyListeners();
+    return requestId;
+  }
+
   /// 发送 LLM generate_report 请求（任务日志 → 巡检报告）
   bool sendGenerateReport(String taskId) {
     if (!isConnected) {
@@ -574,6 +609,17 @@ class CarController extends ChangeNotifier {
     } else {
       _addMessage('[LLM] 报告生成失败: ${result['error_msg'] ?? '未知错误'}');
     }
+    notifyListeners();
+  }
+
+  void _onLlmCommandResult(Map<String, dynamic> result) {
+    _llmLoading = false;
+    _latestLlmCommandResult = result;
+    final success = result['success'] == true;
+    final reply = result['reply'] ?? result['message'] ?? result['error_msg'];
+    _addMessage(
+      success ? '[LLM 执行] ${reply ?? '完成'}' : '[LLM 失败] ${reply ?? '未知错误'}',
+    );
     notifyListeners();
   }
 

@@ -75,6 +75,10 @@ class CarWebSocketService {
   /// LLM generate_report 结果流
   final _reportController = StreamController<Map<String, dynamic>>.broadcast();
 
+  /// 可执行 LLM 工具调用结果流 — /llm/response
+  final _llmCommandController =
+      StreamController<Map<String, dynamic>>.broadcast();
+
   /// 避障状态流 — /obstacle_status
   final _obstacleController = StreamController<ObstacleStatus>.broadcast();
 
@@ -115,6 +119,10 @@ class CarWebSocketService {
 
   /// LLM generate_report 结果流
   Stream<Map<String, dynamic>> get reportStream => _reportController.stream;
+
+  /// 可执行 LLM 指挥结果流
+  Stream<Map<String, dynamic>> get llmCommandStream =>
+      _llmCommandController.stream;
 
   /// 避障状态流
   Stream<ObstacleStatus> get obstacleStream => _obstacleController.stream;
@@ -335,6 +343,7 @@ class CarWebSocketService {
     subscribeNavigationTopics();
     subscribeSensorTopics();
     subscribeTrackingTopics();
+    subscribeTopic('llm_response');
   }
 
   /// 发送导航目标点
@@ -411,6 +420,13 @@ class CarWebSocketService {
       case '/llm/generate_report':
         _reportController.add(json);
         onLog?.call('← [LLM] generate_report 结果: success=${json['success']}');
+        return true;
+      case 'llm_response':
+      case '/llm/response':
+        _llmCommandController.add(json);
+        onLog?.call(
+          '← [LLM] 工具=${json['tool_name'] ?? '-'} success=${json['success']}',
+        );
         return true;
       case 'obstacle_status':
       case '/obstacle_status':
@@ -525,5 +541,13 @@ class CarWebSocketService {
     await _imageFrameController.close();
     await _parseTaskController.close();
     await _reportController.close();
+    await _llmCommandController.close();
+    await _obstacleController.close();
+    await _navStatusController.close();
+    await _taskStatusController.close();
+    await _taskLogController.close();
+    await _envDataController.close();
+    await _sensorAlertController.close();
+    await _trackingController.close();
   }
 }

@@ -21,6 +21,7 @@ class _MissionPageState extends State<MissionPage> {
   final TextEditingController _taskIdCtrl = TextEditingController();
   StreamSubscription<Map<String, dynamic>>? _parseSub;
   StreamSubscription<Map<String, dynamic>>? _reportSub;
+  StreamSubscription<Map<String, dynamic>>? _llmCommandSub;
 
   /// 语音识别
   final stt.SpeechToText _speech = stt.SpeechToText();
@@ -46,6 +47,7 @@ class _MissionPageState extends State<MissionPage> {
     _ctrl.addListener(_onCtrlChanged);
     _parseSub = _ctrl.parseTaskStream.listen(_onParseResult);
     _reportSub = _ctrl.reportStream.listen(_onReportResult);
+    _llmCommandSub = _ctrl.llmCommandStream.listen(_onLlmCommandResult);
     _initSpeech();
   }
 
@@ -107,6 +109,7 @@ class _MissionPageState extends State<MissionPage> {
     _ctrl.removeListener(_onCtrlChanged);
     _parseSub?.cancel();
     _reportSub?.cancel();
+    _llmCommandSub?.cancel();
     _inputCtrl.dispose();
     _taskIdCtrl.dispose();
     super.dispose();
@@ -147,17 +150,42 @@ class _MissionPageState extends State<MissionPage> {
     });
   }
 
+  void _onLlmCommandResult(Map<String, dynamic> result) {
+    final requestId = result['request_id']?.toString() ?? '';
+    final success = result['success'] == true;
+    setState(() {
+      _ChatEntry? entry;
+      for (final candidate in _history.reversed) {
+        if (candidate.type == _EntryType.pending &&
+            (requestId.isEmpty || candidate.requestId == requestId)) {
+          entry = candidate;
+          break;
+        }
+      }
+      if (entry == null) return;
+      entry.result = success
+          ? _ToolSuccess(raw: result)
+          : _ParseError(
+              msg:
+                  result['reply']?.toString() ??
+                  result['message']?.toString() ??
+                  result['error_msg']?.toString() ??
+                  '执行失败',
+            );
+    });
+  }
+
   void _sendParseTask() {
     final text = _inputCtrl.text.trim();
     if (text.isEmpty) return;
 
+    final requestId = _ctrl.sendLlmCommand(text);
+    if (requestId == null) return;
     setState(() {
-      _history.add(_ChatEntry(
-        type: _EntryType.pending,
-        input: text,
-      ));
+      _history.add(
+        _ChatEntry(type: _EntryType.pending, input: text, requestId: requestId),
+      );
     });
-    _ctrl.sendParseTask(text);
     _inputCtrl.clear();
     FocusScope.of(context).unfocus();
   }
@@ -166,10 +194,9 @@ class _MissionPageState extends State<MissionPage> {
     if (parse.taskJson != null) {
       _ctrl.sendParsedTaskToManager(parse.taskJson!);
       setState(() {
-        _history.add(_ChatEntry(
-          type: _EntryType.dispatch,
-          input: '任务已下发至 task_manager',
-        ));
+        _history.add(
+          _ChatEntry(type: _EntryType.dispatch, input: '任务已下发至 task_manager'),
+        );
       });
     }
   }
@@ -178,10 +205,7 @@ class _MissionPageState extends State<MissionPage> {
     final id = _taskIdCtrl.text.trim();
     if (id.isEmpty) return;
     setState(() {
-      _history.add(_ChatEntry(
-        type: _EntryType.reportReq,
-        input: '请求报告: $id',
-      ));
+      _history.add(_ChatEntry(type: _EntryType.reportReq, input: '请求报告: $id'));
     });
     _ctrl.sendGenerateReport(id);
   }
@@ -227,7 +251,7 @@ class _MissionPageState extends State<MissionPage> {
           ),
           const SizedBox(height: 12),
           const Text(
-            '智能任务下发',
+            'LLM 智能指挥',
             style: TextStyle(
               color: AppColors.darkNavy,
               fontSize: 16,
@@ -236,7 +260,7 @@ class _MissionPageState extends State<MissionPage> {
           ),
           const SizedBox(height: 6),
           Text(
-            '输入自然语言指令，LLM 自动解析为任务',
+            '自然语言会调用安全工具执行；不会绕过任务调度和急停',
             style: TextStyle(
               color: AppColors.blueGray.withValues(alpha: 0.7),
               fontSize: 13,
@@ -250,12 +274,7 @@ class _MissionPageState extends State<MissionPage> {
   }
 
   Widget _buildQuickSuggestions() {
-    final suggestions = [
-      '巡检 A、B、C 三个点',
-      '去 D 点检测一下',
-      '遇到障碍物就停止',
-      '你到哪个点了？',
-    ];
+    final suggestions = ['巡检 A、B、C 三个点', '跟踪前面的人', '停止跟踪', '你到哪个点了？'];
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Wrap(
@@ -269,8 +288,7 @@ class _MissionPageState extends State<MissionPage> {
               _sendParseTask();
             },
             child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
                 color: AppColors.surface,
                 borderRadius: BorderRadius.circular(20),
@@ -317,13 +335,12 @@ class _MissionPageState extends State<MissionPage> {
               constraints: BoxConstraints(
                 maxWidth: MediaQuery.of(context).size.width * 0.75,
               ),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
                 color: AppColors.orange,
-                borderRadius: BorderRadius.circular(16).copyWith(
-                  topRight: const Radius.circular(4),
-                ),
+                borderRadius: BorderRadius.circular(
+                  16,
+                ).copyWith(topRight: const Radius.circular(4)),
               ),
               child: Text(
                 entry.input,
@@ -348,12 +365,10 @@ class _MissionPageState extends State<MissionPage> {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
           color: AppColors.surface,
-          borderRadius: BorderRadius.circular(16).copyWith(
-            topLeft: const Radius.circular(4),
-          ),
-          border: Border.all(
-            color: AppColors.blueGray.withValues(alpha: 0.2),
-          ),
+          borderRadius: BorderRadius.circular(
+            16,
+          ).copyWith(topLeft: const Radius.circular(4)),
+          border: Border.all(color: AppColors.blueGray.withValues(alpha: 0.2)),
         ),
         child: const Row(
           mainAxisSize: MainAxisSize.min,
@@ -368,7 +383,7 @@ class _MissionPageState extends State<MissionPage> {
             ),
             SizedBox(width: 8),
             Text(
-              'LLM 解析中...',
+              '正在理解并执行...',
               style: TextStyle(color: AppColors.blueGray, fontSize: 13),
             ),
           ],
@@ -381,28 +396,32 @@ class _MissionPageState extends State<MissionPage> {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
           color: AppColors.errorRed.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(16).copyWith(
-            topLeft: const Radius.circular(4),
-          ),
-          border: Border.all(
-            color: AppColors.errorRed.withValues(alpha: 0.3),
-          ),
+          borderRadius: BorderRadius.circular(
+            16,
+          ).copyWith(topLeft: const Radius.circular(4)),
+          border: Border.all(color: AppColors.errorRed.withValues(alpha: 0.3)),
         ),
         child: Row(
           children: [
-            const Icon(Icons.error_outline,
-                color: AppColors.errorRed, size: 18),
+            const Icon(
+              Icons.error_outline,
+              color: AppColors.errorRed,
+              size: 18,
+            ),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
                 result.msg,
-                style: const TextStyle(
-                    color: AppColors.errorRed, fontSize: 13),
+                style: const TextStyle(color: AppColors.errorRed, fontSize: 13),
               ),
             ),
           ],
         ),
       );
+    }
+
+    if (result is _ToolSuccess) {
+      return _buildToolResultCard(result.raw);
     }
 
     if (result is _ParseSuccess) {
@@ -418,9 +437,9 @@ class _MissionPageState extends State<MissionPage> {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
           color: AppColors.successGreen.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(16).copyWith(
-            topLeft: const Radius.circular(4),
-          ),
+          borderRadius: BorderRadius.circular(
+            16,
+          ).copyWith(topLeft: const Radius.circular(4)),
           border: Border.all(
             color: AppColors.successGreen.withValues(alpha: 0.3),
           ),
@@ -428,15 +447,15 @@ class _MissionPageState extends State<MissionPage> {
         child: const Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.check_circle,
-                color: AppColors.successGreen, size: 18),
+            Icon(Icons.check_circle, color: AppColors.successGreen, size: 18),
             SizedBox(width: 8),
             Text(
               '任务已下发',
               style: TextStyle(
-                  color: AppColors.successGreen,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500),
+                color: AppColors.successGreen,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
             ),
           ],
         ),
@@ -444,6 +463,97 @@ class _MissionPageState extends State<MissionPage> {
     }
 
     return const SizedBox.shrink();
+  }
+
+  Widget _buildToolResultCard(Map<String, dynamic> result) {
+    final toolName = result['tool_name']?.toString() ?? '';
+    final provider = result['provider']?.toString() ?? 'rule';
+    final reply =
+        result['reply']?.toString() ?? result['message']?.toString() ?? '执行完成';
+    final data = result['data'];
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(
+          16,
+        ).copyWith(topLeft: const Radius.circular(4)),
+        border: Border.all(
+          color: AppColors.successGreen.withValues(alpha: 0.35),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.smart_toy_outlined,
+                color: AppColors.successGreen,
+                size: 18,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                _toolNameZh(toolName),
+                style: const TextStyle(
+                  color: AppColors.successGreen,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                provider == 'deepseek' ? 'LLM' : '本地安全规则',
+                style: const TextStyle(color: AppColors.blueGray, fontSize: 10),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            reply,
+            style: const TextStyle(
+              color: AppColors.darkNavy,
+              fontSize: 14,
+              height: 1.5,
+            ),
+          ),
+          if (data is Map && data.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Divider(color: AppColors.blueGray.withValues(alpha: 0.15)),
+            Text(
+              const JsonEncoder.withIndent('  ').convert(data),
+              maxLines: 6,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: AppColors.blueGray,
+                fontFamily: 'monospace',
+                fontSize: 11,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  String _toolNameZh(String toolName) {
+    const names = {
+      'start_patrol': '已启动巡检',
+      'get_robot_status': '状态查询',
+      'stop_robot': '紧急停止',
+      'cancel_task': '取消任务',
+      'reset_task': '复位任务',
+      'query_vision': '视觉查询',
+      'query_navigation': '导航查询',
+      'check_safety': '安全查询',
+      'play_audio': '播放音频',
+      'download_audio': '下载音频',
+      'start_tracking': '启动目标跟踪',
+      'stop_tracking': '停止目标跟踪',
+    };
+    return names[toolName] ?? (toolName.isEmpty ? 'LLM 执行结果' : toolName);
   }
 
   Widget _buildParseResultCard(_ParseSuccess parse) {
@@ -457,12 +567,10 @@ class _MissionPageState extends State<MissionPage> {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16).copyWith(
-          topLeft: const Radius.circular(4),
-        ),
-        border: Border.all(
-          color: AppColors.bluePurple.withValues(alpha: 0.3),
-        ),
+        borderRadius: BorderRadius.circular(
+          16,
+        ).copyWith(topLeft: const Radius.circular(4)),
+        border: Border.all(color: AppColors.bluePurple.withValues(alpha: 0.3)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -474,10 +582,7 @@ class _MissionPageState extends State<MissionPage> {
               const Spacer(),
               Text(
                 'provider: ${task?['params']?['provider'] ?? '-'}',
-                style: const TextStyle(
-                  color: AppColors.blueGray,
-                  fontSize: 10,
-                ),
+                style: const TextStyle(color: AppColors.blueGray, fontSize: 10),
               ),
             ],
           ),
@@ -554,9 +659,9 @@ class _MissionPageState extends State<MissionPage> {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16).copyWith(
-          topLeft: const Radius.circular(4),
-        ),
+        borderRadius: BorderRadius.circular(
+          16,
+        ).copyWith(topLeft: const Radius.circular(4)),
         border: Border.all(
           color: AppColors.successGreen.withValues(alpha: 0.3),
         ),
@@ -566,8 +671,7 @@ class _MissionPageState extends State<MissionPage> {
         children: [
           Row(
             children: [
-              Icon(Icons.description,
-                  color: AppColors.successGreen, size: 18),
+              Icon(Icons.description, color: AppColors.successGreen, size: 18),
               const SizedBox(width: 6),
               const Text(
                 '巡检报告',
@@ -655,10 +759,7 @@ class _MissionPageState extends State<MissionPage> {
           Expanded(
             child: Text(
               value,
-              style: const TextStyle(
-                color: AppColors.darkNavy,
-                fontSize: 12,
-              ),
+              style: const TextStyle(color: AppColors.darkNavy, fontSize: 12),
             ),
           ),
         ],
@@ -681,8 +782,10 @@ class _MissionPageState extends State<MissionPage> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surface,
-        title: const Text('原始 JSON',
-            style: TextStyle(color: AppColors.darkNavy, fontSize: 16)),
+        title: const Text(
+          '原始 JSON',
+          style: TextStyle(color: AppColors.darkNavy, fontSize: 16),
+        ),
         content: SingleChildScrollView(
           child: SelectableText(
             const JsonEncoder.withIndent('  ').convert(raw),
@@ -696,8 +799,7 @@ class _MissionPageState extends State<MissionPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('关闭',
-                style: TextStyle(color: AppColors.orange)),
+            child: const Text('关闭', style: TextStyle(color: AppColors.orange)),
           ),
         ],
       ),
@@ -725,7 +827,9 @@ class _MissionPageState extends State<MissionPage> {
                 duration: const Duration(milliseconds: 200),
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 decoration: BoxDecoration(
-                  color: !_showLogView ? AppColors.bluePurple : Colors.transparent,
+                  color: !_showLogView
+                      ? AppColors.bluePurple
+                      : Colors.transparent,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Center(
@@ -748,7 +852,9 @@ class _MissionPageState extends State<MissionPage> {
                 duration: const Duration(milliseconds: 200),
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 decoration: BoxDecoration(
-                  color: _showLogView ? AppColors.bluePurple : Colors.transparent,
+                  color: _showLogView
+                      ? AppColors.bluePurple
+                      : Colors.transparent,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Center(
@@ -784,60 +890,78 @@ class _MissionPageState extends State<MissionPage> {
       ),
       child: Row(
         children: [
-          const Text('巡检点: ', style: TextStyle(color: AppColors.blueGray, fontSize: 12)),
-          ...['A', 'B', 'C'].map((cp) => Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: GestureDetector(
-              onTap: () => setState(() {
-                if (_selectedCheckpoints.contains(cp)) {
-                  _selectedCheckpoints.remove(cp);
-                } else {
-                  _selectedCheckpoints.add(cp);
-                }
-              }),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: _selectedCheckpoints.contains(cp)
-                    ? AppColors.bluePurple : Colors.transparent,
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(
-                    color: _selectedCheckpoints.contains(cp)
-                      ? AppColors.bluePurple : AppColors.blueGray.withValues(alpha: 0.3),
+          const Text(
+            '巡检点: ',
+            style: TextStyle(color: AppColors.blueGray, fontSize: 12),
+          ),
+          ...['A', 'B', 'C'].map(
+            (cp) => Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: GestureDetector(
+                onTap: () => setState(() {
+                  if (_selectedCheckpoints.contains(cp)) {
+                    _selectedCheckpoints.remove(cp);
+                  } else {
+                    _selectedCheckpoints.add(cp);
+                  }
+                }),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
                   ),
-                ),
-                child: Text(
-                  cp,
-                  style: TextStyle(
-                    color: _selectedCheckpoints.contains(cp) ? Colors.white : AppColors.blueGray,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
+                  decoration: BoxDecoration(
+                    color: _selectedCheckpoints.contains(cp)
+                        ? AppColors.bluePurple
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: _selectedCheckpoints.contains(cp)
+                          ? AppColors.bluePurple
+                          : AppColors.blueGray.withValues(alpha: 0.3),
+                    ),
+                  ),
+                  child: Text(
+                    cp,
+                    style: TextStyle(
+                      color: _selectedCheckpoints.contains(cp)
+                          ? Colors.white
+                          : AppColors.blueGray,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ),
             ),
-          )),
+          ),
           const Spacer(),
           GestureDetector(
-            onTap: _selectedCheckpoints.isEmpty ? null : () {
-              final route = _selectedCheckpoints.toList()..sort();
-              _ctrl.sendParsedTaskToManager({
-                'task_type': 'patrol',
-                'route': route,
-                'actions': ['navigate', 'detect', 'collect'],
-              });
-            },
+            onTap: _selectedCheckpoints.isEmpty
+                ? null
+                : () {
+                    final route = _selectedCheckpoints.toList()..sort();
+                    _ctrl.sendParsedTaskToManager({
+                      'task_type': 'patrol',
+                      'route': route,
+                      'actions': ['navigate', 'detect', 'collect'],
+                    });
+                  },
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
                 color: _selectedCheckpoints.isEmpty
-                  ? AppColors.blueGray.withValues(alpha: 0.3)
-                  : AppColors.orange,
+                    ? AppColors.blueGray.withValues(alpha: 0.3)
+                    : AppColors.orange,
                 borderRadius: BorderRadius.circular(8),
               ),
               child: const Text(
                 '一键巡检',
-                style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ),
@@ -869,22 +993,31 @@ class _MissionPageState extends State<MissionPage> {
             children: [
               _buildStat('日志总数', '${logs.length}', AppColors.bluePurple),
               _buildStat('任务状态', taskStatus.statusZh, taskStatus.statusColor),
-              _buildStat('进度', '${taskStatus.currentStep}/${taskStatus.totalSteps}', AppColors.orange),
+              _buildStat(
+                '进度',
+                '${taskStatus.currentStep}/${taskStatus.totalSteps}',
+                AppColors.orange,
+              ),
             ],
           ),
         ),
         // Timeline
         Expanded(
           child: logs.isEmpty
-            ? const Center(child: Text('暂无任务日志', style: TextStyle(color: AppColors.blueGray)))
-            : ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: logs.length,
-                itemBuilder: (context, index) {
-                  final log = logs[index];
-                  return _buildLogEntry(log, index == 0);
-                },
-              ),
+              ? const Center(
+                  child: Text(
+                    '暂无任务日志',
+                    style: TextStyle(color: AppColors.blueGray),
+                  ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: logs.length,
+                  itemBuilder: (context, index) {
+                    final log = logs[index];
+                    return _buildLogEntry(log, index == 0);
+                  },
+                ),
         ),
       ],
     );
@@ -893,9 +1026,19 @@ class _MissionPageState extends State<MissionPage> {
   Widget _buildStat(String label, String value, Color color) {
     return Column(
       children: [
-        Text(value, style: TextStyle(color: color, fontSize: 14, fontWeight: FontWeight.w700)),
+        Text(
+          value,
+          style: TextStyle(
+            color: color,
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
         const SizedBox(height: 2),
-        Text(label, style: const TextStyle(color: AppColors.blueGray, fontSize: 10)),
+        Text(
+          label,
+          style: const TextStyle(color: AppColors.blueGray, fontSize: 10),
+        ),
       ],
     );
   }
@@ -910,7 +1053,8 @@ class _MissionPageState extends State<MissionPage> {
           Column(
             children: [
               Container(
-                width: 28, height: 28,
+                width: 28,
+                height: 28,
                 decoration: BoxDecoration(
                   color: log.color.withValues(alpha: 0.15),
                   shape: BoxShape.circle,
@@ -918,7 +1062,11 @@ class _MissionPageState extends State<MissionPage> {
                 child: Icon(log.icon, size: 14, color: log.color),
               ),
               if (!isLatest)
-                Container(width: 2, height: 30, color: AppColors.blueGray.withValues(alpha: 0.2)),
+                Container(
+                  width: 2,
+                  height: 30,
+                  color: AppColors.blueGray.withValues(alpha: 0.2),
+                ),
             ],
           ),
           const SizedBox(width: 10),
@@ -929,15 +1077,36 @@ class _MissionPageState extends State<MissionPage> {
               children: [
                 Row(
                   children: [
-                    Text(log.titleZh, style: TextStyle(color: log.color, fontSize: 13, fontWeight: FontWeight.w600)),
+                    Text(
+                      log.titleZh,
+                      style: TextStyle(
+                        color: log.color,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                     const Spacer(),
-                    Text(log.timeShort, style: const TextStyle(color: AppColors.blueGray, fontSize: 10)),
+                    Text(
+                      log.timeShort,
+                      style: const TextStyle(
+                        color: AppColors.blueGray,
+                        fontSize: 10,
+                      ),
+                    ),
                   ],
                 ),
                 if (log.summary.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 2),
-                    child: Text(log.summary, style: const TextStyle(color: AppColors.blueGray, fontSize: 11), maxLines: 2, overflow: TextOverflow.ellipsis),
+                    child: Text(
+                      log.summary,
+                      style: const TextStyle(
+                        color: AppColors.blueGray,
+                        fontSize: 11,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
               ],
             ),
@@ -978,7 +1147,9 @@ class _MissionPageState extends State<MissionPage> {
                     textInputAction: TextInputAction.send,
                     onSubmitted: (_) => _sendParseTask(),
                     style: const TextStyle(
-                        color: AppColors.darkNavy, fontSize: 14),
+                      color: AppColors.darkNavy,
+                      fontSize: 14,
+                    ),
                     decoration: InputDecoration(
                       isDense: true,
                       contentPadding: const EdgeInsets.symmetric(
@@ -987,7 +1158,7 @@ class _MissionPageState extends State<MissionPage> {
                       ),
                       hintText: _isListening
                           ? '正在听...$_currentWords'
-                          : '输入指令，如"巡检ABC三点"',
+                          : '如“巡检ABC”“跟踪前面的人”“立即停下”',
                       hintStyle: TextStyle(
                         color: _isListening
                             ? AppColors.orange.withValues(alpha: 0.7)
@@ -1034,8 +1205,7 @@ class _MissionPageState extends State<MissionPage> {
                   height: 42,
                   width: 42,
                   child: ElevatedButton(
-                    onPressed:
-                        _ctrl.isConnected ? _sendParseTask : null,
+                    onPressed: _ctrl.isConnected ? _sendParseTask : null,
                     style: ElevatedButton.styleFrom(
                       padding: EdgeInsets.zero,
                       shape: RoundedRectangleBorder(
@@ -1051,13 +1221,15 @@ class _MissionPageState extends State<MissionPage> {
             // 报告请求行
             Row(
               children: [
-                const Icon(Icons.description,
-                    color: AppColors.blueGray, size: 16),
+                const Icon(
+                  Icons.description,
+                  color: AppColors.blueGray,
+                  size: 16,
+                ),
                 const SizedBox(width: 6),
                 const Text(
                   '报告',
-                  style: TextStyle(
-                      color: AppColors.blueGray, fontSize: 11),
+                  style: TextStyle(color: AppColors.blueGray, fontSize: 11),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
@@ -1068,7 +1240,9 @@ class _MissionPageState extends State<MissionPage> {
                       textInputAction: TextInputAction.go,
                       onSubmitted: (_) => _requestReport(),
                       style: const TextStyle(
-                          color: AppColors.darkNavy, fontSize: 12),
+                        color: AppColors.darkNavy,
+                        fontSize: 12,
+                      ),
                       decoration: InputDecoration(
                         isDense: true,
                         contentPadding: const EdgeInsets.symmetric(
@@ -1077,8 +1251,7 @@ class _MissionPageState extends State<MissionPage> {
                         ),
                         hintText: 'task_id',
                         hintStyle: TextStyle(
-                          color:
-                              AppColors.blueGray.withValues(alpha: 0.5),
+                          color: AppColors.blueGray.withValues(alpha: 0.5),
                           fontSize: 12,
                         ),
                       ),
@@ -1089,11 +1262,9 @@ class _MissionPageState extends State<MissionPage> {
                 SizedBox(
                   height: 34,
                   child: ElevatedButton(
-                    onPressed:
-                        _ctrl.isConnected ? _requestReport : null,
+                    onPressed: _ctrl.isConnected ? _requestReport : null,
                     style: ElevatedButton.styleFrom(
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 12),
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
                       textStyle: const TextStyle(fontSize: 12),
                       backgroundColor: AppColors.bluePurple,
                     ),
@@ -1118,9 +1289,15 @@ enum _EntryType { pending, dispatch, reportReq }
 class _ChatEntry {
   final _EntryType type;
   final String input;
-  Object? result; // _ParseSuccess / _ParseError / _ReportSuccess
+  final String requestId;
+  Object? result; // _ToolSuccess / _ParseSuccess / _ParseError / _ReportSuccess
 
-  _ChatEntry({required this.type, required this.input});
+  _ChatEntry({required this.type, required this.input, this.requestId = ''});
+}
+
+class _ToolSuccess {
+  final Map<String, dynamic> raw;
+  _ToolSuccess({required this.raw});
 }
 
 class _ParseSuccess {
