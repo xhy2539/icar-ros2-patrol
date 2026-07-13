@@ -96,6 +96,23 @@ class ObstacleScanLogicTest(unittest.TestCase):
         self.assertEqual(result["risk_level"], "safe")
         self.assertEqual(result["action"], "none")
 
+    def test_rotated_laser_mount_uses_pi_as_vehicle_front(self):
+        ranges = [2.0] * 37
+        ranges[0] = 0.4
+        result = self.module.classify_front_scan(
+            ranges=ranges,
+            angle_min=-math.pi,
+            angle_increment=math.radians(10),
+            range_min=0.15,
+            range_max=12.0,
+            front_center_deg=180.0,
+        )
+
+        self.assertTrue(result["is_obstacle"])
+        self.assertAlmostEqual(result["min_distance"], 0.4)
+        self.assertEqual(result["risk_level"], "danger")
+        self.assertEqual(result["action"], "stop")
+
     def test_invalid_and_out_of_range_values_are_filtered(self):
         ranges = [2.0] * 37
         ranges[15] = float("nan")

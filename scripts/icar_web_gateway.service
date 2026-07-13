@@ -1,0 +1,19 @@
+[Unit]
+Description=iCar Web Control Gateway
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jetson
+WorkingDirectory=/home/jetson/icar-ros2-patrol
+Environment=ICAR_BRIDGE_HOST=127.0.0.1
+Environment=ICAR_BRIDGE_PORT=6501
+Environment=ICAR_ROS_VIDEO_HOST=127.0.0.1
+Environment=ICAR_ROS_VIDEO_PORT=6502
+ExecStart=/usr/bin/python3 app/web_gateway.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,15 @@
+[Unit]
+Description=iCar ROS2 Patrol Startup
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=root
+ExecStart=/bin/bash /home/jetson/icar-ros2-patrol/scripts/icar_startup.sh
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

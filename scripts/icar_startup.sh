@@ -134,17 +134,30 @@ sleep 2
 echo "[11/14] Verifying ROS graph"
 # Foxy daemon can retain a partial cross-container graph. Query the two
 # safety-critical nodes without the daemon and verify the endpoint direction.
-MUX_INFO=$(docker exec -e ROS_DOMAIN_ID=30 autodrive_ros2 bash -lc \
-  'source /opt/ros/foxy/setup.bash; ros2 node info --no-daemon --spin-time 5 /velocity_mux')
-DRIVER_INFO=$(docker exec -e ROS_DOMAIN_ID=30 autodrive_ros2 bash -lc \
-  'source /opt/ros/foxy/setup.bash; ros2 node info --no-daemon --spin-time 5 /driver_node')
+# Discovery on the Jetson can take several seconds immediately after a restart,
+# so retry instead of turning a healthy graph into a service restart loop.
+ros_node_info() {
+  local node="$1"
+  local output=""
+  for _ in $(seq 1 3); do
+    if output=$(docker exec -e ROS_DOMAIN_ID=30 autodrive_ros2 bash -lc \
+      "source /opt/ros/foxy/setup.bash; ros2 node info --no-daemon --spin-time 10 '$node'" 2>/dev/null); then
+      printf '%s\n' "$output"
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+MUX_INFO=$(ros_node_info /velocity_mux)
+DRIVER_INFO=$(ros_node_info /driver_node)
 echo "$MUX_INFO"
 echo "$DRIVER_INFO"
 echo "$MUX_INFO" | grep -q '^    /cmd_vel: geometry_msgs/msg/Twist$'
 echo "$DRIVER_INFO" | grep -q '^    /cmd_vel: geometry_msgs/msg/Twist$'
 
 NODE_LIST=$(docker exec -e ROS_DOMAIN_ID=30 autodrive_ros2 bash -lc \
-  'source /opt/ros/foxy/setup.bash; ros2 node list --no-daemon --spin-time 5')
+  'source /opt/ros/foxy/setup.bash; ros2 node list --no-daemon --spin-time 10')
 echo "$NODE_LIST"
 [ "$(echo "$NODE_LIST" | grep -c '^/task_manager_node$')" -eq 1 ]
 [ "$(echo "$NODE_LIST" | grep -c '^/llm_gateway_node$')" -eq 1 ]

@@ -38,7 +38,11 @@ class AppBridgeNode(Node):
         self.declare_parameter("listen_host", "0.0.0.0")
         self.declare_parameter("listen_port", 6501)
         self.declare_parameter("output_topic", "/cmd_vel_app")
-        self.declare_parameter("command_timeout_sec", 0.35)
+        # Browser and mobile timer callbacks can briefly stall while rendering
+        # video or while the OS schedules the app. Keep a one-second lease so
+        # sub-second jitter doesn't create stop/start motion. A closed TCP
+        # connection still calls _stop_now() immediately.
+        self.declare_parameter("command_timeout_sec", 1.0)
         self.declare_parameter("max_linear", 0.35)
         self.declare_parameter("max_angular", 1.2)
 

@@ -65,21 +65,35 @@ if [ "$APP_ENABLE_JOYSTICK" = "1" ]; then
        -r /cmd_vel:=/cmd_vel_joy </dev/null >/tmp/joy_ctrl.log 2>&1 &"
 fi
 
+WEB_USER="${ICAR_WEB_USER:-$(stat -c '%U' "$REPO_DIR")}"
+WEB_SERVICE="${ICAR_WEB_SERVICE:-icar_web_gateway.service}"
+USE_SYSTEMD_WEB=0
+if [ "$(id -u)" -eq 0 ] && systemctl cat "$WEB_SERVICE" >/dev/null 2>&1; then
+  USE_SYSTEMD_WEB=1
+  systemctl stop "$WEB_SERVICE" 2>/dev/null || true
+fi
 pkill -f '^python3 app/web_gateway.py$' 2>/dev/null || true
 rm -f /tmp/icar_web_gateway.log
-WEB_USER="${ICAR_WEB_USER:-$(stat -c '%U' "$REPO_DIR")}"
 if [ "$(id -u)" -eq 0 ] && [ "$WEB_USER" != root ]; then
   runuser -u "$WEB_USER" -- python3 -c 'import flask_sock' 2>/dev/null || \
     runuser -u "$WEB_USER" -- python3 -m pip install --user \
       --disable-pip-version-check -r "$REPO_DIR/app/requirements.txt"
-  runuser -u "$WEB_USER" -- bash -lc \
-    "cd '$REPO_DIR'; nohup python3 app/web_gateway.py </dev/null >/tmp/icar_web_gateway.log 2>&1 &"
+  if [ "$USE_SYSTEMD_WEB" = "1" ]; then
+    systemctl restart "$WEB_SERVICE"
+  else
+    runuser -u "$WEB_USER" -- bash -lc \
+      "cd '$REPO_DIR'; nohup python3 app/web_gateway.py </dev/null >/tmp/icar_web_gateway.log 2>&1 &"
+  fi
 else
   python3 -c 'import flask_sock' 2>/dev/null || \
     python3 -m pip install --user --disable-pip-version-check \
       -r "$REPO_DIR/app/requirements.txt"
-  cd "$REPO_DIR"
-  nohup python3 app/web_gateway.py </dev/null >/tmp/icar_web_gateway.log 2>&1 &
+  if [ "$USE_SYSTEMD_WEB" = "1" ]; then
+    systemctl restart "$WEB_SERVICE"
+  else
+    cd "$REPO_DIR"
+    nohup python3 app/web_gateway.py </dev/null >/tmp/icar_web_gateway.log 2>&1 &
+  fi
 fi
 
 sleep 3
