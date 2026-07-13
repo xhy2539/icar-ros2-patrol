@@ -24,7 +24,10 @@ import uuid
 from enum import Enum
 
 import rclpy
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from builtin_interfaces.msg import Time as RosTime
+from geometry_msgs.msg import PoseStamped, Twist
 
 # 自定义消息接口
 from icar_interfaces.msg import (
@@ -360,7 +363,12 @@ class TaskManagerNode(Node):
     def _state_machine_loop(self):
         """状态机主循环，按当前状态执行对应动作"""
         if not self._check_safety():
-            return  # 紧急停止状态，不执行任何动作
+            # 持续发布停止指令，防止被其他节点覆写
+            stop_msg = Twist()
+            stop_msg.linear.x = 0.0
+            stop_msg.angular.z = 0.0
+            self.cmd_vel_pub.publish(stop_msg)
+            return
 
         state_handlers = {
             PatrolState.PENDING:    self._handle_pending,
