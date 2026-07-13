@@ -799,7 +799,27 @@ class LlmGatewayNode(Node):
 
     def _on_tool_command(self, msg):
         """处理 /llm/user_command 消息，执行工具并发布到 /llm/response。"""
-        user_input = msg.data.strip()
+        # Cloud inference and task-control services may block.  A worker keeps
+        # the ROS executor free to receive status and service responses.
+        threading.Thread(
+            target=self._process_tool_command,
+            args=(msg.data,),
+            daemon=True,
+        ).start()
+
+    def _process_tool_command(self, raw_command: str):
+        request_id = ""
+        source = "ros"
+        user_input = raw_command.strip()
+        if user_input.startswith("{"):
+            try:
+                envelope = json.loads(user_input)
+                if isinstance(envelope, dict) and "input_text" in envelope:
+                    request_id = str(envelope.get("request_id", ""))
+                    source = str(envelope.get("source", "ros"))
+                    user_input = str(envelope.get("input_text", "")).strip()
+            except json.JSONDecodeError:
+                pass
         if not user_input:
             return
 
@@ -815,6 +835,11 @@ class LlmGatewayNode(Node):
             self.get_logger().error(f"Tool execution exception: {_exc}")
             result = {"success": False, "tool_name": "?", "message": str(_exc)}
 
+        result.setdefault("reply", self._tool_reply(result))
+        result["request_id"] = request_id
+        result["input_text"] = user_input
+        result["source"] = source
+
         if self._response_pub:
             from std_msgs.msg import String
             resp = String()
@@ -826,29 +851,38 @@ class LlmGatewayNode(Node):
         if self._robot_tools is None:
             return {"success": False, "message": "tool_mode requires robot_tools"}
 
-        if _TOOL_CLIENT_AVAILABLE and _ToolClient is not None:
+        # Deterministic commands are both the offline fallback and the fast path
+        # for safety-critical intents such as emergency stop.
+        tool_call = parse_tool_intent(user_input, self.default_route)
+        provider = "rule"
+
+        if tool_call is None and _TOOL_CLIENT_AVAILABLE and _ToolClient is not None:
             try:
                 tool_client = _ToolClient()
-                self.get_logger().info(f"Calling DeepSeek parse_tool_call...")
+                if not tool_client.available:
+                    return {"success": False, "message": "无法识别该指令，且 LLM API 未配置"}
+                self.get_logger().info("Calling DeepSeek parse_tool_call...")
                 raw = tool_client.parse_tool_call(user_input)
                 if raw:
                     json_str = extract_json_from_response(raw)
                     tool_call = json.loads(json_str)
+                    provider = "deepseek"
                 else:
                     return {"success": False, "message": "Tool API returned empty"}
             except Exception as e:
                 return {"success": False, "message": f"Tool parse error: {e}"}
-        elif self._use_api and self._client is not None:
+        elif tool_call is None and self._use_api and self._client is not None:
             try:
                 raw = self._client.parse_tool_call(user_input)
                 if raw is None:
                     return {"success": False, "message": "API unavailable"}
                 json_str = extract_json_from_response(raw)
                 tool_call = json.loads(json_str)
+                provider = "deepseek"
             except Exception as e:
                 return {"success": False, "message": f"Tool parse error: {e}"}
-        else:
-            return {"success": False, "message": "DeepSeek API not available"}
+        elif tool_call is None:
+            return {"success": False, "message": "无法识别该指令，请换一种更明确的说法"}
 
         tool_name = tool_call.get("tool_name", "")
         arguments = tool_call.get("arguments", {})
@@ -864,6 +898,8 @@ class LlmGatewayNode(Node):
             "check_safety":       self._tool_check_safety,
             "play_audio":         self._tool_play_audio,
             "download_audio":     self._tool_download_audio,
+            "start_tracking":     self._tool_start_tracking,
+            "stop_tracking":      self._tool_stop_tracking,
         }
 
         if tool_name not in tool_map:
@@ -873,6 +909,7 @@ class LlmGatewayNode(Node):
         try:
             result = tool_map[tool_name](**arguments)
             result["tool_name"] = tool_name
+            result["provider"] = provider
             return result
         except Exception as e:
             return {"success": False, "tool_name": tool_name,
@@ -886,20 +923,23 @@ class LlmGatewayNode(Node):
                 "data": {"status": "PENDING", "task_id": "", "current_step": 0, "total_steps": 0}}
 
     def _tool_stop_robot(self, reason: str = "user requested emergency stop") -> dict:
-        # 通过 /task/control service 异步通知 task_manager
-        self.get_logger().info(f"LLM stop request: {reason}")
-        return {"success": True,
-                "message": f"Stop requested: {reason}. task_manager handles safety stop."}
+        return self._robot_tools.stop_robot(reason)
 
     def _tool_cancel_task(self, reason: str = "user cancelled patrol") -> dict:
-        return {"success": True,
-                "message": f"Cancel requested: {reason}."}
+        return self._robot_tools.cancel_task(reason)
 
     def _tool_reset_task(self, reason: str = "operator confirmed reset") -> dict:
-        return {"success": True,
-                "message": f"Reset requested: {reason}."}
+        return self._robot_tools.reset_task(reason)
 
     def _tool_start_patrol(self, route: list, user_text: str = "") -> dict:
+        if self._latest_task_status:
+            status = str(self._latest_task_status.get("status", ""))
+            if status != "PENDING":
+                return {
+                    "success": False,
+                    "message": f"当前任务状态为 {status}，请先取消或复位后再启动巡检",
+                    "data": self._latest_task_status,
+                }
         return self._robot_tools.start_patrol(route, user_text)
 
     def _tool_query_vision(self) -> dict:
@@ -917,6 +957,37 @@ class LlmGatewayNode(Node):
 
     def _tool_download_audio(self, query: str, name: str = "") -> dict:
         return self._robot_tools.download_audio(query=query, name=name)
+
+    def _tool_start_tracking(self, target_classes=None, user_text: str = "") -> dict:
+        return self._robot_tools.start_tracking(
+            target_classes=target_classes or ["person"], user_text=user_text
+        )
+
+    def _tool_stop_tracking(self, reason: str = "user stopped tracking") -> dict:
+        return self._robot_tools.stop_tracking(reason=reason)
+
+    @staticmethod
+    def _tool_reply(result: dict) -> str:
+        if not result.get("success"):
+            return f"执行失败：{result.get('message', '未知错误')}"
+        replies = {
+            "start_patrol": "巡检任务已下发，小车将按安全任务流程执行。",
+            "get_robot_status": "已查询小车当前状态。",
+            "stop_robot": "已发送紧急停止请求。",
+            "cancel_task": "已发送取消任务请求。",
+            "reset_task": "任务状态已复位。",
+            "query_vision": "已读取最近的视觉检测结果。",
+            "query_navigation": "已读取当前导航状态。",
+            "check_safety": "已读取当前障碍物与安全状态。",
+            "play_audio": "音频播放指令已执行。",
+            "download_audio": "音频下载指令已执行。",
+            "start_tracking": "已启动目标跟踪，人工控制和安全急停仍保持更高优先级。",
+            "stop_tracking": "已停止目标跟踪。",
+        }
+        return replies.get(
+            str(result.get("tool_name", "")),
+            str(result.get("message", "执行完成")),
+        )
 
 
 # ---------------------------------------------------------------------------
