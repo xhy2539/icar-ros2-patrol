@@ -25,7 +25,7 @@ from enum import Enum
 
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSProfile
+from rclpy.qos import QoSProfile, ReliabilityPolicy
 from builtin_interfaces.msg import Time as RosTime
 
 # 自定义消息接口
