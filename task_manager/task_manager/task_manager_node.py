@@ -158,7 +158,7 @@ class TaskManagerNode(Node):
             TaskLog, '/task/log', reliable_qos)
 
         self.cmd_vel_pub = self.create_publisher(
-            Twist, '/cmd_vel', reliable_qos)
+            Twist, '/cmd_vel_safety', reliable_qos)
 
         self.goal_pose_pub = self.create_publisher(
             PoseStamped, '/goal_pose', reliable_qos)
