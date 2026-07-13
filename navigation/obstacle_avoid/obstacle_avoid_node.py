@@ -101,7 +101,7 @@ class ObstacleAvoidNode(Node):
         self.latest_scan_status = _status_from_min_distance(DEFAULT_SAFE_DISTANCE)
 
         self.publisher = self.create_publisher(ObstacleStatus, "/obstacle_status", 10)
-        self.cmd_vel_publisher = self.create_publisher(Twist, "/cmd_vel", 10)
+        self.cmd_vel_publisher = self.create_publisher(Twist, "/cmd_vel_safety", 10)
         self.create_subscription(LaserScan, "/scan", self.on_scan, 10)
         self.create_timer(0.5, self.on_timer)
         if self.mode == "mock":
