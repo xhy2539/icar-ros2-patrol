@@ -367,6 +367,32 @@ class LLMGatewayNode:
             qos
         )
 
+        # 数据缓存 — 供 query_vision/navigation/safety 工具使用
+        self._latest_detections = None
+        self._latest_nav_status = None
+        self._latest_obstacle = None
+
+        try:
+            from icar_interfaces.msg import NavStatus, ObstacleStatus, DetectionArray
+
+            self.nav_status_sub = self.node.create_subscription(
+                NavStatus, '/nav_status',
+                lambda msg: self._cache_nav(msg), qos)
+
+            self.obstacle_sub = self.node.create_subscription(
+                ObstacleStatus, '/obstacle_status',
+                lambda msg: self._cache_obstacle(msg), qos)
+
+            self.vision_sub = self.node.create_subscription(
+                DetectionArray, '/vision/detections',
+                lambda msg: self._cache_detections(msg), qos)
+
+            self.node.get_logger().info(
+                "Subscribed to /nav_status, /obstacle_status, /vision/detections")
+        except ImportError:
+            self.node.get_logger().warn(
+                "icar_interfaces not available; query_vision/navigation/safety will return no data")
+
         self.user_command_sub = self.node.create_subscription(
             ROSString,
             '/llm/user_command',
@@ -525,6 +551,34 @@ class LLMGatewayNode:
     def _sensor_data_callback(self, msg):
         sensor_data = msg.data
         self.node.get_logger().debug(f"Sensor data received: {sensor_data[:50]}...")
+
+    def _cache_nav(self, msg):
+        self._latest_nav_status = {
+            "status": msg.status,
+            "progress": round(msg.progress, 3) if hasattr(msg, 'progress') else 0.0,
+            "distance_remain": round(msg.distance_remain, 2),
+            "message": msg.message,
+        }
+
+    def _cache_obstacle(self, msg):
+        self._latest_obstacle = {
+            "is_obstacle": bool(msg.is_obstacle),
+            "min_distance": round(msg.min_distance, 2),
+            "direction": msg.direction,
+            "risk_level": msg.risk_level,
+            "action": msg.action,
+        }
+
+    def _cache_detections(self, msg):
+        dets = []
+        for d in msg.detections:
+            dets.append({
+                "class_name": d.class_name,
+                "confidence": round(d.confidence, 3),
+                "bbox": [d.x_min, d.y_min, d.x_max, d.y_max],
+                "image_path": d.image_path,
+            })
+        self._latest_detections = dets
 
 
 def main():
