@@ -1,5 +1,4 @@
 import argparse
-import glob
 import json
 import time
 from pathlib import Path
@@ -41,32 +40,6 @@ DEFAULT_WATER_CLASSES = [
     "water on floor",
 ]
 
-DEFAULT_FALL_HAZARD_CLASSES = [
-    "stairs",
-    "staircase",
-    "stairway",
-    "steps",
-    "stair step",
-    "downstairs",
-    "upstairs",
-    "curb",
-    "kerb",
-    "door threshold",
-    "door sill",
-    "raised threshold",
-    "threshold",
-    "transition strip",
-    "ledge",
-    "floor lip",
-    "drop-off",
-    "uneven floor",
-    "floor height difference",
-    "single step",
-    "small step",
-    "ramp",
-    "slope",
-]
-
 
 def parse_list(value):
     if not value:
@@ -84,7 +57,6 @@ def color_for_class(class_name):
     colors = {
         "obstacle": (0, 80, 255),
         "water": (255, 120, 0),
-        "fall_hazard": (180, 0, 255),
         "person": (0, 220, 255),
         "sign": (0, 200, 0),
     }
@@ -96,25 +68,19 @@ class LocalWebcamDetector:
         self.args = args
         self.model = None
         self.water_model = None
-        self.fall_hazard_model = None
         self.water_uses_world_prompts = False
-        self.fall_hazard_uses_world_prompts = False
         self.obstacle_classes = {class_key(item) for item in args.obstacle_classes}
         self.water_classes = [item for item in args.water_classes if item]
-        self.fall_hazard_classes = [item for item in args.fall_hazard_classes if item]
         self.target_classes = {class_key(item) for item in args.target_classes}
         self.save_dir = Path(args.save_dir)
         self.save_dir.mkdir(parents=True, exist_ok=True)
         self.frame_index = 0
         self.last_print_at = 0.0
-        self.last_fall_hazard_detections = []
-        self.last_fall_hazard_frame = 0
         self.load_model()
 
     def load_model(self):
         if self.args.backend == "color":
             self.load_water_model()
-            self.load_fall_hazard_model()
             return
         if self.args.model:
             if YOLO is None:
@@ -126,7 +92,6 @@ class LocalWebcamDetector:
             raise RuntimeError("--backend yolo requires --model, for example yolo11n.pt")
 
         self.load_water_model()
-        self.load_fall_hazard_model()
 
     def load_water_model(self):
         if self.args.water_backend == "none":
@@ -146,24 +111,6 @@ class LocalWebcamDetector:
                 "does not support set_classes"
             )
 
-    def load_fall_hazard_model(self):
-        if self.args.fall_hazard_backend == "none":
-            return
-        if not self.args.fall_hazard_model:
-            return
-        if YOLO is None:
-            raise RuntimeError("ultralytics is required for --fall-hazard-model")
-        self.fall_hazard_model = YOLO(self.args.fall_hazard_model)
-        set_classes = getattr(self.fall_hazard_model, "set_classes", None)
-        if callable(set_classes) and self.fall_hazard_classes:
-            set_classes(self.fall_hazard_classes)
-            self.fall_hazard_uses_world_prompts = True
-        elif self.args.fall_hazard_backend == "world":
-            print(
-                "warning: --fall-hazard-backend world was requested, but this model "
-                "does not support set_classes"
-            )
-
     def detect(self, frame):
         detections = []
         if self.model is not None:
@@ -172,16 +119,6 @@ class LocalWebcamDetector:
             detections.extend(self.detect_color(frame))
         if self.water_model is not None:
             detections.extend(self.detect_water(frame))
-        if self.fall_hazard_model is not None:
-            should_run = (
-                self.last_fall_hazard_frame == 0
-                or self.frame_index - self.last_fall_hazard_frame
-                >= self.args.fall_hazard_frame_stride
-            )
-            if should_run:
-                self.last_fall_hazard_detections = self.detect_fall_hazards(frame)
-                self.last_fall_hazard_frame = self.frame_index
-            detections.extend(self.last_fall_hazard_detections)
         return detections
 
     def detect_yolo(self, frame):
@@ -204,9 +141,7 @@ class LocalWebcamDetector:
 
         height, width = frame.shape[:2]
         detections = []
-        masks = getattr(result, "masks", None)
-        mask_polygons = getattr(masks, "xy", None) if masks is not None else None
-        for index, box in enumerate(boxes):
+        for box in boxes:
             cls_id = int(box.cls[0].item())
             raw_class = str(names.get(cls_id, cls_id))
             confidence = float(box.conf[0].item())
@@ -259,9 +194,7 @@ class LocalWebcamDetector:
         height, width = frame.shape[:2]
         frame_area = float(max(1, width * height))
         detections = []
-        masks = getattr(result, "masks", None)
-        mask_polygons = getattr(masks, "xy", None) if masks is not None else None
-        for index, box in enumerate(boxes):
+        for box in boxes:
             cls_id = int(box.cls[0].item())
             raw_class = str(names.get(cls_id, cls_id))
             confidence = float(box.conf[0].item())
@@ -279,7 +212,8 @@ class LocalWebcamDetector:
                 and class_key(raw_class) not in self.target_classes
             ):
                 continue
-            detection = {
+            detections.append(
+                {
                     "class_name": water_class,
                     "raw_class_name": raw_class,
                     "confidence": round(confidence, 3),
@@ -288,87 +222,6 @@ class LocalWebcamDetector:
                         "yolo_world_water"
                         if self.water_uses_world_prompts
                         else "yolo_water"
-                    ),
-                }
-            polygon = self.mask_polygon(mask_polygons, index, width, height)
-            if polygon:
-                contour = np.asarray(polygon, dtype=np.float32)
-                detection["polygon"] = polygon
-                detection["mask_area_ratio"] = round(
-                    float(cv2.contourArea(contour)) / frame_area, 6
-                )
-            detections.append(detection)
-        return detections
-
-    @staticmethod
-    def mask_polygon(mask_polygons, index, width, height, max_points=100):
-        if mask_polygons is None or index >= len(mask_polygons):
-            return []
-        points = np.asarray(mask_polygons[index], dtype=np.float32)
-        if len(points) < 3:
-            return []
-        epsilon = max(1.0, 0.002 * cv2.arcLength(points, True))
-        points = cv2.approxPolyDP(points, epsilon, True).reshape(-1, 2)
-        if len(points) > max_points:
-            step = int(np.ceil(len(points) / max_points))
-            points = points[::step]
-        return [
-            [
-                int(np.clip(round(x), 0, max(0, width - 1))),
-                int(np.clip(round(y), 0, max(0, height - 1))),
-            ]
-            for x, y in points
-        ]
-
-    def detect_fall_hazards(self, frame):
-        results = self.fall_hazard_model.predict(
-            frame,
-            imgsz=self.args.fall_hazard_imgsz,
-            conf=self.args.fall_hazard_conf,
-            iou=self.args.fall_hazard_iou,
-            device=self.args.fall_hazard_device or self.args.device or None,
-            verbose=False,
-        )
-        if not results:
-            return []
-
-        result = results[0]
-        names = getattr(result, "names", {}) or {}
-        boxes = getattr(result, "boxes", None)
-        if boxes is None:
-            return []
-
-        height, width = frame.shape[:2]
-        frame_area = float(max(1, width * height))
-        detections = []
-        for box in boxes:
-            cls_id = int(box.cls[0].item())
-            raw_class = str(names.get(cls_id, cls_id))
-            confidence = float(box.conf[0].item())
-            x1, y1, x2, y2 = [int(round(v)) for v in box.xyxy[0].tolist()]
-            bbox_area = max(0.0, float(x2 - x1)) * max(0.0, float(y2 - y1))
-            if (
-                self.args.fall_hazard_min_area_ratio > 0
-                and bbox_area / frame_area < self.args.fall_hazard_min_area_ratio
-            ):
-                continue
-            hazard_class = self.args.fall_hazard_class_name
-            if (
-                self.target_classes
-                and class_key(hazard_class) not in self.target_classes
-                and class_key(raw_class) not in self.target_classes
-            ):
-                continue
-            detections.append(
-                {
-                    "class_name": hazard_class,
-                    "raw_class_name": raw_class,
-                    "confidence": round(confidence, 3),
-                    "bbox": [x1, y1, x2, y2],
-                    "source": (
-                        "yolo_world_fall_hazard"
-                        if self.fall_hazard_uses_world_prompts
-                        else "yolo_fall_hazard"
                     ),
                 }
             )
@@ -414,13 +267,6 @@ class LocalWebcamDetector:
                 label = f"{class_name}:{raw_class}"
             label = f"{label} {det['confidence']:.2f}"
             color = color_for_class(class_name)
-            polygon = det.get("polygon") or []
-            if len(polygon) >= 3:
-                contour = np.asarray(polygon, dtype=np.int32).reshape((-1, 1, 2))
-                overlay = frame.copy()
-                cv2.fillPoly(overlay, [contour], color)
-                cv2.addWeighted(overlay, 0.2, frame, 0.8, 0, frame)
-                cv2.polylines(frame, [contour], True, color, 2)
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
             cv2.putText(frame, label, (x1, max(18, y1 - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2, cv2.LINE_AA)
         cv2.putText(
@@ -459,8 +305,6 @@ class LocalWebcamDetector:
         backend = "yolo" if self.model is not None else "color"
         if self.water_model is not None:
             backend = f"{backend}+water_{self.args.water_backend}"
-        if self.fall_hazard_model is not None:
-            backend = f"{backend}+fall_hazard_{self.args.fall_hazard_backend}"
         return backend
 
 
@@ -480,74 +324,9 @@ def open_camera(camera_index, width, height):
     raise RuntimeError(f"Cannot open camera index {camera_index}")
 
 
-def collect_image_paths(image_args, image_globs):
-    paths = []
-    for item in image_args:
-        paths.append(Path(item))
-    for pattern in image_globs:
-        paths.extend(Path(match) for match in glob.glob(pattern))
-    unique_paths = []
-    seen = set()
-    for path in paths:
-        resolved = str(path.resolve())
-        if resolved in seen:
-            continue
-        seen.add(resolved)
-        unique_paths.append(path)
-    return unique_paths
-
-
-def run_image_files(detector, image_paths, show_window, save_results):
-    for image_path in image_paths:
-        frame = cv2.imread(str(image_path))
-        if frame is None:
-            print(json.dumps({"image": str(image_path), "error": "failed_to_read"}))
-            continue
-        detector.frame_index += 1
-        detections = detector.detect(frame)
-        payload = {
-            "image": str(image_path),
-            "backend": detector.active_backend(),
-            "width": int(frame.shape[1]),
-            "height": int(frame.shape[0]),
-            "detections": detections,
-        }
-        print(json.dumps(payload, ensure_ascii=False))
-
-        drawn = detector.draw(frame.copy(), detections)
-        if save_results:
-            stem = image_path.stem
-            out_image = detector.save_dir / f"{stem}_detected.jpg"
-            out_json = detector.save_dir / f"{stem}_detections.json"
-            cv2.imwrite(str(out_image), drawn)
-            out_json.write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-        if show_window:
-            cv2.imshow("ICAR local image detection", drawn)
-            key = cv2.waitKey(0) & 0xFF
-            if key == ord("q"):
-                break
-    if show_window:
-        cv2.destroyAllWindows()
-
-
 def build_arg_parser():
     parser = argparse.ArgumentParser(description="Local webcam detection test without ROS2")
     parser.add_argument("--camera", type=int, default=0, help="OpenCV camera index")
-    parser.add_argument(
-        "--image",
-        action="append",
-        default=[],
-        help="Image file to detect. Can be provided multiple times.",
-    )
-    parser.add_argument(
-        "--image-glob",
-        action="append",
-        default=[],
-        help="Glob pattern for image files, for example samples\\*.jpg",
-    )
     parser.add_argument("--backend", choices=["auto", "yolo", "color"], default="auto")
     parser.add_argument("--model", default="", help="YOLO model path/name, e.g. yolo11n.pt")
     parser.add_argument("--device", default="", help="YOLO device, e.g. 0 or cpu")
@@ -576,35 +355,8 @@ def build_arg_parser():
     parser.add_argument("--water-imgsz", type=int, default=640)
     parser.add_argument("--water-device", default="")
     parser.add_argument("--water-min-area-ratio", type=float, default=0.002)
-    parser.add_argument(
-        "--fall-hazard-backend",
-        choices=["none", "auto", "world", "yolo"],
-        default="none",
-    )
-    parser.add_argument(
-        "--fall-hazard-model",
-        default="",
-        help="YOLO-World/custom model for stairs, curbs, thresholds, ramps, and drop-offs",
-    )
-    parser.add_argument(
-        "--fall-hazard-classes",
-        default=",".join(DEFAULT_FALL_HAZARD_CLASSES),
-        help="Comma list of YOLO-World text prompts for fall-risk height changes",
-    )
-    parser.add_argument("--fall-hazard-class-name", default="fall_hazard")
-    parser.add_argument("--fall-hazard-conf", type=float, default=0.12)
-    parser.add_argument("--fall-hazard-iou", type=float, default=0.5)
-    parser.add_argument("--fall-hazard-imgsz", type=int, default=640)
-    parser.add_argument("--fall-hazard-device", default="")
-    parser.add_argument("--fall-hazard-min-area-ratio", type=float, default=0.003)
-    parser.add_argument("--fall-hazard-frame-stride", type=int, default=5)
     parser.add_argument("--min-color-area", type=float, default=600.0)
     parser.add_argument("--save-dir", default="local_detection_samples")
-    parser.add_argument(
-        "--save-image-results",
-        action="store_true",
-        help="Save annotated image and JSON files when using --image/--image-glob",
-    )
     parser.add_argument("--frames", type=int, default=0, help="Stop after N frames; 0 means live")
     parser.add_argument("--no-window", action="store_true", help="Do not open cv2.imshow window")
     parser.add_argument("--print-every", type=float, default=1.0)
@@ -617,23 +369,8 @@ def main():
     args.obstacle_classes = parse_list(args.obstacle_classes)
     args.water_classes = parse_list(args.water_classes)
     args.water_class_name = args.water_class_name.strip() or "water"
-    args.fall_hazard_classes = parse_list(args.fall_hazard_classes)
-    args.fall_hazard_class_name = (
-        args.fall_hazard_class_name.strip() or "fall_hazard"
-    )
-    args.fall_hazard_frame_stride = max(1, int(args.fall_hazard_frame_stride))
 
     detector = LocalWebcamDetector(args)
-    image_paths = collect_image_paths(args.image, args.image_glob)
-    if image_paths:
-        run_image_files(
-            detector,
-            image_paths,
-            show_window=not args.no_window,
-            save_results=args.save_image_results,
-        )
-        return
-
     cap = open_camera(args.camera, args.width, args.height)
     try:
         while True:

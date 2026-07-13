@@ -132,32 +132,6 @@ class RobotTools:
             "route": route
         }
 
-    # ── 信息查询工具（读取节点缓存的最新数据）─────────────────
-
-    def query_vision(self) -> dict:
-        """查询最近的视觉检测结果。"""
-        if self.node and hasattr(self.node, '_latest_detections'):
-            data = self.node._latest_detections
-            if data:
-                return {"success": True, "message": "vision data", "data": data}
-        return {"success": False, "message": "no vision data available", "data": {}}
-
-    def query_navigation(self) -> dict:
-        """查询当前导航状态。"""
-        if self.node and hasattr(self.node, '_latest_nav_status'):
-            data = self.node._latest_nav_status
-            if data:
-                return {"success": True, "message": "navigation status", "data": data}
-        return {"success": False, "message": "no navigation data available", "data": {}}
-
-    def check_safety(self) -> dict:
-        """查询障碍物状态和安全风险。"""
-        if self.node and hasattr(self.node, '_latest_obstacle'):
-            data = self.node._latest_obstacle
-            if data:
-                return {"success": True, "message": "safety status", "data": data}
-        return {"success": False, "message": "no obstacle data available", "data": {}}
-
     TOOLS_DEF = [
         {
             "tool_name": "start_patrol",
@@ -213,20 +187,5 @@ class RobotTools:
                     "description": "复位原因"
                 }
             }
-        },
-        {
-            "tool_name": "query_vision",
-            "description": "查询最近的视觉检测结果（摄像头看到了什么目标）",
-            "parameters": {}
-        },
-        {
-            "tool_name": "query_navigation",
-            "description": "查询当前导航状态、位置和进度",
-            "parameters": {}
-        },
-        {
-            "tool_name": "check_safety",
-            "description": "查询障碍物状态和安全风险等级",
-            "parameters": {}
-        },
+        }
     ]

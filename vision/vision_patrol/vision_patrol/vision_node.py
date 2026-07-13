@@ -1,14 +1,6 @@
 import json
 import time
 
-try:
-    from ultralytics import YOLO
-
-    YOLO_IMPORT_ERROR = None
-except Exception as exc:  # pylint: disable=broad-except
-    YOLO = None
-    YOLO_IMPORT_ERROR = exc
-
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
@@ -32,6 +24,12 @@ try:
 except ImportError:
     cv2 = None
     np = None
+
+try:
+    from ultralytics import YOLO
+except ImportError:
+    YOLO = None
+
 
 DEFAULT_OBSTACLE_CLASSES = [
     "backpack",
@@ -103,7 +101,6 @@ class VisionNode(Node):
         self.declare_parameter("water_imgsz", 640)
         self.declare_parameter("water_device", "")
         self.declare_parameter("water_min_area_ratio", 0.002)
-        self.declare_parameter("water_frame_stride", 1)
         self.declare_parameter("water_class_name", "water")
 
         self.image_topic = self.get_parameter("image_topic").value
@@ -152,9 +149,6 @@ class VisionNode(Node):
         self.water_min_area_ratio = float(
             self.get_parameter("water_min_area_ratio").value
         )
-        self.water_frame_stride = max(
-            1, int(self.get_parameter("water_frame_stride").value)
-        )
         self.water_class_name = (
             str(self.get_parameter("water_class_name").value).strip() or "water"
         )
@@ -166,8 +160,6 @@ class VisionNode(Node):
         self.water_model = None
         self.water_uses_world_prompts = False
         self.yolo_unavailable_logged = False
-        self.last_water_detections = []
-        self.last_water_frame_count = 0
         self.typed_detections_available = Detection is not None and DetectionArray is not None
 
         detections_msg_type = DetectionArray if self.typed_detections_available else String
@@ -218,10 +210,8 @@ class VisionNode(Node):
                 )
             return
         if YOLO is None:
-            detail = f": {YOLO_IMPORT_ERROR}" if YOLO_IMPORT_ERROR else ""
             self.get_logger().warning(
-                "ultralytics is not available"
-                f"{detail}; falling back to lightweight color detector"
+                "ultralytics is not installed; falling back to lightweight color detector"
             )
             return
         try:
@@ -244,9 +234,8 @@ class VisionNode(Node):
         if not self.water_model_path:
             return
         if YOLO is None:
-            detail = f": {YOLO_IMPORT_ERROR}" if YOLO_IMPORT_ERROR else ""
             self.get_logger().warning(
-                f"ultralytics is not available{detail}; water detector is disabled"
+                "ultralytics is not installed; water detector is disabled"
             )
             return
         try:
@@ -341,15 +330,7 @@ class VisionNode(Node):
             detections = self.run_color_detection(frame)
 
         if self.water_model is not None:
-            should_run_water = (
-                self.last_water_frame_count == 0
-                or self.frame_count - self.last_water_frame_count
-                >= self.water_frame_stride
-            )
-            if should_run_water:
-                self.last_water_detections = self.run_water_detection(frame)
-                self.last_water_frame_count = self.frame_count
-            detections.extend(self.last_water_detections)
+            detections.extend(self.run_water_detection(frame))
         return detections
 
     def run_color_detection(self, frame):
@@ -496,9 +477,7 @@ class VisionNode(Node):
         height, width = frame.shape[:2]
         frame_area = float(max(1, width * height))
         detections = []
-        masks = getattr(result, "masks", None)
-        mask_polygons = getattr(masks, "xy", None) if masks is not None else None
-        for index, box in enumerate(boxes):
+        for box in boxes:
             cls_id = int(box.cls[0].item())
             confidence = float(box.conf[0].item())
             x1, y1, x2, y2 = [int(round(v)) for v in box.xyxy[0].tolist()]
@@ -511,7 +490,8 @@ class VisionNode(Node):
             raw_class_name = str(names.get(cls_id, cls_id))
             if not self.keep_detection_class(raw_class_name, self.water_class_name):
                 continue
-            detection = {
+            detections.append(
+                {
                     "class_name": self.water_class_name,
                     "confidence": round(confidence, 3),
                     "bbox": [x1, y1, x2, y2],
@@ -523,35 +503,8 @@ class VisionNode(Node):
                     "model": self.water_model_path,
                     "raw_class_name": raw_class_name,
                 }
-            polygon = self.mask_polygon(mask_polygons, index, width, height)
-            if polygon:
-                contour = np.asarray(polygon, dtype=np.float32)
-                detection["polygon"] = polygon
-                detection["mask_area_ratio"] = round(
-                    float(cv2.contourArea(contour)) / frame_area, 6
-                )
-            detections.append(detection)
+            )
         return detections
-
-    @staticmethod
-    def mask_polygon(mask_polygons, index, width, height, max_points=100):
-        if mask_polygons is None or index >= len(mask_polygons):
-            return []
-        points = np.asarray(mask_polygons[index], dtype=np.float32)
-        if len(points) < 3:
-            return []
-        epsilon = max(1.0, 0.002 * cv2.arcLength(points, True))
-        points = cv2.approxPolyDP(points, epsilon, True).reshape(-1, 2)
-        if len(points) > max_points:
-            step = int(np.ceil(len(points) / max_points))
-            points = points[::step]
-        return [
-            [
-                int(np.clip(round(x), 0, max(0, width - 1))),
-                int(np.clip(round(y), 0, max(0, height - 1))),
-            ]
-            for x, y in points
-        ]
 
     def map_yolo_class(self, raw_class_name, bbox, width, height):
         """Map COCO/custom YOLO classes that block passage to project obstacle."""
@@ -634,13 +587,6 @@ class VisionNode(Node):
             if raw_label and raw_label != label:
                 label = f"{label}:{raw_label}"
             conf = det.get("confidence", 0.0)
-            polygon = det.get("polygon") or []
-            if len(polygon) >= 3:
-                contour = np.asarray(polygon, dtype=np.int32).reshape((-1, 1, 2))
-                overlay = frame.copy()
-                cv2.fillPoly(overlay, [contour], (255, 120, 0))
-                cv2.addWeighted(overlay, 0.2, frame, 0.8, 0, frame)
-                cv2.polylines(frame, [contour], True, (255, 120, 0), 2)
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
             cv2.putText(
                 frame,
