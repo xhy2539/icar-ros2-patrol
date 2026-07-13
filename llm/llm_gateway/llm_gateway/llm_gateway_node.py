@@ -31,6 +31,7 @@ from icar_interfaces.msg import (
 )
 from icar_interfaces.srv import GenerateReport, ParseTask
 
+from .complex_task import ComplexTaskRunner, PlanStep
 from .tool_intent import is_reset_confirmation, parse_tool_intent
 
 # ---------------------------------------------------------------------------
@@ -152,6 +153,9 @@ class LlmGatewayNode(Node):
         self._latest_nav_status = None
         self._latest_obstacle = None
         self._latest_detections = None
+        self._plan_runner = ComplexTaskRunner()
+        self._plan_lock = threading.RLock()
+        self._plan_context = {}
 
         # ── QoS ──
         reliable_qos = QoSProfile(depth=50, reliability=ReliabilityPolicy.RELIABLE)
@@ -253,6 +257,17 @@ class LlmGatewayNode(Node):
         if len(bucket) > self.max_logs_per_task:
             del bucket[: len(bucket) - self.max_logs_per_task]
 
+        # 持久化到 JSONL 文件
+        try:
+            import os as _os
+            _log_dir = "/home/jetson/icar-ros2-patrol/logs"
+            _os.makedirs(_log_dir, exist_ok=True)
+            _log_file = _os.path.join(_log_dir, f"{msg.task_id}.jsonl")
+            with open(_log_file, "a") as _f:
+                _f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
+
     def _on_task_status(self, msg: TaskStatus):
         self._latest_task_status = {
             "task_id": msg.task_id,
@@ -261,6 +276,18 @@ class LlmGatewayNode(Node):
             "total_steps": msg.total_steps,
             "message": msg.message,
         }
+        with self._plan_lock:
+            was_active = self._plan_runner.active
+            next_step = self._plan_runner.on_task_status(msg.status)
+            snapshot = self._plan_runner.snapshot()
+        if next_step is not None or (
+            was_active and snapshot["status"] in {"COMPLETED", "FAILED"}
+        ):
+            threading.Thread(
+                target=self._resume_complex_plan,
+                args=(next_step,),
+                daemon=True,
+            ).start()
 
     def _on_nav_status(self, msg: NavStatus):
         self._latest_nav_status = {
@@ -548,6 +575,20 @@ class LlmGatewayNode(Node):
                 logs = parsed.get("logs", [])
         elif request.task_id:
             logs = list(self.logs_by_task.get(request.task_id, []))
+            # 内存没有则从历史文件加载
+            if not logs:
+                try:
+                    import os as _os
+                    _log_file = _os.path.join("/home/jetson/icar-ros2-patrol/logs",
+                                               f"{request.task_id}.jsonl")
+                    if _os.path.exists(_log_file):
+                        with open(_log_file, "r") as _f:
+                            for line in _f:
+                                line = line.strip()
+                                if line:
+                                    logs.append(json.loads(line))
+                except Exception:
+                    pass
 
         if not logs:
             response.report_text = ""
@@ -825,9 +866,14 @@ class LlmGatewayNode(Node):
         if not user_input:
             return
 
+        context = {
+            "request_id": request_id,
+            "input_text": user_input,
+            "source": source,
+        }
         self.get_logger().info(f"Tool command: {user_input[:60]}")
         try:
-            result = self._execute_tool(user_input)
+            result = self._execute_tool(user_input, context=context)
             self.get_logger().info(
                 f"Tool result: {result.get('tool_name','?')} "
                 f"success={result.get('success')} "
@@ -837,10 +883,12 @@ class LlmGatewayNode(Node):
             self.get_logger().error(f"Tool execution exception: {_exc}")
             result = {"success": False, "tool_name": "?", "message": str(_exc)}
 
+        self._publish_tool_result(result, context)
+
+    def _publish_tool_result(self, result: dict, context: dict) -> None:
+        result = dict(result)
         result.setdefault("reply", self._tool_reply(result))
-        result["request_id"] = request_id
-        result["input_text"] = user_input
-        result["source"] = source
+        result.update(context)
 
         if self._response_pub:
             from std_msgs.msg import String
@@ -848,7 +896,7 @@ class LlmGatewayNode(Node):
             resp.data = json.dumps(result, ensure_ascii=False)
             self._response_pub.publish(resp)
 
-    def _execute_tool(self, user_input: str) -> dict:
+    def _execute_tool(self, user_input: str, context=None) -> dict:
         """LLM 解析 → 工具执行。"""
         if self._robot_tools is None:
             return {"success": False, "message": "tool_mode requires robot_tools"}
@@ -888,6 +936,13 @@ class LlmGatewayNode(Node):
 
         tool_name = tool_call.get("tool_name", "")
         arguments = tool_call.get("arguments", {})
+        if not isinstance(arguments, dict):
+            return {
+                "success": False,
+                "tool_name": tool_name,
+                "message": "tool arguments must be an object",
+                "provider": provider,
+            }
 
         if tool_name == "reset_task" and not is_reset_confirmation(user_input):
             return {
@@ -897,6 +952,18 @@ class LlmGatewayNode(Node):
                 "provider": provider,
             }
 
+        if tool_name == "execute_plan":
+            return self._start_complex_plan(
+                arguments.get("steps", []),
+                context=context or {},
+                provider=provider,
+            )
+
+        result = self._execute_named_tool(tool_name, arguments)
+        result["provider"] = provider
+        return result
+
+    def _execute_named_tool(self, tool_name: str, arguments: dict) -> dict:
         tool_map = {
             "start_patrol":       self._tool_start_patrol,
             "get_robot_status":   self._tool_get_status,
@@ -919,11 +986,82 @@ class LlmGatewayNode(Node):
         try:
             result = tool_map[tool_name](**arguments)
             result["tool_name"] = tool_name
-            result["provider"] = provider
             return result
         except Exception as e:
             return {"success": False, "tool_name": tool_name,
                     "message": f"Tool execution failed: {e}"}
+
+    def _start_complex_plan(self, raw_steps, context: dict, provider: str) -> dict:
+        try:
+            with self._plan_lock:
+                first_step = self._plan_runner.start(raw_steps)
+                self._plan_context = dict(context)
+        except ValueError as exc:
+            return {
+                "success": False,
+                "tool_name": "execute_plan",
+                "provider": provider,
+                "message": str(exc),
+            }
+
+        result = self._run_plan_steps(first_step)
+        result["provider"] = provider
+        return result
+
+    def _run_plan_steps(self, step: PlanStep) -> dict:
+        executed = []
+        next_step = step
+        while next_step is not None:
+            step_result = self._execute_named_tool(
+                next_step.tool_name,
+                next_step.arguments,
+            )
+            executed.append({
+                "tool_name": next_step.tool_name,
+                "success": bool(step_result.get("success")),
+                "message": str(step_result.get("message", "")),
+            })
+            with self._plan_lock:
+                next_step = self._plan_runner.record_result(
+                    bool(step_result.get("success")),
+                    str(step_result.get("message", "")),
+                )
+                snapshot = self._plan_runner.snapshot()
+
+        success = snapshot["status"] not in {"FAILED"}
+        messages = {
+            "WAITING": "复杂任务已启动，正在等待巡检完成后接续下一步",
+            "COMPLETED": "复杂任务的全部步骤已执行完成",
+            "FAILED": f"复杂任务执行失败：{snapshot['error']}",
+        }
+        return {
+            "success": success,
+            "tool_name": "execute_plan",
+            "message": messages.get(snapshot["status"], "复杂任务正在执行"),
+            "plan": snapshot,
+            "executed": executed,
+        }
+
+    def _resume_complex_plan(self, next_step) -> None:
+        if next_step is not None:
+            result = self._run_plan_steps(next_step)
+        else:
+            with self._plan_lock:
+                snapshot = self._plan_runner.snapshot()
+            result = {
+                "success": snapshot["status"] == "COMPLETED",
+                "tool_name": "execute_plan",
+                "message": (
+                    "复杂任务的全部步骤已执行完成"
+                    if snapshot["status"] == "COMPLETED"
+                    else f"复杂任务执行失败：{snapshot['error']}"
+                ),
+                "plan": snapshot,
+                "executed": [],
+            }
+        with self._plan_lock:
+            context = dict(self._plan_context)
+        self._publish_tool_result(result, context)
 
     def _tool_get_status(self) -> dict:
         if self._latest_task_status:
@@ -1004,6 +1142,7 @@ class LlmGatewayNode(Node):
             "download_audio": "音频下载指令已执行。",
             "start_tracking": "已启动目标跟踪，人工控制和安全急停仍保持更高优先级。",
             "stop_tracking": "已停止目标跟踪。",
+            "execute_plan": "复杂任务计划已接收，将按步骤安全接续执行。",
         }
         return replies.get(
             str(result.get("tool_name", "")),
