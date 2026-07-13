@@ -6,6 +6,7 @@ import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:speech_to_text/speech_recognition_result.dart';
 import '../theme/app_theme.dart';
 import '../services/car_controller.dart';
+import '../services/data_models.dart';
 
 class MissionPage extends StatefulWidget {
   const MissionPage({super.key});
@@ -32,6 +33,12 @@ class _MissionPageState extends State<MissionPage> {
 
   /// 历史交互记录
   final List<_ChatEntry> _history = [];
+
+  /// 是否显示日志时间线视图（false = 任务模式，true = 日志模式）
+  bool _showLogView = false;
+
+  /// 选中的巡检点（用于一键巡检快捷操作）
+  final Set<String> _selectedCheckpoints = {};
 
   @override
   void initState() {
@@ -185,13 +192,26 @@ class _MissionPageState extends State<MissionPage> {
       body: SafeArea(
         child: Column(
           children: [
+            _buildModeToggle(),
             Expanded(
-              child: _history.isEmpty ? _buildEmptyState() : _buildHistory(),
+              child: _showLogView ? _buildLogTimeline() : _buildTaskView(),
             ),
-            _buildInputBar(),
           ],
         ),
       ),
+    );
+  }
+
+  /// 任务模式视图（原有聊天 UI）
+  Widget _buildTaskView() {
+    return Column(
+      children: [
+        Expanded(
+          child: _history.isEmpty ? _buildEmptyState() : _buildHistory(),
+        ),
+        _buildRouteSelector(),
+        _buildInputBar(),
+      ],
     );
   }
 
@@ -678,6 +698,249 @@ class _MissionPageState extends State<MissionPage> {
             onPressed: () => Navigator.of(ctx).pop(),
             child: const Text('关闭',
                 style: TextStyle(color: AppColors.orange)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════
+  // 模式切换
+  // ═══════════════════════════════════════════
+
+  Widget _buildModeToggle() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceAlt,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: GestureDetector(
+              onTap: () => setState(() => _showLogView = false),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                decoration: BoxDecoration(
+                  color: !_showLogView ? AppColors.bluePurple : Colors.transparent,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Center(
+                  child: Text(
+                    '任务',
+                    style: TextStyle(
+                      color: !_showLogView ? Colors.white : AppColors.blueGray,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Expanded(
+            child: GestureDetector(
+              onTap: () => setState(() => _showLogView = true),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                decoration: BoxDecoration(
+                  color: _showLogView ? AppColors.bluePurple : Colors.transparent,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Center(
+                  child: Text(
+                    '日志',
+                    style: TextStyle(
+                      color: _showLogView ? Colors.white : AppColors.blueGray,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════
+  // 巡检点快捷选择
+  // ═══════════════════════════════════════════
+
+  Widget _buildRouteSelector() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.blueGray.withValues(alpha: 0.2)),
+      ),
+      child: Row(
+        children: [
+          const Text('巡检点: ', style: TextStyle(color: AppColors.blueGray, fontSize: 12)),
+          ...['A', 'B', 'C'].map((cp) => Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: GestureDetector(
+              onTap: () => setState(() {
+                if (_selectedCheckpoints.contains(cp)) {
+                  _selectedCheckpoints.remove(cp);
+                } else {
+                  _selectedCheckpoints.add(cp);
+                }
+              }),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: _selectedCheckpoints.contains(cp)
+                    ? AppColors.bluePurple : Colors.transparent,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                    color: _selectedCheckpoints.contains(cp)
+                      ? AppColors.bluePurple : AppColors.blueGray.withValues(alpha: 0.3),
+                  ),
+                ),
+                child: Text(
+                  cp,
+                  style: TextStyle(
+                    color: _selectedCheckpoints.contains(cp) ? Colors.white : AppColors.blueGray,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+          )),
+          const Spacer(),
+          GestureDetector(
+            onTap: _selectedCheckpoints.isEmpty ? null : () {
+              final route = _selectedCheckpoints.toList()..sort();
+              _ctrl.sendParsedTaskToManager({
+                'task_type': 'patrol',
+                'route': route,
+                'actions': ['navigate', 'detect', 'collect'],
+              });
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: _selectedCheckpoints.isEmpty
+                  ? AppColors.blueGray.withValues(alpha: 0.3)
+                  : AppColors.orange,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Text(
+                '一键巡检',
+                style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════
+  // 日志时间线视图
+  // ═══════════════════════════════════════════
+
+  Widget _buildLogTimeline() {
+    final logs = _ctrl.taskLogs.reversed.toList();
+    final taskStatus = _ctrl.latestTaskStatus;
+
+    return Column(
+      children: [
+        // Stats bar
+        Container(
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _buildStat('日志总数', '${logs.length}', AppColors.bluePurple),
+              _buildStat('任务状态', taskStatus.statusZh, taskStatus.statusColor),
+              _buildStat('进度', '${taskStatus.currentStep}/${taskStatus.totalSteps}', AppColors.orange),
+            ],
+          ),
+        ),
+        // Timeline
+        Expanded(
+          child: logs.isEmpty
+            ? const Center(child: Text('暂无任务日志', style: TextStyle(color: AppColors.blueGray)))
+            : ListView.builder(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                itemCount: logs.length,
+                itemBuilder: (context, index) {
+                  final log = logs[index];
+                  return _buildLogEntry(log, index == 0);
+                },
+              ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStat(String label, String value, Color color) {
+    return Column(
+      children: [
+        Text(value, style: TextStyle(color: color, fontSize: 14, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 2),
+        Text(label, style: const TextStyle(color: AppColors.blueGray, fontSize: 10)),
+      ],
+    );
+  }
+
+  Widget _buildLogEntry(TaskLog log, bool isLatest) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Timeline dot + line
+          Column(
+            children: [
+              Container(
+                width: 28, height: 28,
+                decoration: BoxDecoration(
+                  color: log.color.withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(log.icon, size: 14, color: log.color),
+              ),
+              if (!isLatest)
+                Container(width: 2, height: 30, color: AppColors.blueGray.withValues(alpha: 0.2)),
+            ],
+          ),
+          const SizedBox(width: 10),
+          // Content
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(log.titleZh, style: TextStyle(color: log.color, fontSize: 13, fontWeight: FontWeight.w600)),
+                    const Spacer(),
+                    Text(log.timeShort, style: const TextStyle(color: AppColors.blueGray, fontSize: 10)),
+                  ],
+                ),
+                if (log.summary.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(log.summary, style: const TextStyle(color: AppColors.blueGray, fontSize: 11), maxLines: 2, overflow: TextOverflow.ellipsis),
+                  ),
+              ],
+            ),
           ),
         ],
       ),

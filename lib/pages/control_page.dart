@@ -86,6 +86,7 @@ class _ControlPageState extends State<ControlPage> {
           child: Column(
             children: [
               _buildConnectionBar(),
+              _buildObstacleBanner(),
               const SizedBox(height: 16),
               _buildSpeedControl(),
               const SizedBox(height: 24),
@@ -176,6 +177,52 @@ class _ControlPageState extends State<ControlPage> {
                       ),
                     )
                   : Text(isConnected ? '断开' : '连接'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildObstacleBanner() {
+    final obs = _ctrl.latestObstacleStatus;
+    if (!obs.isObstacle || obs.isSafe) return const SizedBox.shrink();
+
+    final isDanger = obs.isDanger;
+
+    if (isDanger) {
+      HapticFeedback.vibrate();
+    }
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: isDanger
+            ? AppColors.errorRed.withValues(alpha: 0.15)
+            : AppColors.orange.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDanger ? AppColors.errorRed : AppColors.orange,
+          width: 1.5,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            isDanger ? Icons.error : Icons.warning,
+            color: isDanger ? AppColors.errorRed : AppColors.orange,
+            size: 20,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '${obs.directionZh} ${obs.minDistance.toStringAsFixed(1)}m 有障碍物${isDanger ? " — 紧急" : ""}',
+              style: TextStyle(
+                color: isDanger ? AppColors.errorRed : AppColors.orange,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ],

@@ -1,7 +1,7 @@
-import 'dart:async';
-import 'dart:math';
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
+import '../services/car_controller.dart';
+import '../services/data_models.dart';
 
 class SensorPage extends StatefulWidget {
   const SensorPage({super.key});
@@ -11,111 +11,125 @@ class SensorPage extends StatefulWidget {
 }
 
 class _SensorPageState extends State<SensorPage> {
-  Timer? _timer;
-  final Random _random = Random();
-
-  // 传感器数据模型
-  late List<SensorData> _sensors;
+  final CarController _ctrl = CarController.instance;
 
   @override
   void initState() {
     super.initState();
-    _sensors = [
-      SensorData(
-        name: '温度',
-        unit: '°C',
-        icon: Icons.thermostat,
-        value: 26.5,
-        min: 0,
-        max: 50,
-        threshold: 38,
-        color: AppColors.orange,
-      ),
-      SensorData(
-        name: '湿度',
-        unit: '%',
-        icon: Icons.water_drop,
-        value: 45.2,
-        min: 0,
-        max: 100,
-        threshold: 80,
-        color: AppColors.bluePurple,
-      ),
-      SensorData(
-        name: 'PM2.5',
-        unit: 'μg/m³',
-        icon: Icons.air,
-        value: 35.0,
-        min: 0,
-        max: 500,
-        threshold: 75,
-        color: AppColors.darkNavy,
-      ),
-      SensorData(
-        name: '烟雾',
-        unit: 'ppm',
-        icon: Icons.local_fire_department,
-        value: 120.0,
-        min: 0,
-        max: 1000,
-        threshold: 300,
-        color: AppColors.orange,
-      ),
-      SensorData(
-        name: '光照',
-        unit: 'lux',
-        icon: Icons.wb_sunny,
-        value: 450.0,
-        min: 0,
-        max: 1000,
-        threshold: 800,
-        color: AppColors.orangeDark,
-      ),
-      SensorData(
-        name: '气压',
-        unit: 'hPa',
-        icon: Icons.compress,
-        value: 1013.2,
-        min: 900,
-        max: 1100,
-        threshold: 1050,
-        color: AppColors.bluePurple,
-      ),
-    ];
-
-    // 模拟数据刷新
-    _timer = Timer.periodic(const Duration(seconds: 2), (timer) {
-      setState(() {
-        for (var sensor in _sensors) {
-          double delta = (_random.nextDouble() - 0.5) * 2;
-          sensor.value = (sensor.value + delta)
-              .clamp(sensor.min.toDouble(), sensor.max.toDouble());
-        }
-      });
-    });
+    _ctrl.addListener(_onCtrlChanged);
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
+    _ctrl.removeListener(_onCtrlChanged);
     super.dispose();
+  }
+
+  void _onCtrlChanged() {
+    if (mounted) setState(() {});
+  }
+
+  /// Whether all env data values are zero (default/uninitialized state).
+  bool get _isWaiting {
+    final d = _ctrl.latestEnvData;
+    return d.temperature == 0 &&
+        d.humidity == 0 &&
+        d.smoke == 0 &&
+        d.pm25 == 0 &&
+        d.light == 0 &&
+        d.pressure == 0;
   }
 
   @override
   Widget build(BuildContext context) {
+    final env = _ctrl.latestEnvData;
+
+    final sensors = <_SensorDisplay>[
+      _SensorDisplay(
+        name: '温度',
+        unit: '°C',
+        icon: Icons.thermostat,
+        color: AppColors.orange,
+        value: env.temperature,
+        threshold: EnvData.thresholds['temperature']!,
+        isAlert: env.isTempAlert,
+        min: 0,
+        max: 50,
+      ),
+      _SensorDisplay(
+        name: '湿度',
+        unit: '%',
+        icon: Icons.water_drop,
+        color: AppColors.bluePurple,
+        value: env.humidity,
+        threshold: EnvData.thresholds['humidity']!,
+        isAlert: env.isHumidityAlert,
+        min: 0,
+        max: 100,
+      ),
+      _SensorDisplay(
+        name: 'PM2.5',
+        unit: 'μg/m³',
+        icon: Icons.air,
+        color: AppColors.darkNavy,
+        value: env.pm25,
+        threshold: EnvData.thresholds['pm25']!,
+        isAlert: env.isPm25Alert,
+        min: 0,
+        max: 500,
+      ),
+      _SensorDisplay(
+        name: '烟雾',
+        unit: 'ppm',
+        icon: Icons.local_fire_department,
+        color: AppColors.orange,
+        value: env.smoke,
+        threshold: EnvData.thresholds['smoke']!,
+        isAlert: env.isSmokeAlert,
+        min: 0,
+        max: 1000,
+      ),
+      _SensorDisplay(
+        name: '光照',
+        unit: 'lux',
+        icon: Icons.wb_sunny,
+        color: AppColors.orangeDark,
+        value: env.light,
+        threshold: EnvData.thresholds['light']!,
+        isAlert: env.isLightAlert,
+        min: 0,
+        max: 1000,
+      ),
+      _SensorDisplay(
+        name: '气压',
+        unit: 'hPa',
+        icon: Icons.compress,
+        color: AppColors.bluePurple,
+        value: env.pressure,
+        threshold: EnvData.thresholds['pressure']!,
+        isAlert: env.isPressureAlert,
+        min: 900,
+        max: 1100,
+      ),
+    ];
+
+    final int alertCount = sensors.where((s) => s.isAlert).length;
+    final int normalCount = sensors.length - alertCount;
+    final bool waiting = _isWaiting;
+
     return Scaffold(
       body: SafeArea(
         child: Column(
           children: [
             // 顶部汇总
-            _buildSummaryBar(),
+            _buildSummaryBar(sensors.length, normalCount, alertCount, waiting),
             // 传感器列表
             Expanded(
               child: ListView.builder(
                 padding: const EdgeInsets.symmetric(vertical: 8),
-                itemCount: _sensors.length,
+                itemCount: sensors.length,
                 itemBuilder: (context, index) {
-                  return _buildSensorCard(_sensors[index]);
+                  return _buildSensorCard(sensors[index]);
                 },
               ),
             ),
@@ -125,10 +139,7 @@ class _SensorPageState extends State<SensorPage> {
     );
   }
 
-  Widget _buildSummaryBar() {
-    int normalCount = _sensors.where((s) => !s.isAlert).length;
-    int alertCount = _sensors.where((s) => s.isAlert).length;
-
+  Widget _buildSummaryBar(int total, int normalCount, int alertCount, bool waiting) {
     return Container(
       margin: const EdgeInsets.all(16),
       padding: const EdgeInsets.all(16),
@@ -146,43 +157,55 @@ class _SensorPageState extends State<SensorPage> {
           ),
         ],
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: [
-          _buildSummaryItem(
-            '传感器总数',
-            '${_sensors.length}',
-            Icons.sensors,
-            AppColors.bluePurple,
-          ),
-          Container(
-            width: 1,
-            height: 40,
-            color: AppColors.blueGray.withValues(alpha: 0.3),
-          ),
-          _buildSummaryItem(
-            '正常',
-            '$normalCount',
-            Icons.check_circle,
-            AppColors.successGreen,
-          ),
-          Container(
-            width: 1,
-            height: 40,
-            color: AppColors.blueGray.withValues(alpha: 0.3),
-          ),
-          _buildSummaryItem(
-            '告警',
-            '$alertCount',
-            Icons.warning,
-            alertCount > 0 ? AppColors.errorRed : AppColors.blueGray,
-          ),
-        ],
-      ),
+      child: waiting
+          ? Center(
+              child: Text(
+                '等待传感器数据...',
+                style: TextStyle(
+                  color: AppColors.blueGray.withValues(alpha: 0.8),
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            )
+          : Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildSummaryItem(
+                  '传感器总数',
+                  '$total',
+                  Icons.sensors,
+                  AppColors.bluePurple,
+                ),
+                Container(
+                  width: 1,
+                  height: 40,
+                  color: AppColors.blueGray.withValues(alpha: 0.3),
+                ),
+                _buildSummaryItem(
+                  '正常',
+                  '$normalCount',
+                  Icons.check_circle,
+                  AppColors.successGreen,
+                ),
+                Container(
+                  width: 1,
+                  height: 40,
+                  color: AppColors.blueGray.withValues(alpha: 0.3),
+                ),
+                _buildSummaryItem(
+                  '告警',
+                  '$alertCount',
+                  Icons.warning,
+                  alertCount > 0 ? AppColors.errorRed : AppColors.blueGray,
+                ),
+              ],
+            ),
     );
   }
 
-  Widget _buildSummaryItem(String label, String value, IconData icon, Color color) {
+  Widget _buildSummaryItem(
+      String label, String value, IconData icon, Color color) {
     return Column(
       children: [
         Icon(icon, color: color, size: 24),
@@ -206,8 +229,8 @@ class _SensorPageState extends State<SensorPage> {
     );
   }
 
-  Widget _buildSensorCard(SensorData sensor) {
-    bool isAlert = sensor.isAlert;
+  Widget _buildSensorCard(_SensorDisplay sensor) {
+    final bool isAlert = sensor.isAlert;
     double progress = (sensor.value - sensor.min) / (sensor.max - sensor.min);
     double thresholdProgress =
         (sensor.threshold - sensor.min) / (sensor.max - sensor.min);
@@ -264,7 +287,7 @@ class _SensorPageState extends State<SensorPage> {
                       ),
                     ),
                     Text(
-                      '阈值: ${sensor.threshold} ${sensor.unit}',
+                      '阈值: ${sensor.threshold.toStringAsFixed(sensor.threshold == sensor.threshold.roundToDouble() ? 0 : 1)} ${sensor.unit}',
                       style: const TextStyle(
                         color: AppColors.blueGrayDark,
                         fontSize: 12,
@@ -323,8 +346,9 @@ class _SensorPageState extends State<SensorPage> {
               ),
               // 阈值线
               Positioned(
-                left: MediaQuery.of(context).size.width * thresholdProgress *
-                        0.85 - // 估算宽度
+                left: MediaQuery.of(context).size.width *
+                        thresholdProgress *
+                        0.85 -
                     32,
                 child: Container(
                   width: 2,
@@ -361,26 +385,28 @@ class _SensorPageState extends State<SensorPage> {
   }
 }
 
-class SensorData {
+/// Lightweight display-only model for sensor cards.
+/// Values are read from [EnvData] at build time; thresholds come from [EnvData.thresholds].
+class _SensorDisplay {
   final String name;
   final String unit;
   final IconData icon;
-  double value;
+  final Color color;
+  final double value;
+  final double threshold;
+  final bool isAlert;
   final double min;
   final double max;
-  final double threshold;
-  final Color color;
 
-  SensorData({
+  const _SensorDisplay({
     required this.name,
     required this.unit,
     required this.icon,
+    required this.color,
     required this.value,
+    required this.threshold,
+    required this.isAlert,
     required this.min,
     required this.max,
-    required this.threshold,
-    required this.color,
   });
-
-  bool get isAlert => value > threshold;
 }

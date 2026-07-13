@@ -110,6 +110,8 @@ class _VisionPageState extends State<VisionPage> {
               _buildCameraFeed(),
               const SizedBox(height: 8),
               _buildFeedToggle(),
+              const SizedBox(height: 8),
+              _buildTrackingBar(),
               const SizedBox(height: 12),
               _buildCaptureControls(),
               const SizedBox(height: 12),
@@ -412,6 +414,76 @@ class _VisionPageState extends State<VisionPage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════
+  // 人员跟踪控制条
+  // ═══════════════════════════════════════════
+
+  Widget _buildTrackingBar() {
+    final tracking = _ctrl.latestTrackingStatus;
+    final isTracking = tracking.isTracking;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: isTracking
+            ? AppColors.successGreen.withValues(alpha: 0.1)
+            : tracking.isLost
+                ? AppColors.orange.withValues(alpha: 0.1)
+                : AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isTracking
+              ? AppColors.successGreen.withValues(alpha: 0.3)
+              : AppColors.blueGray.withValues(alpha: 0.2),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: tracking.statusColor,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            isTracking ? '人员跟踪中' : tracking.eventZh,
+            style: TextStyle(
+              color: tracking.statusColor,
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const Spacer(),
+          GestureDetector(
+            onTap:
+                isTracking ? _ctrl.sendTrackingStop : _ctrl.sendTrackingStart,
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color:
+                    isTracking ? AppColors.errorRed : AppColors.bluePurple,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                isTracking ? '停止跟踪' : '启动跟踪',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
