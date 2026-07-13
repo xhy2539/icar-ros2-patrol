@@ -7,6 +7,10 @@ CONTAINER="${ICAR_ROS_CONTAINER:-autodrive_ros2}"
 ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-30}"
 REPO_DIR="${ICAR_REPO_DIR:-$HOME/icar-ros2-patrol}"
 APP_WS="${ICAR_APP_WS:-/root/icar_app_ws}"
+APP_MAX_LINEAR="${ICAR_APP_MAX_LINEAR:-0.45}"
+APP_MAX_ANGULAR="${ICAR_APP_MAX_ANGULAR:-1.2}"
+APP_COMMAND_TIMEOUT="${ICAR_APP_COMMAND_TIMEOUT:-1.0}"
+APP_ENABLE_JOYSTICK="${ICAR_ENABLE_JOYSTICK:-0}"
 
 docker inspect "$CONTAINER" >/dev/null
 
@@ -29,32 +33,51 @@ docker exec "$CONTAINER" pkill -f 'ros2 run yahboomcar_ctrl yahboom_keyboard' 2>
 run_ros_node() {
   local executable="$1"
   local logfile="$2"
+  shift 2
+  local ros_args="$*"
   docker exec "$CONTAINER" bash -lc \
     "source /opt/ros/foxy/setup.bash
      source $APP_WS/install/setup.bash
      export ROS_DOMAIN_ID=$ROS_DOMAIN_ID
-     nohup ros2 run app_control $executable </dev/null >$logfile 2>&1 &"
+     nohup ros2 run app_control $executable $ros_args </dev/null >$logfile 2>&1 &"
 }
 
 run_ros_node velocity_mux_node /tmp/velocity_mux.log
 sleep 1
-run_ros_node app_bridge_node /tmp/app_bridge.log
+run_ros_node app_bridge_node /tmp/app_bridge.log \
+  --ros-args \
+  -p command_timeout_sec:="$APP_COMMAND_TIMEOUT" \
+  -p max_linear:="$APP_MAX_LINEAR" \
+  -p max_angular:="$APP_MAX_ANGULAR"
 
-docker exec "$CONTAINER" pkill -x yahboom_joy_X3 2>/dev/null || true
-docker exec "$CONTAINER" bash -lc \
-  "source /opt/ros/foxy/setup.bash
-   source /root/yahboomcar_ros2_ws/yahboomcar_ws/install/setup.bash
-   export ROS_DOMAIN_ID=$ROS_DOMAIN_ID
-   nohup ros2 run yahboomcar_ctrl yahboom_joy_X3 --ros-args \
-     -r /cmd_vel:=/cmd_vel_joy </dev/null >/tmp/joy_ctrl.log 2>&1 &"
+# The vendor launch starts this Python executable under the interpreter, so
+# `pkill -x yahboom_joy_X3` never matches it.  Remove every existing instance
+# before starting the remapped one below; otherwise one joystick writes
+# directly to /cmd_vel and bypasses velocity_mux.
+docker exec "$CONTAINER" pkill -f '/yahboomcar_ctrl/lib/yahboomcar_ctrl/yahboom_joy_X3' 2>/dev/null || true
+docker exec "$CONTAINER" pkill -f 'ros2 run yahboomcar_ctrl yahboom_joy_X3' 2>/dev/null || true
+if [ "$APP_ENABLE_JOYSTICK" = "1" ]; then
+  docker exec "$CONTAINER" bash -lc \
+    "source /opt/ros/foxy/setup.bash
+     source /root/yahboomcar_ros2_ws/yahboomcar_ws/install/setup.bash
+     export ROS_DOMAIN_ID=$ROS_DOMAIN_ID
+     nohup ros2 run yahboomcar_ctrl yahboom_joy_X3 --ros-args \
+       -r /cmd_vel:=/cmd_vel_joy </dev/null >/tmp/joy_ctrl.log 2>&1 &"
+fi
 
 pkill -f '^python3 app/web_gateway.py$' 2>/dev/null || true
 rm -f /tmp/icar_web_gateway.log
 WEB_USER="${ICAR_WEB_USER:-$(stat -c '%U' "$REPO_DIR")}"
 if [ "$(id -u)" -eq 0 ] && [ "$WEB_USER" != root ]; then
+  runuser -u "$WEB_USER" -- python3 -c 'import flask_sock' 2>/dev/null || \
+    runuser -u "$WEB_USER" -- python3 -m pip install --user \
+      --disable-pip-version-check -r "$REPO_DIR/app/requirements.txt"
   runuser -u "$WEB_USER" -- bash -lc \
     "cd '$REPO_DIR'; nohup python3 app/web_gateway.py </dev/null >/tmp/icar_web_gateway.log 2>&1 &"
 else
+  python3 -c 'import flask_sock' 2>/dev/null || \
+    python3 -m pip install --user --disable-pip-version-check \
+      -r "$REPO_DIR/app/requirements.txt"
   cd "$REPO_DIR"
   nohup python3 app/web_gateway.py </dev/null >/tmp/icar_web_gateway.log 2>&1 &
 fi

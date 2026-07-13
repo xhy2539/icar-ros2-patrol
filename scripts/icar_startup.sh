@@ -42,6 +42,11 @@ echo "[4/14] Removing legacy control and camera processes"
 pkill -f 'Rosmaster-App/rosmaster/app.py' 2>/dev/null || true
 pkill -f '^python3 app.py$' 2>/dev/null || true
 docker exec autodrive_ros2 pkill -f '^python3 /tmp/fast_bridge.py$' 2>/dev/null || true
+# The vendor DWA launch publishes directly to /cmd_vel and bypasses the
+# application mux. Navigation is started separately only after localization.
+docker exec autodrive_ros2 pkill -f '[n]avigation_dwa_launch.py' 2>/dev/null || true
+docker exec autodrive_ros2 pkill -f \
+  '[/]navigation/lib/navigation/obstacle_avoid_node' 2>/dev/null || true
 
 echo "[5/14] Starting chassis bringup and lidar"
 # A container restart can restore a launch process a few seconds after Docker is
@@ -61,7 +66,8 @@ if ! docker exec autodrive_ros2 pgrep -f 'Mcnamu_driver_X3 --ros-args' >/dev/nul
        </dev/null >/tmp/yahboomcar_bringup.log 2>&1 &'
   sleep 10
 fi
-if ! docker exec autodrive_ros2 pgrep -x sllidar_node >/dev/null; then
+if ! docker exec autodrive_ros2 pgrep -f \
+  '/sllidar_ros2/lib/sllidar_ros2/sllidar_node --ros-args' >/dev/null; then
   docker exec autodrive_ros2 bash -lc \
     'source /opt/ros/foxy/setup.bash
      source /root/yahboomcar_ros2_ws/software/library_ws/install/setup.bash
