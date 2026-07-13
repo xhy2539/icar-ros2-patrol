@@ -18,39 +18,9 @@ from navigation_utils import (
     interpolate_pose,
     load_checkpoints,
     load_map_metadata,
+    parse_pgm,
     yaw_to_quaternion,
 )
-
-
-def parse_ascii_pgm(file_path: Path):
-    tokens = []
-    with file_path.open("r", encoding="ascii") as file:
-        for line in file:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            tokens.extend(line.split())
-
-    if len(tokens) < 4 or tokens[0] != "P2":
-        raise ValueError(f"Unsupported PGM format in {file_path}")
-
-    width = int(tokens[1])
-    height = int(tokens[2])
-    max_value = int(tokens[3])
-    raw_values = [int(value) for value in tokens[4:]]
-    if len(raw_values) != width * height:
-        raise ValueError(f"PGM size mismatch in {file_path}")
-
-    occupancy = []
-    for pixel in raw_values:
-        normalized = pixel / max_value
-        if normalized >= 0.65:
-            occupancy.append(100)
-        elif normalized <= 0.2:
-            occupancy.append(0)
-        else:
-            occupancy.append(-1)
-    return width, height, occupancy
 
 
 class SlamNode(Node):
@@ -71,9 +41,19 @@ class SlamNode(Node):
 
         map_yaml_path = self.map_metadata.get("map_yaml", "config/navigation/maps/mock_lab.yaml")
         self.map_yaml_file = (PARENT_DIR / map_yaml_path).resolve()
-        self.pgm_file = self.map_yaml_file.parent / "mock_lab.pgm"
 
-        width, height, occupancy = parse_ascii_pgm(self.pgm_file)
+        # Read the map YAML to get the PGM file name
+        try:
+            import yaml as _yaml
+            with self.map_yaml_file.open("r", encoding="utf-8") as _f:
+                _map_cfg = _yaml.safe_load(_f) or {}
+            _pgm_name = _map_cfg.get("image", "mock_lab.pgm")
+        except Exception:
+            _pgm_name = "mock_lab.pgm"
+        self.pgm_file = self.map_yaml_file.parent / _pgm_name
+
+        invert = bool(self.map_metadata.get("invert", False))
+        width, height, occupancy = parse_pgm(self.pgm_file, invert=invert)
         self.map_width = width
         self.map_height = height
         self.map_occupancy = occupancy

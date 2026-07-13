@@ -77,7 +77,7 @@
 | **负责人** | 曹莹 |
 | **订阅 Topic** | `/scan` |
 | **发布 Topic** | `/cmd_vel`（停止/避让指令）, `/obstacle_status` |
-| **功能** | 默认根据真实 `/scan` 前方约 ±30° 扇区计算最近障碍距离，发布 `/obstacle_status` 并在危险时发布停止指令；`--mode mock` 仅保留为无雷达演示兜底 |
+| **功能** | 默认根据真实 `/scan` 前方约 ±90° 扇区计算最近障碍距离（含渐进式全向兜底），发布 `/obstacle_status` 并在危险时发布停止指令；`--mode mock` 仅保留为无雷达演示兜底 |
 | **启动命令** | `ros2 run navigation obstacle_avoid_node` |
 
 ### 5. slam_node

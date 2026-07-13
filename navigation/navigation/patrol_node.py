@@ -16,6 +16,8 @@ for path in (CURRENT_DIR, PARENT_DIR):
 
 from navigation_utils import load_checkpoints, yaw_to_quaternion
 
+NAV_TIMEOUT_SEC = 60.0
+
 
 class PatrolNode(Node):
     def __init__(self, route_names, loop: bool):
@@ -27,6 +29,7 @@ class PatrolNode(Node):
         self.current_index = 0
         self.waiting_result = False
         self.started_at = time.monotonic()
+        self.goal_sent_at = None
         self.last_status = "IDLE"
         self.goal_publisher = self.create_publisher(PoseStamped, "/goal_pose", 10)
         self.create_subscription(NavStatus, "/nav_status", self.on_nav_status, 10)
@@ -48,15 +51,18 @@ class PatrolNode(Node):
         message.pose.orientation.w = orientation["w"]
         self.goal_publisher.publish(message)
         self.waiting_result = True
+        self.goal_sent_at = time.monotonic()
         self.get_logger().info(f"Published patrol goal: {name}")
 
     def on_nav_status(self, message: NavStatus):
         self.last_status = message.status or "IDLE"
         if self.waiting_result and self.last_status == "ARRIVED":
             self.waiting_result = False
+            self.goal_sent_at = None
             self.current_index += 1
         elif self.waiting_result and self.last_status == "FAILED":
             self.waiting_result = False
+            self.goal_sent_at = None
             self.get_logger().warning("Patrol stopped after navigation failure")
             self.current_index = len(self.route_names)
 
@@ -64,7 +70,14 @@ class PatrolNode(Node):
         if time.monotonic() - self.started_at < 2.0:
             return
         if self.waiting_result:
-            return
+            if self.goal_sent_at is not None and time.monotonic() - self.goal_sent_at > NAV_TIMEOUT_SEC:
+                self.waiting_result = False
+                self.get_logger().warning(
+                    f"Patrol goal timed out after {NAV_TIMEOUT_SEC:.0f}s — skipping and advancing"
+                )
+                self.current_index += 1
+            else:
+                return
         if self.current_index >= len(self.route_names):
             if not self.loop:
                 return

@@ -33,8 +33,15 @@ def install_ros_stubs():
     sys.modules.setdefault("icar_interfaces.msg", icar_interfaces_msg)
     sys.modules.setdefault("rclpy", rclpy)
     sys.modules.setdefault("rclpy.node", rclpy_node)
+    std_msgs = types.ModuleType("std_msgs")
+    std_msgs_msg = types.ModuleType("std_msgs.msg")
+    std_msgs_msg.String = type("String", (), {})
+    std_msgs.msg = std_msgs_msg
+
     sys.modules.setdefault("sensor_msgs", sensor_msgs)
     sys.modules.setdefault("sensor_msgs.msg", sensor_msgs_msg)
+    sys.modules.setdefault("std_msgs", std_msgs)
+    sys.modules.setdefault("std_msgs.msg", std_msgs_msg)
 
 
 def load_obstacle_module():
@@ -112,9 +119,9 @@ class ObstacleScanLogicTest(unittest.TestCase):
         self.assertEqual(result["action"], "slow_down")
 
     def test_no_valid_front_ranges_falls_back_to_safe_range_max(self):
-        ranges = [2.0] * 37
-        for index in range(15, 22):
-            ranges[index] = float("nan")
+        # All ranges NaN → primary and all fallback sectors empty →
+        # falls back to range_max as safe distance.
+        ranges = [float("nan")] * 37
 
         result = self.classify(ranges)
 
