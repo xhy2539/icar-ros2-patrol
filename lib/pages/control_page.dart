@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/app_theme.dart';
@@ -11,25 +13,39 @@ class ControlPage extends StatefulWidget {
   State<ControlPage> createState() => _ControlPageState();
 }
 
-class _ControlPageState extends State<ControlPage> {
+class _ControlPageState extends State<ControlPage> with WidgetsBindingObserver {
   final CarController _ctrl = CarController.instance;
   late TextEditingController _ipController;
 
   /// 当前激活中的运动方向（空 = 未运动）
   String _activeDirection = '';
+  Timer? _motionHeartbeat;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _ipController = TextEditingController(text: _ctrl.host);
     _ctrl.addListener(_onControllerChanged);
   }
 
   @override
   void dispose() {
+    _motionHeartbeat?.cancel();
+    if (_ctrl.isConnected) {
+      _ctrl.sendCommand('stop');
+    }
+    WidgetsBinding.instance.removeObserver(this);
     _ctrl.removeListener(_onControllerChanged);
     _ipController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) {
+      _stopMotion(sendStop: true);
+    }
   }
 
   void _onControllerChanged() {
@@ -59,22 +75,40 @@ class _ControlPageState extends State<ControlPage> {
     }
     _ctrl.sendCommand(direction);
     setState(() => _activeDirection = direction);
+    _motionHeartbeat?.cancel();
+    // 与网页一致：车端看门狗要求长按期间持续续租。
+    _motionHeartbeat = Timer.periodic(const Duration(milliseconds: 100), (_) {
+      if (_activeDirection.isNotEmpty && _ctrl.isConnected) {
+        _ctrl.sendCommand(_activeDirection);
+      }
+    });
     HapticFeedback.heavyImpact();
   }
 
   /// 松开方向键：发送 stop
   void _onRelease() {
     if (_activeDirection.isEmpty) return;
-    _ctrl.sendCommand('stop');
-    setState(() => _activeDirection = '');
+    _stopMotion(sendStop: true);
     HapticFeedback.lightImpact();
   }
 
   /// 单次点击 stop
   void _onStop() {
-    _ctrl.sendCommand('stop');
-    setState(() => _activeDirection = '');
+    _stopMotion(sendStop: true);
     HapticFeedback.heavyImpact();
+  }
+
+  void _stopMotion({required bool sendStop}) {
+    _motionHeartbeat?.cancel();
+    _motionHeartbeat = null;
+    if (sendStop && _ctrl.isConnected) {
+      _ctrl.sendCommand('stop');
+    }
+    if (_activeDirection.isNotEmpty && mounted) {
+      setState(() => _activeDirection = '');
+    } else {
+      _activeDirection = '';
+    }
   }
 
   @override
@@ -86,6 +120,7 @@ class _ControlPageState extends State<ControlPage> {
           child: Column(
             children: [
               _buildConnectionBar(),
+              _buildObstacleBanner(),
               const SizedBox(height: 16),
               _buildSpeedControl(),
               const SizedBox(height: 24),
@@ -183,6 +218,52 @@ class _ControlPageState extends State<ControlPage> {
     );
   }
 
+  Widget _buildObstacleBanner() {
+    final obs = _ctrl.latestObstacleStatus;
+    if (!obs.isObstacle || obs.isSafe) return const SizedBox.shrink();
+
+    final isDanger = obs.isDanger;
+
+    if (isDanger) {
+      HapticFeedback.vibrate();
+    }
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: isDanger
+            ? AppColors.errorRed.withValues(alpha: 0.15)
+            : AppColors.orange.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDanger ? AppColors.errorRed : AppColors.orange,
+          width: 1.5,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            isDanger ? Icons.error : Icons.warning,
+            color: isDanger ? AppColors.errorRed : AppColors.orange,
+            size: 20,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '${obs.directionZh} ${obs.minDistance.toStringAsFixed(1)}m 有障碍物${isDanger ? " — 紧急" : ""}',
+              style: TextStyle(
+                color: isDanger ? AppColors.errorRed : AppColors.orange,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSpeedControl() {
     return AppCard(
       title: '速度控制',
@@ -191,8 +272,11 @@ class _ControlPageState extends State<ControlPage> {
         children: [
           Row(
             children: [
-              const Icon(Icons.slow_motion_video,
-                  color: AppColors.blueGray, size: 20),
+              const Icon(
+                Icons.slow_motion_video,
+                color: AppColors.blueGray,
+                size: 20,
+              ),
               Expanded(
                 child: Slider(
                   value: _ctrl.speed,
@@ -212,10 +296,7 @@ class _ControlPageState extends State<ControlPage> {
             children: [
               Text(
                 '当前速度: ${(_ctrl.speed * 100).round()}%',
-                style: const TextStyle(
-                  color: AppColors.darkNavy,
-                  fontSize: 14,
-                ),
+                style: const TextStyle(color: AppColors.darkNavy, fontSize: 14),
               ),
               Text(
                 '${(_ctrl.speed * 1.5).toStringAsFixed(1)} m/s',
@@ -239,9 +320,7 @@ class _ControlPageState extends State<ControlPage> {
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: AppColors.blueGray.withValues(alpha: 0.2),
-        ),
+        border: Border.all(color: AppColors.blueGray.withValues(alpha: 0.2)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.04),
@@ -660,10 +739,7 @@ class _ControlPageState extends State<ControlPage> {
                 icon: const Icon(Icons.copy, size: 18),
                 color: AppColors.bluePurple,
                 tooltip: '复制全部日志',
-                constraints: const BoxConstraints(
-                  minWidth: 36,
-                  minHeight: 36,
-                ),
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
                 padding: EdgeInsets.zero,
               ),
               const SizedBox(width: 4),
@@ -673,10 +749,7 @@ class _ControlPageState extends State<ControlPage> {
                 icon: const Icon(Icons.delete_outline, size: 18),
                 color: AppColors.blueGray,
                 tooltip: '清空日志',
-                constraints: const BoxConstraints(
-                  minWidth: 36,
-                  minHeight: 36,
-                ),
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
                 padding: EdgeInsets.zero,
               ),
             ],
@@ -693,10 +766,7 @@ class _ControlPageState extends State<ControlPage> {
                 ? const Center(
                     child: Text(
                       '暂无日志',
-                      style: TextStyle(
-                        color: AppColors.blueGray,
-                        fontSize: 12,
-                      ),
+                      style: TextStyle(color: AppColors.blueGray, fontSize: 12),
                     ),
                   )
                 : ListView.builder(
@@ -712,10 +782,10 @@ class _ControlPageState extends State<ControlPage> {
                             color: logs[index].contains('[错误]')
                                 ? AppColors.errorRed
                                 : logs[index].contains('[收到]')
-                                    ? AppColors.successGreen
-                                    : logs[index].contains('[调试]')
-                                        ? AppColors.blueGray
-                                        : AppColors.darkNavyLight,
+                                ? AppColors.successGreen
+                                : logs[index].contains('[调试]')
+                                ? AppColors.blueGray
+                                : AppColors.darkNavyLight,
                             fontSize: 11,
                             fontFamily: 'monospace',
                           ),

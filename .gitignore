@@ -21,15 +21,6 @@ install/
 vision_samples/
 local_detection_samples/
 
-# Public water dataset is distributed through GitHub Releases.
-datasets/water_public/train/
-datasets/water_public/valid/
-datasets/water_public/test/
-datasets/water_public/*.cache
-datasets/water_public/README.dataset.txt
-datasets/water_public/README.roboflow.txt
-runs/
-
 # 模型文件较大，建议放网盘、Release 或 Git LFS
 *.pt
 *.onnx
@@ -43,7 +34,13 @@ models/
 # 敏感配置文件（含密码）
 小车配置
 云服务器配置
-.env
+
+# Flutter 构建产物
+.dart_tool/
+.flutter-plugins-dependencies
+web/
+datasets/
+runs/
 
 # 临时目录
 tmp/
@@ -52,51 +49,9 @@ tmp/
 *.swp
 *.swo
 *~
-# Built APK
-app-release.apk
 
-# Miscellaneous
-*.class
-*.log
-*.pyc
-*.swp
-.DS_Store
-.atom/
-.build/
-.buildlog/
-.history
-.svn/
-.swiftpm/
-migrate_working_dir/
-
-# IntelliJ related
-*.iml
-*.ipr
-*.iws
-.idea/
-
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
-
-# Flutter/Dart/Pub related
-**/doc/api/
-**/ios/Flutter/.last_build_id
-.dart_tool/
-.flutter-plugins-dependencies
-.pub-cache/
-.pub/
-/build/
-/coverage/
-
-# Symbolication related
-app.*.symbols
-
-# Obfuscation related
-app.*.map.json
-
-# Android Studio will place build artifacts here
-/android/app/debug
-/android/app/profile
-/android/app/release
+# 音频生成文件 — 保留 README 和脚本，忽略生成的音频
+audio/*.wav
+audio/*.mp3
+audio/*.m4a
+!audio/README.md

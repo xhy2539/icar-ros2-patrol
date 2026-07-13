@@ -31,7 +31,41 @@ from icar_interfaces.msg import (
 from icar_interfaces.srv import GenerateReport, ParseTask
 
 # ---------------------------------------------------------------------------
-# 可选依赖
+# 可选依赖 — RobotTools（工具调用模式）
+# ---------------------------------------------------------------------------
+_RobotTools = None
+_ROBOT_TOOLS_AVAILABLE = False
+
+try:
+    import sys as _sys
+    import os as _os
+    # 从安装空间反查源空间: install/llm_gateway/... -> src/llm/
+    _here = _os.path.realpath(__file__)
+    _src_llm = ""
+    _d = _os.path.dirname(_here)
+    while _d and _d != "/":
+        _candidate = _os.path.join(_d, "src", "llm")
+        if _os.path.isdir(_candidate):
+            _src_llm = _candidate
+            break
+        _d = _os.path.dirname(_d)
+    if _src_llm and _src_llm not in _sys.path:
+        _sys.path.insert(0, _src_llm)
+    from robot_tools import RobotTools as _RT
+    _RobotTools = _RT
+    _ROBOT_TOOLS_AVAILABLE = True
+    # 同时导入独立 deepseek_client（供 parse_tool_call 使用）
+    try:
+        from deepseek_client import DeepSeekClient as _ToolClient
+        _TOOL_CLIENT_AVAILABLE = True
+    except ImportError:
+        _ToolClient = None
+        _TOOL_CLIENT_AVAILABLE = False
+except ImportError:
+    pass
+
+# ---------------------------------------------------------------------------
+# 可选依赖 — DeepSeek
 # ---------------------------------------------------------------------------
 _DEEPSEEK_AVAILABLE = False
 DeepSeekClient = None
@@ -88,22 +122,33 @@ class LlmGatewayNode(Node):
         self.declare_parameter("provider", "auto")
         self.declare_parameter("default_route", ["A", "B", "C"])
         self.declare_parameter("max_logs_per_task", 200)
+        self.declare_parameter("tool_mode", False)
 
         self._provider_cfg = str(self.get_parameter("provider").value)
         self.default_route = list(self.get_parameter("default_route").value)
         self.max_logs_per_task = int(self.get_parameter("max_logs_per_task").value)
+        self._tool_mode = bool(self.get_parameter("tool_mode").value)
 
         # DeepSeek 客户端（延迟初始化）
         self._client = None
         self._api_ok = False
 
+        # RobotTools（工具调用模式）
+        self._robot_tools = None
+        if self._tool_mode:
+            if _ROBOT_TOOLS_AVAILABLE:
+                self._robot_tools = _RobotTools(self)
+                self.get_logger().info("RobotTools loaded for tool_mode")
+            else:
+                self.get_logger().warn("tool_mode=true but RobotTools import failed")
+
         # ── 数据缓存 ──
         self.logs_by_task = defaultdict(list)
 
-        self._latest_task_status = None   # dict: {task_id, status, current_step, total_steps, message}
-        self._latest_nav_status = None    # dict: {status, progress, distance_remain, message}
-        self._latest_obstacle = None      # dict: {is_obstacle, min_distance, direction, risk_level, action}
-        self._latest_detections = None    # list of dict: [{class_name, confidence, bbox, image_path}, ...]
+        self._latest_task_status = None
+        self._latest_nav_status = None
+        self._latest_obstacle = None
+        self._latest_detections = None
 
         # ── QoS ──
         reliable_qos = QoSProfile(depth=50, reliability=ReliabilityPolicy.RELIABLE)
@@ -131,13 +176,27 @@ class LlmGatewayNode(Node):
         self.report_srv = self.create_service(
             GenerateReport, "/llm/generate_report", self._on_generate_report)
 
+        # ── 工具调用（可选）──────────────────────────────────────
+        self._tool_sub = None
+        self._response_pub = None
+        if self._tool_mode:
+            from std_msgs.msg import String
+            self._tool_sub = self.create_subscription(
+                String, "/llm/user_command", self._on_tool_command, reliable_qos)
+            self._response_pub = self.create_publisher(
+                String, "/llm/response", reliable_qos)
+
         # 启动信息
         effective = self._resolve_provider()
+        extra = []
+        if self._tool_mode:
+            extra.append("tool_mode=on")
         self.get_logger().info(
             f"llm_gateway_node ready, provider={effective}, "
             f"api_available={self._api_ok}, "
             f"services=[/llm/parse_task, /llm/generate_report], "
             f"subscriptions=5 topics"
+            + (", tool_mode=on, /llm/user_command" if self._tool_mode else "")
         )
 
     # ── provider 决策 ──────────────────────────────────────────
@@ -732,6 +791,130 @@ class LlmGatewayNode(Node):
             return json.loads(text)
         except json.JSONDecodeError:
             return {"raw": text}
+
+    # ═══════════════════════════════════════════════════════════
+    # 工具调用（tool_mode）
+    # ═══════════════════════════════════════════════════════════
+
+    def _on_tool_command(self, msg):
+        """处理 /llm/user_command 消息，执行工具并发布到 /llm/response。"""
+        user_input = msg.data.strip()
+        if not user_input:
+            return
+
+        self.get_logger().info(f"Tool command: {user_input[:60]}")
+        try:
+            result = self._execute_tool(user_input)
+            self.get_logger().info(
+                f"Tool result: {result.get('tool_name','?')} "
+                f"success={result.get('success')} "
+                f"msg={str(result.get('message',''))[:80]}"
+            )
+        except Exception as _exc:
+            self.get_logger().error(f"Tool execution exception: {_exc}")
+            result = {"success": False, "tool_name": "?", "message": str(_exc)}
+
+        if self._response_pub:
+            from std_msgs.msg import String
+            resp = String()
+            resp.data = json.dumps(result, ensure_ascii=False)
+            self._response_pub.publish(resp)
+
+    def _execute_tool(self, user_input: str) -> dict:
+        """LLM 解析 → 工具执行。"""
+        if self._robot_tools is None:
+            return {"success": False, "message": "tool_mode requires robot_tools"}
+
+        if _TOOL_CLIENT_AVAILABLE and _ToolClient is not None:
+            try:
+                tool_client = _ToolClient()
+                self.get_logger().info(f"Calling DeepSeek parse_tool_call...")
+                raw = tool_client.parse_tool_call(user_input)
+                if raw:
+                    json_str = extract_json_from_response(raw)
+                    tool_call = json.loads(json_str)
+                else:
+                    return {"success": False, "message": "Tool API returned empty"}
+            except Exception as e:
+                return {"success": False, "message": f"Tool parse error: {e}"}
+        elif self._use_api and self._client is not None:
+            try:
+                raw = self._client.parse_tool_call(user_input)
+                if raw is None:
+                    return {"success": False, "message": "API unavailable"}
+                json_str = extract_json_from_response(raw)
+                tool_call = json.loads(json_str)
+            except Exception as e:
+                return {"success": False, "message": f"Tool parse error: {e}"}
+        else:
+            return {"success": False, "message": "DeepSeek API not available"}
+
+        tool_name = tool_call.get("tool_name", "")
+        arguments = tool_call.get("arguments", {})
+
+        tool_map = {
+            "start_patrol":       self._tool_start_patrol,
+            "get_robot_status":   self._tool_get_status,
+            "stop_robot":         self._tool_stop_robot,
+            "cancel_task":        self._tool_cancel_task,
+            "reset_task":         self._tool_reset_task,
+            "query_vision":       self._tool_query_vision,
+            "query_navigation":   self._tool_query_navigation,
+            "check_safety":       self._tool_check_safety,
+            "play_audio":         self._tool_play_audio,
+            "download_audio":     self._tool_download_audio,
+        }
+
+        if tool_name not in tool_map:
+            return {"success": False, "tool_name": tool_name,
+                    "message": f"Unknown tool: {tool_name}"}
+
+        try:
+            result = tool_map[tool_name](**arguments)
+            result["tool_name"] = tool_name
+            return result
+        except Exception as e:
+            return {"success": False, "tool_name": tool_name,
+                    "message": f"Tool execution failed: {e}"}
+
+    def _tool_get_status(self) -> dict:
+        # 读缓存数据，避免同步 ROS2 调用阻塞 spin
+        if self._latest_task_status:
+            return {"success": True, "message": "task status",
+                    "data": self._latest_task_status}
+        return self._robot_tools.get_robot_status()
+
+    def _tool_stop_robot(self, reason: str = "user requested emergency stop") -> dict:
+        # /task/control 可能不存在，返回提示
+        return {"success": True,
+                "message": f"Stop requested: {reason}. task_manager will handle via /task/request."}
+
+    def _tool_cancel_task(self, reason: str = "user cancelled patrol") -> dict:
+        return {"success": True,
+                "message": f"Cancel requested: {reason}. Use /task/request to cancel."}
+
+    def _tool_reset_task(self, reason: str = "operator confirmed reset") -> dict:
+        return {"success": True,
+                "message": f"Reset requested: {reason}. Use /task/request to reset."}
+
+    def _tool_start_patrol(self, route: list, user_text: str = "") -> dict:
+        return self._robot_tools.start_patrol(route, user_text)
+
+    def _tool_query_vision(self) -> dict:
+        return self._robot_tools.query_vision()
+
+    def _tool_query_navigation(self) -> dict:
+        return self._robot_tools.query_navigation()
+
+    def _tool_check_safety(self) -> dict:
+        return self._robot_tools.check_safety()
+
+    def _tool_play_audio(self, name: str = "beep", file_path: str = "",
+                         volume: float = 1.0) -> dict:
+        return self._robot_tools.play_audio(name=name, file_path=file_path, volume=volume)
+
+    def _tool_download_audio(self, query: str, name: str = "") -> dict:
+        return self._robot_tools.download_audio(query=query, name=name)
 
 
 # ---------------------------------------------------------------------------

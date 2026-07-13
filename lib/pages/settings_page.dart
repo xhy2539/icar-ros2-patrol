@@ -132,7 +132,9 @@ class _SettingsPageState extends State<SettingsPage> {
                             width: 18,
                             height: 18,
                             child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white),
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
                           )
                         : const Icon(Icons.save, size: 20),
                     label: Text(_dirty ? '保存并应用' : '已保存'),
@@ -190,8 +192,11 @@ class _SettingsPageState extends State<SettingsPage> {
               children: [
                 Row(
                   children: [
-                    Icon(Icons.info_outline,
-                        color: AppColors.bluePurple, size: 16),
+                    Icon(
+                      Icons.info_outline,
+                      color: AppColors.bluePurple,
+                      size: 16,
+                    ),
                     SizedBox(width: 8),
                     Text(
                       'WiFi 热点配置',
@@ -373,21 +378,19 @@ class _SettingsPageState extends State<SettingsPage> {
             children: [
               Text(
                 label,
-                style:
-                    const TextStyle(color: AppColors.darkNavy, fontSize: 14),
+                style: const TextStyle(color: AppColors.darkNavy, fontSize: 14),
               ),
               Text(
                 subtitle,
                 style: const TextStyle(
-                    color: AppColors.blueGrayDark, fontSize: 11),
+                  color: AppColors.blueGrayDark,
+                  fontSize: 11,
+                ),
               ),
             ],
           ),
         ),
-        Switch(
-          value: value,
-          onChanged: onChanged,
-        ),
+        Switch(value: value, onChanged: onChanged),
       ],
     );
   }

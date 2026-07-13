@@ -19,7 +19,7 @@ CAR_PASS="${ICAR_PASS:-yahboom}"
 CONTAINER="icar_ros2"
 WS_DIR="/root/icar_ros2_ws/icar_ws"
 REPO_DIR="icar-ros2-patrol"
-PACKAGES="icar_interfaces task_manager cloud_bridge vision llm voice navigation scripts"
+PACKAGES="icar_interfaces task_manager cloud_bridge vision llm voice scripts audio"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'

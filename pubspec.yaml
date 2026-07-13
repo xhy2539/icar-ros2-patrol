@@ -1,7 +1,7 @@
 name: icar_app
 description: "iCar 智能巡检小车控制端 - 2026小学期实训项目"
 publish_to: 'none'
-version: 2.0.0+2
+version: 2.0.2+4
 
 environment:
   sdk: ^3.12.0

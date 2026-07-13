@@ -90,10 +90,7 @@ class AppTheme {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
-          textStyle: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-          ),
+          textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
         ),
       ),
       sliderTheme: SliderThemeData(
@@ -121,7 +118,10 @@ class AppTheme {
         ),
         labelStyle: const TextStyle(color: AppColors.blueGrayDark),
         hintStyle: TextStyle(color: AppColors.blueGray.withValues(alpha: 0.6)),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 14,
+        ),
       ),
       dividerTheme: DividerThemeData(
         color: AppColors.blueGray.withValues(alpha: 0.3),
@@ -241,10 +241,7 @@ class StatusBadge extends StatelessWidget {
           Container(
             width: 8,
             height: 8,
-            decoration: BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-            ),
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
           ),
           const SizedBox(width: 6),
           Text(

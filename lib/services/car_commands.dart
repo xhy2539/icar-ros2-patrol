@@ -67,6 +67,14 @@ class CarCommands {
   }
 
   /// 获取所有可用指令
-  static List<String> get all =>
-      [forward, backward, left, right, turnLeft, turnRight, stop, start];
+  static List<String> get all => [
+    forward,
+    backward,
+    left,
+    right,
+    turnLeft,
+    turnRight,
+    stop,
+    start,
+  ];
 }

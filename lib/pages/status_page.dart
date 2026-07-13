@@ -1,6 +1,6 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
+import '../services/car_controller.dart';
 
 class StatusPage extends StatefulWidget {
   const StatusPage({super.key});
@@ -10,39 +10,77 @@ class StatusPage extends StatefulWidget {
 }
 
 class _StatusPageState extends State<StatusPage> {
-  // 模拟数据
-  final double _batteryLevel = 78.0;
-  double _currentSpeed = 0.0;
-  String _navigationMode = '手动控制';
-  final String _signalStrength = '强';
-  int _runningTime = 1245; // 秒
-  Timer? _timer;
+  final CarController _ctrl = CarController.instance;
 
   @override
   void initState() {
     super.initState();
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      setState(() {
-        _runningTime++;
-        // 模拟速度波动
-        _currentSpeed = (_currentSpeed + (DateTime.now().second % 3 - 1) * 0.1)
-            .clamp(0.0, 1.5);
-      });
-    });
+    _ctrl.addListener(_onCtrlChanged);
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
+    _ctrl.removeListener(_onCtrlChanged);
     super.dispose();
   }
 
-  String _formatTime(int seconds) {
-    int h = seconds ~/ 3600;
-    int m = (seconds % 3600) ~/ 60;
-    int s = seconds % 60;
-    return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  void _onCtrlChanged() {
+    if (mounted) setState(() {});
   }
+
+  // ═══════════════════════════════════════════
+  // Helpers
+  // ═══════════════════════════════════════════
+
+  /// Whether real car data is available (connected + non-default values)
+  bool get _hasNavData {
+    final nav = _ctrl.latestNavStatus;
+    return nav.status != 'IDLE' ||
+        nav.progress > 0.0 ||
+        nav.distanceRemain > 0.0;
+  }
+
+  bool get _hasObstacleData {
+    final obs = _ctrl.latestObstacleStatus;
+    return obs.isObstacle || obs.minDistance < 99.0;
+  }
+
+  bool get _hasTaskData {
+    final task = _ctrl.latestTaskStatus;
+    return task.taskId.isNotEmpty ||
+        task.status != 'PENDING' ||
+        task.totalSteps > 0;
+  }
+
+  Color _riskColor(String riskLevel) {
+    switch (riskLevel) {
+      case 'danger':
+        return AppColors.errorRed;
+      case 'warning':
+        return AppColors.warningOrange;
+      default:
+        return AppColors.successGreen;
+    }
+  }
+
+  IconData _directionIcon(String direction) {
+    switch (direction) {
+      case 'front':
+        return Icons.arrow_upward;
+      case 'back':
+        return Icons.arrow_downward;
+      case 'left':
+        return Icons.arrow_back;
+      case 'right':
+        return Icons.arrow_forward;
+      default:
+        return Icons.near_me;
+    }
+  }
+
+  // ═══════════════════════════════════════════
+  // Build
+  // ═══════════════════════════════════════════
 
   @override
   Widget build(BuildContext context) {
@@ -60,6 +98,9 @@ class _StatusPageState extends State<StatusPage> {
               const SizedBox(height: 16),
               // 导航信息
               _buildNavigationInfo(),
+              const SizedBox(height: 16),
+              // 系统信息
+              _buildSystemInfo(),
             ],
           ),
         ),
@@ -67,19 +108,25 @@ class _StatusPageState extends State<StatusPage> {
     );
   }
 
+  // ═══════════════════════════════════════════
+  // 状态概览
+  // ═══════════════════════════════════════════
+
   Widget _buildStatusOverview() {
+    final connected = _ctrl.isConnected;
+    final nav = _ctrl.latestNavStatus;
+    final task = _ctrl.latestTaskStatus;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
         children: [
           Expanded(
             child: _buildStatusItem(
-              icon: Icons.battery_charging_full,
-              label: '电量',
-              value: '${_batteryLevel.round()}%',
-              color: _batteryLevel > 30
-                  ? AppColors.successGreen
-                  : AppColors.errorRed,
+              icon: connected ? Icons.link : Icons.link_off,
+              label: '连接',
+              value: connected ? '已连接' : '未连接',
+              color: connected ? AppColors.successGreen : AppColors.errorRed,
             ),
           ),
           const SizedBox(width: 8),
@@ -87,26 +134,26 @@ class _StatusPageState extends State<StatusPage> {
             child: _buildStatusItem(
               icon: Icons.speed,
               label: '速度',
-              value: '${_currentSpeed.toStringAsFixed(1)} m/s',
+              value: '${(_ctrl.speed * 100).round()}%',
               color: AppColors.bluePurple,
             ),
           ),
           const SizedBox(width: 8),
           Expanded(
             child: _buildStatusItem(
-              icon: Icons.timer,
-              label: '运行时间',
-              value: _formatTime(_runningTime),
-              color: AppColors.darkNavy,
+              icon: Icons.navigation,
+              label: '导航',
+              value: _hasNavData ? nav.statusZh : '--',
+              color: _hasNavData ? nav.statusColor : AppColors.blueGray,
             ),
           ),
           const SizedBox(width: 8),
           Expanded(
             child: _buildStatusItem(
-              icon: Icons.wifi,
-              label: '信号',
-              value: _signalStrength,
-              color: AppColors.successGreen,
+              icon: Icons.task_alt,
+              label: '任务',
+              value: _hasTaskData ? task.statusZh : '--',
+              color: _hasTaskData ? task.statusColor : AppColors.blueGray,
             ),
           ),
         ],
@@ -125,9 +172,7 @@ class _StatusPageState extends State<StatusPage> {
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: AppColors.blueGray.withValues(alpha: 0.2),
-        ),
+        border: Border.all(color: AppColors.blueGray.withValues(alpha: 0.2)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.03),
@@ -151,61 +196,268 @@ class _StatusPageState extends State<StatusPage> {
           const SizedBox(height: 2),
           Text(
             label,
-            style: const TextStyle(
-              color: AppColors.blueGrayDark,
-              fontSize: 11,
-            ),
+            style: const TextStyle(color: AppColors.blueGrayDark, fontSize: 11),
           ),
         ],
       ),
     );
   }
 
+  // ═══════════════════════════════════════════
+  // 详细卡片: 避障状态 + 任务进度
+  // ═══════════════════════════════════════════
+
   Widget _buildDetailCards() {
-    return Column(
-      children: [
-        // 底盘状态
-        AppCard(
-          title: '底盘状态',
-          icon: Icons.settings_input_component,
-          child: Column(
-            children: [
-              _buildDetailRow('驱动模式', '麦轮全向', Icons.all_inclusive),
-              const Divider(height: 20),
-              _buildDetailRow('左前轮', '0 rpm', Icons.rotate_right),
-              const SizedBox(height: 8),
-              _buildDetailRow('右前轮', '0 rpm', Icons.rotate_left),
-              const SizedBox(height: 8),
-              _buildDetailRow('左后轮', '0 rpm', Icons.rotate_right),
-              const SizedBox(height: 8),
-              _buildDetailRow('右后轮', '0 rpm', Icons.rotate_left),
-            ],
-          ),
-        ),
-        // 系统信息
-        AppCard(
-          title: '系统信息',
-          icon: Icons.memory,
-          child: Column(
-            children: [
-              _buildDetailRow('主控', 'Jetson Orin Nano', Icons.developer_board),
-              const Divider(height: 20),
-              _buildDetailRow('系统', 'Ubuntu 20.04', Icons.laptop),
-              const SizedBox(height: 8),
-              _buildDetailRow('ROS2', 'Foxy', Icons.hub),
-              const SizedBox(height: 8),
-              _buildDetailRow('Docker', '运行中', Icons.inventory_2),
-            ],
-          ),
-        ),
-      ],
+    return Column(children: [_buildObstacleCard(), _buildTaskProgressCard()]);
+  }
+
+  /// 避障状态卡片
+  Widget _buildObstacleCard() {
+    final obs = _ctrl.latestObstacleStatus;
+
+    return AppCard(
+      title: '避障状态',
+      icon: Icons.radar,
+      child: _hasObstacleData
+          ? Column(
+              children: [
+                _buildDetailRow(
+                  '障碍物',
+                  obs.isObstacle ? '检测到' : '无',
+                  obs.isObstacle
+                      ? Icons.warning_amber
+                      : Icons.check_circle_outline,
+                  obs.isObstacle
+                      ? AppColors.warningOrange
+                      : AppColors.successGreen,
+                ),
+                const Divider(height: 20),
+                _buildDetailRow(
+                  '最近距离',
+                  '${obs.minDistance.toStringAsFixed(1)} m',
+                  Icons.straighten,
+                  _riskColor(obs.riskLevel),
+                ),
+                const SizedBox(height: 8),
+                _buildDetailRow(
+                  '方向',
+                  obs.directionZh,
+                  _directionIcon(obs.direction),
+                  AppColors.darkNavy,
+                ),
+                const SizedBox(height: 8),
+                _buildDetailRow(
+                  '风险等级',
+                  obs.riskLevel == 'danger'
+                      ? '危险'
+                      : obs.riskLevel == 'warning'
+                      ? '警告'
+                      : '安全',
+                  obs.isDanger
+                      ? Icons.error_outline
+                      : obs.isWarning
+                      ? Icons.warning_amber
+                      : Icons.shield,
+                  _riskColor(obs.riskLevel),
+                ),
+                const SizedBox(height: 8),
+                _buildDetailRow(
+                  '建议动作',
+                  _obstacleActionZh(obs.action),
+                  Icons.psychology,
+                  AppColors.bluePurple,
+                ),
+              ],
+            )
+          : _buildPlaceholder('等待车端避障数据...'),
     );
   }
 
-  Widget _buildDetailRow(String label, String value, IconData icon) {
+  /// 任务进度卡片
+  Widget _buildTaskProgressCard() {
+    final task = _ctrl.latestTaskStatus;
+
+    return AppCard(
+      title: '任务进度',
+      icon: Icons.checklist,
+      child: _hasTaskData
+          ? Column(
+              children: [
+                Row(
+                  children: [
+                    StatusBadge(text: task.statusZh, color: task.statusColor),
+                    const Spacer(),
+                    if (task.taskId.isNotEmpty)
+                      Text(
+                        'ID: ${task.taskId}',
+                        style: const TextStyle(
+                          color: AppColors.blueGrayDark,
+                          fontSize: 12,
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                _buildDetailRow(
+                  '当前步骤',
+                  '${task.currentStep} / ${task.totalSteps}',
+                  Icons.format_list_numbered,
+                  AppColors.darkNavy,
+                ),
+                const SizedBox(height: 12),
+                // 进度条
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: LinearProgressIndicator(
+                    value: task.totalSteps > 0
+                        ? task.currentStep / task.totalSteps
+                        : 0.0,
+                    backgroundColor: AppColors.blueGray.withValues(alpha: 0.2),
+                    valueColor: AlwaysStoppedAnimation<Color>(task.statusColor),
+                    minHeight: 8,
+                  ),
+                ),
+                if (task.message.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    task.message,
+                    style: const TextStyle(
+                      color: AppColors.blueGrayDark,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ],
+            )
+          : _buildPlaceholder('等待车端任务数据...'),
+    );
+  }
+
+  // ═══════════════════════════════════════════
+  // 导航信息
+  // ═══════════════════════════════════════════
+
+  Widget _buildNavigationInfo() {
+    final nav = _ctrl.latestNavStatus;
+
+    return AppCard(
+      title: '导航信息',
+      icon: Icons.navigation,
+      child: _hasNavData
+          ? Column(
+              children: [
+                Row(
+                  children: [
+                    StatusBadge(
+                      text: nav.statusZh,
+                      color: nav.statusColor,
+                      pulse: nav.isNavigating,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                _buildDetailRow(
+                  '导航进度',
+                  '${(nav.progress * 100).round()}%',
+                  Icons.trending_up,
+                  nav.statusColor,
+                ),
+                const SizedBox(height: 10),
+                // 导航进度条
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: LinearProgressIndicator(
+                    value: nav.progress,
+                    backgroundColor: AppColors.blueGray.withValues(alpha: 0.2),
+                    valueColor: AlwaysStoppedAnimation<Color>(nav.statusColor),
+                    minHeight: 8,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _buildDetailRow(
+                  '剩余距离',
+                  '${nav.distanceRemain.toStringAsFixed(1)} m',
+                  Icons.near_me,
+                  AppColors.darkNavy,
+                ),
+                if (nav.message.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: nav.isFailed
+                          ? AppColors.errorRed.withValues(alpha: 0.08)
+                          : AppColors.surfaceAlt,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      nav.message,
+                      style: TextStyle(
+                        color: nav.isFailed
+                            ? AppColors.errorRed
+                            : AppColors.blueGrayDark,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            )
+          : _buildPlaceholder('等待车端导航数据...'),
+    );
+  }
+
+  // ═══════════════════════════════════════════
+  // 系统信息（硬编码，不来自 CarController）
+  // ═══════════════════════════════════════════
+
+  Widget _buildSystemInfo() {
+    return AppCard(
+      title: '系统信息',
+      icon: Icons.memory,
+      child: Column(
+        children: [
+          _buildDetailRow(
+            '主控',
+            'Jetson Orin Nano',
+            Icons.developer_board,
+            AppColors.darkNavy,
+          ),
+          const Divider(height: 20),
+          _buildDetailRow(
+            '系统',
+            'Ubuntu 20.04',
+            Icons.laptop,
+            AppColors.darkNavy,
+          ),
+          const SizedBox(height: 8),
+          _buildDetailRow('ROS2', 'Foxy', Icons.hub, AppColors.darkNavy),
+          const SizedBox(height: 8),
+          _buildDetailRow(
+            '驱动模式',
+            '麦轮全向',
+            Icons.all_inclusive,
+            AppColors.bluePurple,
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════
+  // 通用组件
+  // ═══════════════════════════════════════════
+
+  Widget _buildDetailRow(
+    String label,
+    String value,
+    IconData icon,
+    Color iconColor,
+  ) {
     return Row(
       children: [
-        Icon(icon, color: AppColors.blueGray, size: 16),
+        Icon(icon, color: iconColor, size: 16),
         const SizedBox(width: 10),
         Text(
           label,
@@ -224,76 +476,41 @@ class _StatusPageState extends State<StatusPage> {
     );
   }
 
-  Widget _buildNavigationInfo() {
-    return AppCard(
-      title: '导航信息',
-      icon: Icons.navigation,
-      child: Column(
-        children: [
-          Row(
-            children: [
-              StatusBadge(
-                text: _navigationMode,
-                color: AppColors.bluePurple,
-              ),
-              const Spacer(),
-              TextButton.icon(
-                onPressed: () {
-                  setState(() {
-                    _navigationMode = _navigationMode == '手动控制'
-                        ? '自主导航'
-                        : '手动控制';
-                  });
-                },
-                icon: const Icon(Icons.swap_horiz, size: 16),
-                label: const Text('切换模式'),
-                style: TextButton.styleFrom(
-                  foregroundColor: AppColors.bluePurple,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Container(
-            height: 160,
-            decoration: BoxDecoration(
-              color: AppColors.surfaceAlt,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: AppColors.blueGray.withValues(alpha: 0.2),
+  Widget _buildPlaceholder(String text) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 20),
+      child: Center(
+        child: Column(
+          children: [
+            Icon(
+              Icons.hourglass_empty,
+              color: AppColors.blueGray.withValues(alpha: 0.5),
+              size: 28,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              text,
+              style: const TextStyle(
+                color: AppColors.blueGrayDark,
+                fontSize: 13,
               ),
             ),
-            child: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.map,
-                    color: AppColors.blueGray.withValues(alpha: 0.5),
-                    size: 40,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'SLAM 地图',
-                    style: TextStyle(
-                      color: AppColors.blueGrayDark,
-                      fontSize: 13,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '建图后显示',
-                    style: TextStyle(
-                      color: AppColors.blueGray.withValues(alpha: 0.5),
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
+  }
+
+  String _obstacleActionZh(String action) {
+    switch (action) {
+      case 'slow_down':
+        return '减速';
+      case 'stop':
+        return '停止';
+      case 'turn':
+        return '转向';
+      default:
+        return '无';
+    }
   }
 }

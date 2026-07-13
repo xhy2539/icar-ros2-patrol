@@ -88,7 +88,7 @@ case "$MODE" in
         start_process "lidar_node" python3 navigation/lidar/lidar_node.py
         start_process "obstacle_avoid_node" python3 navigation/obstacle_avoid/obstacle_avoid_node.py --mode real
         start_process "slam_node_mock_provider" python3 navigation/slam/slam_node.py
-        start_process "nav2_bridge_node" python3 navigation/navigation/nav2_bridge_node.py --mode real
+        start_process "navigation_node_real_ready" python3 navigation/navigation/navigation_node.py --mode real --scenario "$NAV_SCENARIO"
         ;;
     -h|--help|help)
         print_usage

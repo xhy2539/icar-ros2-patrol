@@ -2,14 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'vision_models.dart';
+import 'data_models.dart';
 
 /// 小车连接状态
-enum CarConnectionState {
-  disconnected,
-  connecting,
-  connected,
-  error,
-}
+enum CarConnectionState { disconnected, connecting, connected, error }
 
 /// iCar 小车 WebSocket 通信服务
 ///
@@ -20,7 +16,7 @@ enum CarConnectionState {
 /// 用法：
 /// ```dart
 /// final service = CarWebSocketService();
-/// await service.connect('192.168.137.218');
+/// await service.connect('192.168.137.117');
 /// service.send('forward');
 /// ```
 class CarWebSocketService {
@@ -73,10 +69,32 @@ class CarWebSocketService {
   final _imageFrameController = StreamController<String>.broadcast();
 
   /// LLM parse_task 结果流
-  final _parseTaskController = StreamController<Map<String, dynamic>>.broadcast();
+  final _parseTaskController =
+      StreamController<Map<String, dynamic>>.broadcast();
 
   /// LLM generate_report 结果流
   final _reportController = StreamController<Map<String, dynamic>>.broadcast();
+
+  /// 避障状态流 — /obstacle_status
+  final _obstacleController = StreamController<ObstacleStatus>.broadcast();
+
+  /// 导航状态流 — /nav_status
+  final _navStatusController = StreamController<NavStatus>.broadcast();
+
+  /// 任务状态流 — /task/status
+  final _taskStatusController = StreamController<TaskStatus>.broadcast();
+
+  /// 任务日志流 — /task/log
+  final _taskLogController = StreamController<TaskLog>.broadcast();
+
+  /// 环境传感器数据流 — /sensor/env_data
+  final _envDataController = StreamController<EnvData>.broadcast();
+
+  /// 传感器告警流 — /sensor/alert
+  final _sensorAlertController = StreamController<SensorAlert>.broadcast();
+
+  /// 人员跟踪状态流 — /vision/target_tracking/status
+  final _trackingController = StreamController<TrackingStatus>.broadcast();
 
   /// 接收到的响应数据流
   Stream<String> get responseStream => _responseController.stream;
@@ -97,6 +115,27 @@ class CarWebSocketService {
 
   /// LLM generate_report 结果流
   Stream<Map<String, dynamic>> get reportStream => _reportController.stream;
+
+  /// 避障状态流
+  Stream<ObstacleStatus> get obstacleStream => _obstacleController.stream;
+
+  /// 导航状态流
+  Stream<NavStatus> get navStatusStream => _navStatusController.stream;
+
+  /// 任务状态流
+  Stream<TaskStatus> get taskStatusStream => _taskStatusController.stream;
+
+  /// 任务日志流
+  Stream<TaskLog> get taskLogStream => _taskLogController.stream;
+
+  /// 环境传感器数据流
+  Stream<EnvData> get envDataStream => _envDataController.stream;
+
+  /// 传感器告警流
+  Stream<SensorAlert> get sensorAlertStream => _sensorAlertController.stream;
+
+  /// 人员跟踪状态流
+  Stream<TrackingStatus> get trackingStream => _trackingController.stream;
 
   /// 状态变更回调
   void Function(CarConnectionState)? onStateChanged;
@@ -223,7 +262,9 @@ class CarWebSocketService {
   /// 发送文本指令
   bool send(String command) {
     if (!isConnected || _channel == null) {
-      onError?.call('未连接，无法发送指令 (状态=$_state, channel=${_channel != null ? "非null" : "null"})');
+      onError?.call(
+        '未连接，无法发送指令 (状态=$_state, channel=${_channel != null ? "非null" : "null"})',
+      );
       return false;
     }
 
@@ -267,6 +308,44 @@ class CarWebSocketService {
     subscribeTopic('detections');
     subscribeTopic('capture_status');
     subscribeTopic('camera');
+  }
+
+  /// 订阅导航相关 Topic
+  void subscribeNavigationTopics() {
+    subscribeTopic('obstacle_status');
+    subscribeTopic('nav_status');
+    subscribeTopic('task_status');
+    subscribeTopic('task_log');
+  }
+
+  /// 订阅传感器相关 Topic
+  void subscribeSensorTopics() {
+    subscribeTopic('sensor_env_data');
+    subscribeTopic('sensor_alert');
+  }
+
+  /// 订阅人员跟踪 Topic
+  void subscribeTrackingTopics() {
+    subscribeTopic('tracking_status');
+  }
+
+  /// 订阅所有 Topic（桥接节点就绪后调用）
+  void subscribeAllTopics() {
+    subscribeVisionTopics();
+    subscribeNavigationTopics();
+    subscribeSensorTopics();
+    subscribeTrackingTopics();
+  }
+
+  /// 发送导航目标点
+  bool sendGoalPose(double x, double y, [double yaw = 0.0]) {
+    return sendJson({'action': 'goal_pose', 'x': x, 'y': y, 'yaw': yaw});
+  }
+
+  /// 发送人员跟踪指令
+  bool sendTrackingCommand(Map<String, dynamic> cmd) {
+    final payload = {'action': 'tracking', ...cmd};
+    return sendJson(payload);
   }
 
   // ═══════════════════════════════════════════
@@ -333,6 +412,35 @@ class CarWebSocketService {
         _reportController.add(json);
         onLog?.call('← [LLM] generate_report 结果: success=${json['success']}');
         return true;
+      case 'obstacle_status':
+      case '/obstacle_status':
+        _obstacleController.add(ObstacleStatus.fromJson(json));
+        return true;
+      case 'nav_status':
+      case '/nav_status':
+        _navStatusController.add(NavStatus.fromJson(json));
+        return true;
+      case 'task_status':
+      case '/task/status':
+        _taskStatusController.add(TaskStatus.fromJson(json));
+        return true;
+      case 'task_log':
+      case '/task/log':
+        _taskLogController.add(TaskLog.fromJson(json));
+        return true;
+      case 'sensor_env_data':
+      case '/sensor/env_data':
+        _envDataController.add(EnvData.fromJson(json));
+        return true;
+      case 'sensor_alert':
+      case '/sensor/alert':
+        _sensorAlertController.add(SensorAlert.fromJson(json));
+        onLog?.call('← [告警] ${json['sensor_type']}: ${json['current_value']}');
+        return true;
+      case 'tracking_status':
+      case '/vision/target_tracking/status':
+        _trackingController.add(TrackingStatus.fromJson(json));
+        return true;
       default:
         return false;
     }
@@ -360,7 +468,9 @@ class CarWebSocketService {
   // ═══════════════════════════════════════════
 
   void _tryReconnect() {
-    onLog?.call('_tryReconnect() autoReconnect=$_autoReconnect, attempts=$_reconnectAttempts/$maxReconnectAttempts');
+    onLog?.call(
+      '_tryReconnect() autoReconnect=$_autoReconnect, attempts=$_reconnectAttempts/$maxReconnectAttempts',
+    );
     if (!_autoReconnect) {
       onLog?.call('自动重连已关闭，跳过');
       return;
@@ -378,13 +488,10 @@ class CarWebSocketService {
     _reconnectAttempts++;
     onError?.call('第 $_reconnectAttempts 次重连 (${reconnectIntervalSec}s 后)...');
 
-    _reconnectTimer = Timer(
-      Duration(seconds: reconnectIntervalSec),
-      () {
-        onLog?.call('重连定时器触发，开始重新 connect()');
-        connect(_host, _port);
-      },
-    );
+    _reconnectTimer = Timer(Duration(seconds: reconnectIntervalSec), () {
+      onLog?.call('重连定时器触发，开始重新 connect()');
+      connect(_host, _port);
+    });
   }
 
   void _cancelReconnect() {

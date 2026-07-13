@@ -200,8 +200,6 @@ jobs:
           )
           EXPECTED_SRVS=(
             "icar_interfaces/srv/ParseTask.srv"
-            "icar_interfaces/srv/TaskControl.srv"
-            "icar_interfaces/srv/GenerateReport.srv"
           )
           ALL_OK=true
           for m in "${EXPECTED_MSGS[@]}" "${EXPECTED_SRVS[@]}"; do

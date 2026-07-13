@@ -24,6 +24,7 @@ setup(
             "dataset_recorder = vision_patrol.dataset_recorder_node:main",
             "target_tracker = vision_patrol.target_tracker_node:main",
             "vision_node = vision_patrol.vision_node:main",
+            "mjpeg_server = vision_patrol.mjpeg_server_node:main",
         ],
     },
 )
