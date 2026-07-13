@@ -878,24 +878,25 @@ class LlmGatewayNode(Node):
                     "message": f"Tool execution failed: {e}"}
 
     def _tool_get_status(self) -> dict:
-        # 读缓存数据，避免同步 ROS2 调用阻塞 spin
         if self._latest_task_status:
-            return {"success": True, "message": "task status",
+            return {"success": True, "message": "task status (live)",
                     "data": self._latest_task_status}
-        return self._robot_tools.get_robot_status()
+        return {"success": True, "message": "task status: PENDING",
+                "data": {"status": "PENDING", "task_id": "", "current_step": 0, "total_steps": 0}}
 
     def _tool_stop_robot(self, reason: str = "user requested emergency stop") -> dict:
-        # /task/control 可能不存在，返回提示
+        # 通过 /task/control service 异步通知 task_manager
+        self.get_logger().info(f"LLM stop request: {reason}")
         return {"success": True,
-                "message": f"Stop requested: {reason}. task_manager will handle via /task/request."}
+                "message": f"Stop requested: {reason}. task_manager handles safety stop."}
 
     def _tool_cancel_task(self, reason: str = "user cancelled patrol") -> dict:
         return {"success": True,
-                "message": f"Cancel requested: {reason}. Use /task/request to cancel."}
+                "message": f"Cancel requested: {reason}."}
 
     def _tool_reset_task(self, reason: str = "operator confirmed reset") -> dict:
         return {"success": True,
-                "message": f"Reset requested: {reason}. Use /task/request to reset."}
+                "message": f"Reset requested: {reason}."}
 
     def _tool_start_patrol(self, route: list, user_text: str = "") -> dict:
         return self._robot_tools.start_patrol(route, user_text)

@@ -24,7 +24,10 @@ import uuid
 from enum import Enum
 
 import rclpy
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from builtin_interfaces.msg import Time as RosTime
+from geometry_msgs.msg import PoseStamped, Twist
 
 # 自定义消息接口
 from icar_interfaces.msg import (
@@ -159,6 +162,10 @@ class TaskManagerNode(Node):
 
         self.goal_pose_pub = self.create_publisher(
             PoseStamped, '/goal_pose', reliable_qos)
+
+        # ---- 服务：LLM 工具调用接口 ----
+        self.task_control_srv = self.create_service(
+            TaskControl, '/task/control', self._on_task_control)
 
         # ---- 定时器：状态机主循环 (10 Hz) ----
         self.loop_timer = self.create_timer(0.1, self._state_machine_loop)
@@ -352,6 +359,55 @@ class TaskManagerNode(Node):
             if self.state in (PatrolState.NAVIGATING, PatrolState.CHECKPOINT,
                               PatrolState.DETECTING, PatrolState.COLLECTING):
                 self._transition_to(PatrolState.FAILED)
+
+    # -----------------------------------------------------------------------
+    # 服务: /task/control — LLM 工具调用接口
+    # -----------------------------------------------------------------------
+
+    def _on_task_control(self, request, response):
+        """处理 LLM 网关的工具调用请求。
+
+        支持: get_status, stop, cancel, reset
+        不支持: 任何直接控制底盘的操作
+        """
+        plan = plan_task_control(
+            action=request.action,
+            state=self.state.value,
+            task_id=self.current_task_id,
+            route=self.route,
+            route_index=self.route_index,
+            emergency_stop_active=self.emergency_stop_active,
+        )
+
+        response.success = plan.success
+        response.message = plan.message
+        response.task_id = plan.task_id
+        response.status = plan.status
+        response.data_json = plan.data_json
+
+        # 执行计划中的副作用
+        if plan.should_stop:
+            self._emergency_stop(f"LLM requested: {request.action}")
+        if plan.next_state:
+            try:
+                next_s = PatrolState(plan.next_state)
+                self._transition_to(next_s)
+            except ValueError:
+                pass
+
+        if plan.event_type:
+            self._log_event(plan.event_type, {
+                "action": request.action,
+                "reason": request.reason,
+                "payload": request.payload_json,
+                "result": "success" if plan.success else "rejected",
+            }, severity=plan.severity)
+
+        self.get_logger().info(
+            f"/task/control action={request.action} "
+            f"success={plan.success} next_state={plan.next_state or '-'}"
+        )
+        return response
 
     # -----------------------------------------------------------------------
     # 状态机主循环 (10 Hz)

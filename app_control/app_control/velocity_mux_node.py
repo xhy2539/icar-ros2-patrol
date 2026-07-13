@@ -12,6 +12,7 @@ class VelocityMuxNode(Node):
     SOURCES = (
         ("safety", "/cmd_vel_safety", 1.0),
         ("app", "/cmd_vel_app", 0.4),
+        ("tracking", "/vision/target_cmd_vel", 0.3),
         ("joy", "/cmd_vel_joy", 0.4),
         ("nav", "/cmd_vel_nav", 0.6),
     )

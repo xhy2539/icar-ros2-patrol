@@ -3,6 +3,7 @@ import math
 import socket
 import threading
 import time
+import uuid
 from datetime import datetime
 
 import rclpy
@@ -57,6 +58,9 @@ class AppBridgeNode(Node):
         self._capture_publisher = self.create_publisher(
             String, "/vision/capture_command", 10
         )
+        self._llm_command_publisher = self.create_publisher(
+            String, "/llm/user_command", 10
+        )
         self._parse_task_client = self.create_client(ParseTask, "/llm/parse_task")
         self._report_client = self.create_client(
             GenerateReport, "/llm/generate_report"
@@ -88,6 +92,9 @@ class AppBridgeNode(Node):
             "/vision/target_tracking/status",
             lambda msg: self._on_json_string("tracking_status", msg),
             10,
+        )
+        self.create_subscription(
+            String, "/llm/response", self._on_llm_response, 10
         )
 
         self._motion = Motion(0.0, 0.0, 0.0)
@@ -205,6 +212,9 @@ class AppBridgeNode(Node):
             if action == "generate_report":
                 self._call_generate_report(client, data)
                 return
+            if action == "llm_command":
+                self._publish_llm_command(client, data)
+                return
             if action and "command" not in data and "direction" not in data:
                 self._send(
                     client,
@@ -285,6 +295,51 @@ class AppBridgeNode(Node):
         message.data = json.dumps(data, ensure_ascii=False)
         self._capture_publisher.publish(message)
         self._send(client, {"topic": "command_ack", "action": data["action"], "ok": True})
+
+    def _publish_llm_command(self, client: socket.socket, data: dict) -> None:
+        """Forward one natural-language command to the executable LLM gateway."""
+        input_text = str(data.get("input_text", "")).strip()
+        if not input_text:
+            self._send(
+                client,
+                {
+                    "topic": "llm_response",
+                    "success": False,
+                    "error_msg": "input_text is required",
+                },
+            )
+            return
+        if len(input_text) > 1000:
+            self._send(
+                client,
+                {
+                    "topic": "llm_response",
+                    "success": False,
+                    "error_msg": "input_text is too long (max 1000 characters)",
+                },
+            )
+            return
+
+        request_id = str(data.get("request_id", "")).strip() or uuid.uuid4().hex
+        message = String()
+        message.data = json.dumps(
+            {
+                "request_id": request_id,
+                "input_text": input_text,
+                "source": "app",
+            },
+            ensure_ascii=False,
+        )
+        self._llm_command_publisher.publish(message)
+        self._send(
+            client,
+            {
+                "topic": "command_ack",
+                "action": "llm_command",
+                "request_id": request_id,
+                "ok": True,
+            },
+        )
 
     def _call_parse_task(self, client: socket.socket, data: dict) -> None:
         text = str(data.get("input_text", "")).strip()
@@ -437,6 +492,15 @@ class AppBridgeNode(Node):
         except json.JSONDecodeError:
             payload = {"raw": msg.data}
         self._broadcast(topic, payload)
+
+    def _on_llm_response(self, msg: String) -> None:
+        try:
+            payload = json.loads(msg.data)
+            if not isinstance(payload, dict):
+                payload = {"success": True, "data": payload}
+        except json.JSONDecodeError:
+            payload = {"success": True, "message": msg.data}
+        self._broadcast("llm_response", payload)
 
     def _stop_now(self) -> None:
         with self._motion_lock:
