@@ -35,6 +35,14 @@ models/
 小车配置
 云服务器配置
 
+# Flutter 构建产物
+.dart_tool/
+.flutter-plugins-dependencies
+android/
+web/
+datasets/
+runs/
+
 # 临时目录
 tmp/
 
