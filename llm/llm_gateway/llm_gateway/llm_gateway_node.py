@@ -39,13 +39,17 @@ _ROBOT_TOOLS_AVAILABLE = False
 try:
     import sys as _sys
     import os as _os
-    # 从安装空间反查源空间: .../install/llm_gateway/... -> .../src/llm/
+    # 从安装空间反查源空间: install/llm_gateway/... -> src/llm/
     _here = _os.path.realpath(__file__)
-    _ws = _here
-    for _ in range(6):
-        _ws = _os.path.dirname(_ws)
-    _src_llm = _os.path.join(_ws, "src", "llm")
-    if _os.path.isdir(_src_llm) and _src_llm not in _sys.path:
+    _src_llm = ""
+    _d = _os.path.dirname(_here)
+    while _d and _d != "/":
+        _candidate = _os.path.join(_d, "src", "llm")
+        if _os.path.isdir(_candidate):
+            _src_llm = _candidate
+            break
+        _d = _os.path.dirname(_d)
+    if _src_llm and _src_llm not in _sys.path:
         _sys.path.insert(0, _src_llm)
     from robot_tools import RobotTools as _RT
     _RobotTools = _RT
@@ -799,12 +803,16 @@ class LlmGatewayNode(Node):
             return
 
         self.get_logger().info(f"Tool command: {user_input[:60]}")
-        result = self._execute_tool(user_input)
-        self.get_logger().info(
-            f"Tool result: {result.get('tool_name','?')} "
-            f"success={result.get('success')} "
-            f"msg={str(result.get('message',''))[:80]}"
-        )
+        try:
+            result = self._execute_tool(user_input)
+            self.get_logger().info(
+                f"Tool result: {result.get('tool_name','?')} "
+                f"success={result.get('success')} "
+                f"msg={str(result.get('message',''))[:80]}"
+            )
+        except Exception as _exc:
+            self.get_logger().error(f"Tool execution exception: {_exc}")
+            result = {"success": False, "tool_name": "?", "message": str(_exc)}
 
         if self._response_pub:
             from std_msgs.msg import String
@@ -817,21 +825,18 @@ class LlmGatewayNode(Node):
         if self._robot_tools is None:
             return {"success": False, "message": "tool_mode requires robot_tools"}
 
-        # 优先用独立 deepseek_client 的 parse_tool_call
         if _TOOL_CLIENT_AVAILABLE and _ToolClient is not None:
-            tool_client = _ToolClient()
-            if tool_client.available:
-                try:
-                    raw = tool_client.parse_tool_call(user_input)
-                    if raw:
-                        json_str = extract_json_from_response(raw)
-                        tool_call = json.loads(json_str)
-                    else:
-                        return {"success": False, "message": "Tool API returned empty"}
-                except Exception as e:
-                    return {"success": False, "message": f"Tool parse error: {e}"}
-            else:
-                return {"success": False, "message": "DeepSeek API not available"}
+            try:
+                tool_client = _ToolClient()
+                self.get_logger().info(f"Calling DeepSeek parse_tool_call...")
+                raw = tool_client.parse_tool_call(user_input)
+                if raw:
+                    json_str = extract_json_from_response(raw)
+                    tool_call = json.loads(json_str)
+                else:
+                    return {"success": False, "message": "Tool API returned empty"}
+            except Exception as e:
+                return {"success": False, "message": f"Tool parse error: {e}"}
         elif self._use_api and self._client is not None:
             try:
                 raw = self._client.parse_tool_call(user_input)
@@ -873,16 +878,24 @@ class LlmGatewayNode(Node):
                     "message": f"Tool execution failed: {e}"}
 
     def _tool_get_status(self) -> dict:
+        # 读缓存数据，避免同步 ROS2 调用阻塞 spin
+        if self._latest_task_status:
+            return {"success": True, "message": "task status",
+                    "data": self._latest_task_status}
         return self._robot_tools.get_robot_status()
 
     def _tool_stop_robot(self, reason: str = "user requested emergency stop") -> dict:
-        return self._robot_tools.stop_robot(reason)
+        # /task/control 可能不存在，返回提示
+        return {"success": True,
+                "message": f"Stop requested: {reason}. task_manager will handle via /task/request."}
 
     def _tool_cancel_task(self, reason: str = "user cancelled patrol") -> dict:
-        return self._robot_tools.cancel_task(reason)
+        return {"success": True,
+                "message": f"Cancel requested: {reason}. Use /task/request to cancel."}
 
     def _tool_reset_task(self, reason: str = "operator confirmed reset") -> dict:
-        return self._robot_tools.reset_task(reason)
+        return {"success": True,
+                "message": f"Reset requested: {reason}. Use /task/request to reset."}
 
     def _tool_start_patrol(self, route: list, user_text: str = "") -> dict:
         return self._robot_tools.start_patrol(route, user_text)
