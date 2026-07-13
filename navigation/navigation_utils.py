@@ -7,6 +7,9 @@ import yaml
 
 NAVIGATION_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = NAVIGATION_DIR.parent
+# 兼容 ROS2 workspace 布局 (src/navigation, build/navigation) 和开发布局 (navigation/)
+if PROJECT_ROOT.name in ("src", "build", "install"):
+    PROJECT_ROOT = PROJECT_ROOT.parent
 MOCK_CONFIG_DIR = PROJECT_ROOT / "config" / "navigation" / "mock"
 MAP_DIR = PROJECT_ROOT / "config" / "navigation" / "maps"
 
