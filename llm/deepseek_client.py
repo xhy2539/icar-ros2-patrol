@@ -24,16 +24,16 @@ import os
 import json
 import requests
 from typing import Optional, Dict, Any, List
-from dotenv import load_dotenv
 
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
 DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
-
-if not DEEPSEEK_API_KEY:
-    raise RuntimeError("请设置环境变量 DEEPSEEK_API_KEY")
 
 SYSTEM_PROMPT = """你是一个智能机器人指令翻译系统。用户的自然语言输入需要被转换为统一的JSON指令格式。
 
@@ -158,10 +158,11 @@ class DeepSeekClient:
         self.api_key = api_key or DEEPSEEK_API_KEY
         self.base_url = base_url or DEEPSEEK_BASE_URL
         self.model = model or DEEPSEEK_MODEL
+        self.available = bool(self.api_key)
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
-        }
+        } if self.available else {}
 
     def _build_messages(self, user_input: str) -> List[Dict[str, Any]]:
         return [
