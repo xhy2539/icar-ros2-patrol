@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'car_tcp_service.dart';
 import 'car_commands.dart';
 import 'vision_models.dart';
+import 'data_models.dart';
 
 /// 小车控制器 - 全局状态管理
 ///
@@ -26,13 +27,13 @@ class CarController extends ChangeNotifier {
     _service.captureStatusStream.listen(_onCaptureStatus);
     _service.parseTaskStream.listen(_onParseTaskResult);
     _service.reportStream.listen(_onReportResult);
-    _service.obstacleStream.listen((data) => _updateBridgeState('obstacle', data));
-    _service.navStatusStream.listen((data) => _updateBridgeState('nav', data));
-    _service.taskStatusStream.listen((data) => _updateBridgeState('task', data));
+    _service.obstacleStream.listen(_onObstacleStatus);
+    _service.navStatusStream.listen(_onNavStatus);
+    _service.taskStatusStream.listen(_onTaskStatus);
     _service.taskLogStream.listen(_onTaskLog);
-    _service.sensorEnvStream.listen((data) => _updateBridgeState('sensor', data));
+    _service.envDataStream.listen(_onEnvData);
     _service.sensorAlertStream.listen(_onSensorAlert);
-    _service.trackingStatusStream.listen((data) => _updateBridgeState('tracking', data));
+    _service.trackingStream.listen(_onTrackingStatus);
   }
 
   final CarWebSocketService _service = CarWebSocketService();
@@ -76,22 +77,6 @@ class CarController extends ChangeNotifier {
   /// 错误/日志消息列表
   final List<String> _messages = [];
   List<String> get messages => List.unmodifiable(_messages);
-
-  /// ROS2 实时状态（由车端双向桥推送）
-  Map<String, dynamic>? _latestObstacleStatus;
-  Map<String, dynamic>? get latestObstacleStatus => _latestObstacleStatus;
-  Map<String, dynamic>? _latestNavStatus;
-  Map<String, dynamic>? get latestNavStatus => _latestNavStatus;
-  Map<String, dynamic>? _latestTaskStatus;
-  Map<String, dynamic>? get latestTaskStatus => _latestTaskStatus;
-  Map<String, dynamic>? _latestSensorEnv;
-  Map<String, dynamic>? get latestSensorEnv => _latestSensorEnv;
-  Map<String, dynamic>? _latestSensorAlert;
-  Map<String, dynamic>? get latestSensorAlert => _latestSensorAlert;
-  Map<String, dynamic>? _latestTrackingStatus;
-  Map<String, dynamic>? get latestTrackingStatus => _latestTrackingStatus;
-  final List<Map<String, dynamic>> _taskLogs = [];
-  List<Map<String, dynamic>> get taskLogs => List.unmodifiable(_taskLogs);
 
   /// 自动重连开关
   bool _autoReconnect = true;
@@ -165,8 +150,7 @@ class CarController extends ChangeNotifier {
   Stream<DetectionArray> get detectionStream => _service.detectionStream;
 
   /// 截图状态流
-  Stream<CaptureStatus> get captureStatusStream =>
-      _service.captureStatusStream;
+  Stream<CaptureStatus> get captureStatusStream => _service.captureStatusStream;
 
   /// 摄像头帧流（base64 JPEG）
   Stream<String> get imageFrameStream => _service.imageFrameStream;
@@ -176,8 +160,7 @@ class CarController extends ChangeNotifier {
   // ═══════════════════════════════════════════
 
   /// LLM parse_task 流
-  Stream<Map<String, dynamic>> get parseTaskStream =>
-      _service.parseTaskStream;
+  Stream<Map<String, dynamic>> get parseTaskStream => _service.parseTaskStream;
 
   /// LLM generate_report 流
   Stream<Map<String, dynamic>> get reportStream => _service.reportStream;
@@ -195,6 +178,46 @@ class CarController extends ChangeNotifier {
   bool get llmLoading => _llmLoading;
 
   // ═══════════════════════════════════════════
+  // 导航与避障状态
+  // ═══════════════════════════════════════════
+
+  /// 最新避障状态
+  ObstacleStatus _latestObstacle = const ObstacleStatus();
+  ObstacleStatus get latestObstacleStatus => _latestObstacle;
+
+  /// 最新导航状态
+  NavStatus _latestNavStatus = const NavStatus();
+  NavStatus get latestNavStatus => _latestNavStatus;
+
+  /// 最新任务状态
+  TaskStatus _latestTaskStatus = const TaskStatus();
+  TaskStatus get latestTaskStatus => _latestTaskStatus;
+
+  /// 任务日志列表
+  final List<TaskLog> _taskLogs = [];
+  List<TaskLog> get taskLogs => List.unmodifiable(_taskLogs);
+
+  // ═══════════════════════════════════════════
+  // 传感器状态
+  // ═══════════════════════════════════════════
+
+  /// 最新环境数据
+  EnvData _latestEnvData = const EnvData();
+  EnvData get latestEnvData => _latestEnvData;
+
+  /// 最新传感器告警
+  SensorAlert? _latestSensorAlert;
+  SensorAlert? get latestSensorAlert => _latestSensorAlert;
+
+  // ═══════════════════════════════════════════
+  // 人员跟踪状态
+  // ═══════════════════════════════════════════
+
+  /// 最新跟踪状态
+  TrackingStatus _latestTracking = const TrackingStatus();
+  TrackingStatus get latestTrackingStatus => _latestTracking;
+
+  // ═══════════════════════════════════════════
   // URL 工具（供 UI 使用）
   // ═══════════════════════════════════════════
 
@@ -202,7 +225,8 @@ class CarController extends ChangeNotifier {
   String get videoUrl => CarWebSocketService.buildVideoUrl(_host, _port);
 
   /// YOLO 视频流 URL
-  String get yoloVideoUrl => CarWebSocketService.buildYoloVideoUrl(_host, _port);
+  String get yoloVideoUrl =>
+      CarWebSocketService.buildYoloVideoUrl(_host, _port);
 
   /// 带标注的视频流 URL（YOLO 检测框叠加）
   String get annotatedVideoUrl => yoloVideoUrl;
@@ -229,7 +253,7 @@ class CarController extends ChangeNotifier {
     if (ok) {
       _currentAction = '已连接';
       _addMessage('WebSocket 连接成功');
-      _service.subscribeBridgeTopics();
+      _service.subscribeAllTopics();
     } else {
       _currentAction = '连接失败';
       _addMessage('WebSocket 连接失败');
@@ -244,6 +268,11 @@ class CarController extends ChangeNotifier {
     await _service.disconnect();
     _currentAction = '待机';
     _currentDirection = '';
+    // 清空实时状态（桥接节点数据不再推送）
+    _latestObstacle = const ObstacleStatus();
+    _latestNavStatus = const NavStatus();
+    _latestTaskStatus = const TaskStatus();
+    _latestTracking = const TrackingStatus();
     _addMessage('已断开连接');
     notifyListeners();
   }
@@ -267,7 +296,7 @@ class CarController extends ChangeNotifier {
       return false;
     }
 
-    // 同时发送速度，车端会做二次限幅。stop 不受速度影响。
+    // 与网页保持一致：JSON 中携带速度，车端会再次限幅。
     final cmd = CarCommands.fromDirection(direction);
     final ok = _service.sendJson({'command': cmd, 'speed': _speed});
 
@@ -395,15 +424,70 @@ class CarController extends ChangeNotifier {
   bool sendParsedTaskToManager(Map<String, dynamic> taskJson) {
     if (!isConnected) return false;
     _addMessage('[LLM] 发送任务到 task_manager: ${taskJson['task_type']}');
-    final ok = _service.sendJson({
-      'action': 'task_request',
-      'task': taskJson,
-    });
+    final ok = _service.sendJson({'action': 'task_request', 'task': taskJson});
     if (ok) {
       _currentAction = '任务下发中';
     }
     notifyListeners();
     return ok;
+  }
+
+  // ═══════════════════════════════════════════
+  // 导航与跟踪指令
+  // ═══════════════════════════════════════════
+
+  /// 发送导航目标点
+  bool sendGoalPose(double x, double y, [double yaw = 0.0]) {
+    if (!isConnected) {
+      _addMessage('未连接，无法发送导航目标');
+      notifyListeners();
+      return false;
+    }
+    _addMessage('[导航] 发送目标: ($x, $y, yaw=$yaw)');
+    final ok = _service.sendGoalPose(x, y, yaw);
+    if (ok) {
+      _currentAction = '导航中';
+    }
+    notifyListeners();
+    return ok;
+  }
+
+  /// 启动人员跟踪
+  bool sendTrackingStart([List<String> targetClasses = const ['person']]) {
+    if (!isConnected) {
+      _addMessage('未连接，无法启动跟踪');
+      notifyListeners();
+      return false;
+    }
+    _addMessage('[跟踪] 启动跟踪: ${targetClasses.join(",")}');
+    final ok = _service.sendTrackingCommand({
+      'command': 'start',
+      'target_classes': targetClasses,
+    });
+    if (ok) {
+      _currentAction = '跟踪中';
+    }
+    notifyListeners();
+    return ok;
+  }
+
+  /// 停止人员跟踪
+  bool sendTrackingStop() {
+    if (!isConnected) {
+      _addMessage('未连接，无法停止跟踪');
+      notifyListeners();
+      return false;
+    }
+    _addMessage('[跟踪] 停止跟踪');
+    final ok = _service.sendTrackingCommand({'command': 'stop'});
+    notifyListeners();
+    return ok;
+  }
+
+  /// 清空任务日志
+  void clearTaskLogs() {
+    _taskLogs.clear();
+    notifyListeners();
   }
 
   /// 清空消息日志
@@ -493,36 +577,74 @@ class CarController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _updateBridgeState(String kind, Map<String, dynamic> data) {
-    switch (kind) {
-      case 'obstacle':
-        _latestObstacleStatus = data;
-        break;
-      case 'nav':
-        _latestNavStatus = data;
-        break;
-      case 'task':
-        _latestTaskStatus = data;
-        break;
-      case 'sensor':
-        _latestSensorEnv = data;
-        break;
-      case 'tracking':
-        _latestTrackingStatus = data;
-        break;
+  // ═══════════════════════════════════════════
+  // 导航 / 避障 / 任务 / 传感器 / 跟踪 回调
+  // ═══════════════════════════════════════════
+
+  void _onObstacleStatus(ObstacleStatus obs) {
+    _latestObstacle = obs;
+    if (obs.isDanger) {
+      _addMessage(
+        '[避障] ${obs.directionZh} ${obs.minDistance.toStringAsFixed(1)}m — 危险',
+      );
+    } else if (obs.isWarning) {
+      _addMessage(
+        '[避障] ${obs.directionZh} ${obs.minDistance.toStringAsFixed(1)}m — 警告',
+      );
     }
     notifyListeners();
   }
 
-  void _onTaskLog(Map<String, dynamic> data) {
-    _taskLogs.insert(0, data);
-    if (_taskLogs.length > 200) _taskLogs.removeLast();
+  void _onNavStatus(NavStatus nav) {
+    _latestNavStatus = nav;
+    if (nav.isArrived) {
+      _addMessage('[导航] 已到达目标点');
+    } else if (nav.isFailed) {
+      _addMessage('[导航] 导航失败: ${nav.message}');
+    }
     notifyListeners();
   }
 
-  void _onSensorAlert(Map<String, dynamic> data) {
-    _latestSensorAlert = data;
-    _addMessage('[传感器告警] ${data['message'] ?? data['sensor_type'] ?? '未知告警'}');
+  void _onTaskStatus(TaskStatus task) {
+    _latestTaskStatus = task;
+    _addMessage(
+      '[任务] ${task.statusZh} (${task.currentStep}/${task.totalSteps})',
+    );
+    notifyListeners();
+  }
+
+  void _onTaskLog(TaskLog log) {
+    _taskLogs.add(log);
+    if (_taskLogs.length > 500) {
+      _taskLogs.removeRange(0, _taskLogs.length - 500);
+    }
+    _addMessage('[日志] ${log.titleZh}');
+    notifyListeners();
+  }
+
+  void _onEnvData(EnvData data) {
+    _latestEnvData = data;
+    notifyListeners();
+    // 不写入日志面板，避免高频刷新
+  }
+
+  void _onSensorAlert(SensorAlert alert) {
+    _latestSensorAlert = alert;
+    _addMessage(
+      '[告警] ${alert.sensorTypeZh}: ${alert.currentValue} > ${alert.threshold}',
+    );
+    notifyListeners();
+  }
+
+  void _onTrackingStatus(TrackingStatus tracking) {
+    _latestTracking = tracking;
+    if (tracking.event == 'tracking_started') {
+      _addMessage('[跟踪] 已启动');
+    } else if (tracking.event == 'target_lost') {
+      _addMessage('[跟踪] 目标丢失');
+    } else if (tracking.event == 'tracking_stopped') {
+      _addMessage('[跟踪] 已停止');
+    }
     notifyListeners();
   }
 

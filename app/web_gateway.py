@@ -1,26 +1,27 @@
 """HTTP/MJPEG and WebSocket gateway for the mobile app.
 
-This process deliberately does not import Rosmaster_Lib or open a chassis serial
-device.  Chassis control belongs exclusively to the ROS 2 driver.
+The ROS Astra driver is the single camera owner. Video is proxied from the
+loopback-only vision MJPEG node; this process never opens a camera device or a
+chassis serial port.
 """
 
+import http.client
+import json
 import logging
 import os
 import socket
 import threading
-import time
-from typing import Optional
 
-import cv2
 from flask import Flask, Response, jsonify, request, send_file
 from flask_sock import Sock
 
 
 LOG = logging.getLogger("icar.web_gateway")
-CAMERA_DEVICE = os.getenv("ICAR_CAMERA_DEVICE", "/dev/camera_depth")
 BRIDGE_HOST = os.getenv("ICAR_BRIDGE_HOST", "127.0.0.1")
 BRIDGE_PORT = int(os.getenv("ICAR_BRIDGE_PORT", "6501"))
 WEB_PORT = int(os.getenv("ICAR_WEB_PORT", "6500"))
+ROS_VIDEO_HOST = os.getenv("ICAR_ROS_VIDEO_HOST", "127.0.0.1")
+ROS_VIDEO_PORT = int(os.getenv("ICAR_ROS_VIDEO_PORT", "6502"))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONTROL_SIMULATOR = os.path.join(PROJECT_ROOT, "web", "control_simulator.html")
 
@@ -28,79 +29,59 @@ app = Flask(__name__)
 sock = Sock(app)
 
 
-class CameraStream:
-    def __init__(self, device: str) -> None:
-        self.device = device
-        self._frame: Optional[bytes] = None
-        self._last_frame_at = 0.0
-        self._error = "camera has not started"
-        self._lock = threading.Lock()
-        self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._run, daemon=True)
-
-    def start(self) -> None:
-        self._thread.start()
-
-    def _run(self) -> None:
-        while not self._stop.is_set():
-            capture = cv2.VideoCapture(self.device, cv2.CAP_V4L2)
-            if not capture.isOpened():
-                self._set_error(f"cannot open {self.device}")
-                capture.release()
-                self._stop.wait(1.0)
-                continue
-
-            capture.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-            capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-            capture.set(cv2.CAP_PROP_FPS, 15)
-            self._set_error("")
-            while not self._stop.is_set():
-                ok, frame = capture.read()
-                if not ok:
-                    self._set_error(f"read failed for {self.device}")
-                    break
-                ok, encoded = cv2.imencode(
-                    ".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 75]
-                )
-                if ok:
-                    with self._lock:
-                        self._frame = encoded.tobytes()
-                        self._last_frame_at = time.monotonic()
-            capture.release()
-            self._stop.wait(0.5)
-
-    def _set_error(self, message: str) -> None:
-        with self._lock:
-            self._error = message
-
-    def snapshot(self) -> Optional[bytes]:
-        with self._lock:
-            if time.monotonic() - self._last_frame_at > 2.0:
-                return None
-            return self._frame
-
-    def status(self) -> dict:
-        with self._lock:
-            age = time.monotonic() - self._last_frame_at
-            return {
-                "device": self.device,
-                "ready": self._frame is not None and age <= 2.0,
-                "frame_age_sec": round(age, 3) if self._frame else None,
-                "error": self._error or None,
-            }
+def _video_status() -> dict:
+    connection = http.client.HTTPConnection(
+        ROS_VIDEO_HOST, ROS_VIDEO_PORT, timeout=0.5
+    )
+    try:
+        connection.request("GET", "/health")
+        response = connection.getresponse()
+        if response.status != 200:
+            return {"ready": False, "error": f"HTTP {response.status}"}
+        payload = json.loads(response.read().decode("utf-8"))
+        payload["source"] = "ros_mjpeg"
+        payload["error"] = None if payload.get("ready") else "waiting for ROS image"
+        return payload
+    except (OSError, http.client.HTTPException, json.JSONDecodeError) as exc:
+        return {"ready": False, "source": "ros_mjpeg", "error": str(exc)}
+    finally:
+        connection.close()
 
 
-camera = CameraStream(CAMERA_DEVICE)
+def _proxy_video(path: str):
+    connection = http.client.HTTPConnection(
+        ROS_VIDEO_HOST, ROS_VIDEO_PORT, timeout=3.0
+    )
+    try:
+        connection.request("GET", path, headers={"Connection": "close"})
+        upstream = connection.getresponse()
+    except (OSError, http.client.HTTPException) as exc:
+        connection.close()
+        return jsonify(error="video unavailable", detail=str(exc)), 503
 
+    if upstream.status != 200:
+        body = upstream.read()
+        connection.close()
+        return Response(
+            body,
+            status=upstream.status,
+            content_type=upstream.getheader("Content-Type", "application/json"),
+        )
 
-def _mjpeg_frames():
-    while True:
-        frame = camera.snapshot()
-        if frame is None:
-            time.sleep(0.1)
-            continue
-        yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
-        time.sleep(1.0 / 15.0)
+    content_type = upstream.getheader(
+        "Content-Type", "multipart/x-mixed-replace; boundary=frame"
+    )
+
+    def generate():
+        try:
+            while chunk := upstream.read(64 * 1024):
+                yield chunk
+        except (OSError, http.client.HTTPException):
+            pass
+        finally:
+            connection.close()
+
+    return Response(generate(), content_type=content_type)
 
 
 @app.get("/")
@@ -129,28 +110,28 @@ def health():
             bridge_ready = True
     except OSError:
         pass
-    return jsonify(camera=camera.status(), bridge_ready=bridge_ready)
+    return jsonify(camera=_video_status(), bridge_ready=bridge_ready)
 
 
 @app.get("/video_feed")
 def video_feed():
-    if not camera.status()["ready"]:
-        return jsonify(error="camera unavailable", camera=camera.status()), 503
-    return Response(
-        _mjpeg_frames(), mimetype="multipart/x-mixed-replace; boundary=frame"
-    )
+    return _proxy_video("/video_feed")
 
 
 @app.get("/yolo_video_feed")
 def yolo_video_feed():
-    # Until the ROS annotated-image bridge is wired in, return the live camera
-    # instead of leaving clients waiting forever for a first frame.
-    return video_feed()
+    return _proxy_video("/yolo_video_feed")
 
 
 @app.get("/yolo_detailed_status")
 def yolo_detailed_status():
-    return jsonify(status="disabled", enabled=False, camera=camera.status())
+    camera = _video_status()
+    enabled = bool(camera.get("annotated_ready"))
+    return jsonify(
+        status="ready" if enabled else "waiting_for_annotated_image",
+        enabled=enabled,
+        camera=camera,
+    )
 
 
 @sock.route("/ws/control")
@@ -220,17 +201,14 @@ def main() -> None:
         level=os.getenv("ICAR_LOG_LEVEL", "INFO"),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    camera.start()
     LOG.info(
-        "starting on :%d, bridge=%s:%d, camera=%s",
+        "starting on :%d, bridge=%s:%d, ROS video=%s:%d",
         WEB_PORT,
         BRIDGE_HOST,
         BRIDGE_PORT,
-        CAMERA_DEVICE,
+        ROS_VIDEO_HOST,
+        ROS_VIDEO_PORT,
     )
-    # Flask-Sock's simple-websocket backend uses a real reader thread. The
-    # threaded Werkzeug server keeps that model compatible with the camera
-    # capture thread; gevent sockets can otherwise raise cross-thread errors.
     app.run(host="0.0.0.0", port=WEB_PORT, threaded=True, use_reloader=False)
 
 

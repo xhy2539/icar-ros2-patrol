@@ -209,7 +209,7 @@ Inside `icar_ros2`, confirm the real camera topic first:
 source /opt/ros/foxy/setup.bash
 source /root/icar_ros2_ws/software/library_ws/install/setup.bash
 source /root/icar_ros2_ws/icar_ws/install/setup.bash
-export ROS_DOMAIN_ID=32
+export ROS_DOMAIN_ID=30
 ros2 launch astra_camera astro_pro_plus.launch.xml
 ros2 topic list | grep -E "image|camera|depth|rgb|color|astra|points"
 ```

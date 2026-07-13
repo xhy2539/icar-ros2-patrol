@@ -27,7 +27,7 @@ void main() async {
   // 从 SharedPreferences 加载持久化设置
   final prefs = await SharedPreferences.getInstance();
   final savedHost = prefs.getString('car_ip');
-  // Migrate the old hotspot address when an existing APK is upgraded.
+  // 旧 APK 使用 .218；当前车端与网页统一使用 .117。
   final carHost = savedHost == null || savedHost == '192.168.137.218'
       ? '192.168.137.117'
       : savedHost;
@@ -92,10 +92,7 @@ class _MainScreenState extends State<MainScreen> {
       appBar: AppBar(
         title: Text(
           _titles[_currentIndex],
-          style: const TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w600,
-          ),
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
         ),
         actions: [
           if (_currentIndex == 0)
@@ -108,10 +105,7 @@ class _MainScreenState extends State<MainScreen> {
             ),
         ],
       ),
-      body: IndexedStack(
-        index: _currentIndex,
-        children: _pages,
-      ),
+      body: IndexedStack(index: _currentIndex, children: _pages),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           color: AppColors.surface,
@@ -193,23 +187,35 @@ class _MainScreenState extends State<MainScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('1. 连接 WiFi 热点 ohcar121 (密码 12345678)，小车 IP: 192.168.137.117',
-                  style: TextStyle(color: AppColors.blueGrayDark, fontSize: 13)),
+              Text(
+                '1. 连接 WiFi 热点 ohcar121 (密码 12345678)，小车 IP: 192.168.137.117',
+                style: TextStyle(color: AppColors.blueGrayDark, fontSize: 13),
+              ),
               SizedBox(height: 8),
-              Text('2. 在控制页面输入小车 IP 地址并点击连接',
-                  style: TextStyle(color: AppColors.blueGrayDark, fontSize: 13)),
+              Text(
+                '2. 在控制页面输入小车 IP 地址并点击连接',
+                style: TextStyle(color: AppColors.blueGrayDark, fontSize: 13),
+              ),
               SizedBox(height: 8),
-              Text('3. 连接成功后可使用方向按钮控制小车',
-                  style: TextStyle(color: AppColors.blueGrayDark, fontSize: 13)),
+              Text(
+                '3. 连接成功后可使用方向按钮控制小车',
+                style: TextStyle(color: AppColors.blueGrayDark, fontSize: 13),
+              ),
               SizedBox(height: 8),
-              Text('4. 状态页面查看摄像头画面和系统信息',
-                  style: TextStyle(color: AppColors.blueGrayDark, fontSize: 13)),
+              Text(
+                '4. 状态页面查看摄像头画面和系统信息',
+                style: TextStyle(color: AppColors.blueGrayDark, fontSize: 13),
+              ),
               SizedBox(height: 8),
-              Text('5. 传感器页面查看环境数据实时监测',
-                  style: TextStyle(color: AppColors.blueGrayDark, fontSize: 13)),
+              Text(
+                '5. 传感器页面查看环境数据实时监测',
+                style: TextStyle(color: AppColors.blueGrayDark, fontSize: 13),
+              ),
               SizedBox(height: 8),
-              Text('6. 任务日志记录巡检过程的所有事件',
-                  style: TextStyle(color: AppColors.blueGrayDark, fontSize: 13)),
+              Text(
+                '6. 任务日志记录巡检过程的所有事件',
+                style: TextStyle(color: AppColors.blueGrayDark, fontSize: 13),
+              ),
             ],
           ),
         ),

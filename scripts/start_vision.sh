@@ -28,6 +28,11 @@
 
 set -e
 
+# The car runtime is standardized on ROS domain 30. Do not inherit an old
+# ROS_DOMAIN_ID from an interactive icar_ros2 shell (historically it used 32).
+# Use ICAR_ROS_DOMAIN_ID only for an intentional, explicit override.
+export ROS_DOMAIN_ID="${ICAR_ROS_DOMAIN_ID:-30}"
+
 MODE=${1:-detect}
 IMAGE_TOPIC=${IMAGE_TOPIC:-/camera/color/image_raw}
 DETECTIONS_TOPIC=${DETECTIONS_TOPIC:-/vision/detections}
@@ -68,6 +73,7 @@ FAKE_SCENARIO=${FAKE_SCENARIO:-patrol}
 echo "============================================="
 echo "  Starting Vision Module (mode: $MODE)..."
 echo "============================================="
+echo "  ROS domain: $ROS_DOMAIN_ID"
 echo "  image topic: $IMAGE_TOPIC"
 echo "  detector backend: $DETECTOR_BACKEND"
 if [ -n "$YOLO_MODEL" ]; then
