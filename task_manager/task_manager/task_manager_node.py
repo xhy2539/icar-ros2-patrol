@@ -27,6 +27,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from builtin_interfaces.msg import Time as RosTime
+from geometry_msgs.msg import PoseStamped, Twist
 
 # 自定义消息接口
 from icar_interfaces.msg import (
