@@ -18,6 +18,7 @@ Subscriptions (缓存最新值):
 
 import json
 import re
+import threading
 from collections import defaultdict
 
 import rclpy
@@ -58,10 +59,10 @@ try:
     try:
         from deepseek_client import DeepSeekClient as _ToolClient
         _TOOL_CLIENT_AVAILABLE = True
-    except ImportError:
+    except Exception:
         _ToolClient = None
         _TOOL_CLIENT_AVAILABLE = False
-except ImportError:
+except Exception:
     pass
 
 # ---------------------------------------------------------------------------
