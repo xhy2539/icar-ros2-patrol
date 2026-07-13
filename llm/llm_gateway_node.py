@@ -12,12 +12,12 @@ LLM Gateway Node - LLM模块主入口
 前置条件：
   - 设置环境变量 DEEPSEEK_API_KEY
   - 或创建 .env 文件（参考 .env.example）
+  - 工具调用模式需要ROS2环境和icar_interfaces包
 
 使用方式：
-  python llm_gateway_node.py              # 命令解析模式
-  python llm_gateway_node.py --tool       # 工具调用模式
+  python llm_gateway_node.py              # 命令解析模式（不需要ROS2）
   python llm_gateway_node.py --ros2       # ROS2模式
-  python llm_gateway_node.py --ros2 --tool # ROS2+工具调用模式
+  python llm_gateway_node.py --ros2 --tool # ROS2+工具调用模式（推荐）
 """
 import os
 import sys
@@ -116,11 +116,11 @@ class LLMGatewayNode:
             self.robot_tools = RobotTools(self.node)
 
         tool_map = {
-            "start_patrol": self.robot_tools.start_patrol,
-            "get_robot_status": self.robot_tools.get_robot_status,
-            "stop_robot": self.robot_tools.stop_robot,
-            "cancel_task": self.robot_tools.cancel_task,
-            "reset_task": self.robot_tools.reset_task,
+            "start_patrol": self._execute_start_patrol,
+            "get_robot_status": self._execute_get_status,
+            "stop_robot": self._execute_stop_robot,
+            "cancel_task": self._execute_cancel_task,
+            "reset_task": self._execute_reset_task,
             "send_command": self._execute_send_command,
         }
 
@@ -141,6 +141,31 @@ class LLMGatewayNode:
             return result
         except Exception as e:
             return {"success": False, "tool_name": tool_name, "message": f"Tool execution failed: {str(e)}"}
+
+    def _execute_get_status(self) -> dict:
+        if self.node is None:
+            return {"success": False, "message": "工具调用需要ROS2环境，请使用 --ros2 参数启动"}
+        return self.robot_tools.get_robot_status()
+
+    def _execute_stop_robot(self, reason: str = "user requested emergency stop") -> dict:
+        if self.node is None:
+            return {"success": False, "message": "工具调用需要ROS2环境，请使用 --ros2 参数启动"}
+        return self.robot_tools.stop_robot(reason)
+
+    def _execute_cancel_task(self, reason: str = "user cancelled patrol") -> dict:
+        if self.node is None:
+            return {"success": False, "message": "工具调用需要ROS2环境，请使用 --ros2 参数启动"}
+        return self.robot_tools.cancel_task(reason)
+
+    def _execute_reset_task(self, reason: str = "operator confirmed reset") -> dict:
+        if self.node is None:
+            return {"success": False, "message": "工具调用需要ROS2环境，请使用 --ros2 参数启动"}
+        return self.robot_tools.reset_task(reason)
+
+    def _execute_start_patrol(self, route: list, user_text: str = "") -> dict:
+        if self.node is None:
+            return {"success": False, "message": "工具调用需要ROS2环境，请使用 --ros2 参数启动"}
+        return self.robot_tools.start_patrol(route, user_text)
 
     def _execute_send_command(self, type: str, payload: Dict[str, Any]) -> dict:
         cmd = TaskCommand(
@@ -237,7 +262,8 @@ class LLMGatewayNode:
         print("LLM Gateway Node (Standalone Mode)")
         print("=" * 50)
         print("DeepSeek API: Real")
-        print(f"Mode: {'Tool Call' if self.tool_mode else 'Command Parse'}")
+        print(f"Mode: {'Tool Parse' if self.tool_mode else 'Command Parse'}")
+        print("注意: 工具执行需要ROS2环境，此处仅返回解析结果")
         print("Commands: report, logs, exit")
         print("=" * 50)
 
@@ -318,11 +344,26 @@ class LLMGatewayNode:
             qos
         )
 
+        self.user_command_sub = self.node.create_subscription(
+            ROSString,
+            '/llm/user_command',
+            self._user_command_callback,
+            qos
+        )
+
         self.command_pub = self.node.create_publisher(
             ROSString,
             '/llm/command',
             qos
         )
+
+        self.response_pub = self.node.create_publisher(
+            ROSString,
+            '/llm/response',
+            qos
+        )
+
+        self._register_services()
 
         self.node.get_logger().info("LLM Gateway Node started")
         self.node.get_logger().info("Using Real DeepSeek API")
@@ -335,6 +376,114 @@ class LLMGatewayNode:
         finally:
             self.node.destroy_node()
             rclpy.shutdown()
+
+    def _register_services(self):
+        try:
+            from icar_interfaces.srv import ParseTask, GenerateReport
+
+            self.parse_task_srv = self.node.create_service(
+                ParseTask,
+                '/llm/parse_task',
+                self._on_parse_task_service
+            )
+            self.generate_report_srv = self.node.create_service(
+                GenerateReport,
+                '/llm/generate_report',
+                self._on_generate_report_service
+            )
+            self.node.get_logger().info("Services registered: /llm/parse_task, /llm/generate_report")
+        except ImportError as e:
+            self.node.get_logger().warn(f"icar_interfaces not available, services not registered: {e}")
+
+    def _on_parse_task_service(self, request, response):
+        user_input = request.input_text.strip()
+        if not user_input:
+            response.task_json = "{}"
+            response.success = False
+            response.error_msg = "input_text is empty"
+            return response
+
+        try:
+            result = self.process_user_input(user_input)
+            
+            if result.get("success"):
+                if "command" in result:
+                    response.task_json = json.dumps(result["command"], ensure_ascii=False)
+                elif "tool_name" in result:
+                    task_data = {
+                        "task_type": "patrol" if result["tool_name"] == "start_patrol" else result["tool_name"],
+                        "route": result.get("route", []),
+                        "tool_name": result["tool_name"],
+                        "arguments": result.get("result", {}).get("route", {}),
+                        "params": {"source": "llm", "raw_text": user_input}
+                    }
+                    response.task_json = json.dumps(task_data, ensure_ascii=False)
+                else:
+                    response.task_json = json.dumps(result, ensure_ascii=False)
+                response.success = True
+                response.error_msg = ""
+            else:
+                response.task_json = "{}"
+                response.success = False
+                response.error_msg = result.get("error", result.get("message", "Unknown error"))
+            
+            self.node.get_logger().info(f"parse_task service: {user_input[:30]}... -> success={response.success}")
+            return response
+        except Exception as e:
+            response.task_json = "{}"
+            response.success = False
+            response.error_msg = str(e)
+            self.node.get_logger().error(f"parse_task service error: {e}")
+            return response
+
+    def _on_generate_report_service(self, request, response):
+        try:
+            if request.logs_json.strip():
+                log_content = request.logs_json
+            elif request.task_id:
+                log_content = "\n".join(self.task_logs)
+            else:
+                log_content = "\n".join(self.task_logs)
+
+            result = self.generate_report(log_content)
+            
+            if result.get("success"):
+                response.report_text = result["report"]
+                response.success = True
+                response.error_msg = ""
+            else:
+                response.report_text = ""
+                response.success = False
+                response.error_msg = result.get("error", "Report generation failed")
+            
+            self.node.get_logger().info(f"generate_report service: success={response.success}")
+            return response
+        except Exception as e:
+            response.report_text = ""
+            response.success = False
+            response.error_msg = str(e)
+            self.node.get_logger().error(f"generate_report service error: {e}")
+            return response
+
+    def _user_command_callback(self, msg):
+        user_input = msg.data.strip()
+        if not user_input:
+            return
+
+        self.node.get_logger().info(f"Received user command: {user_input[:50]}...")
+        
+        result = self.process_user_input(user_input)
+        
+        if self.response_pub and ROSString:
+            response_msg = ROSString()
+            response_msg.data = json.dumps(result, ensure_ascii=False)
+            self.response_pub.publish(response_msg)
+        
+        if result.get("success"):
+            if self.tool_mode and "tool_name" in result:
+                self.add_task_log(f"User: {user_input} -> Tool: {result['tool_name']}")
+            elif "command" in result:
+                self.add_task_log(f"User: {user_input} -> Type: {result['command']['type']}")
 
     def _task_log_callback(self, msg):
         log_entry = msg.data
