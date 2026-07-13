@@ -23,6 +23,7 @@ import shutil
 import subprocess
 import threading
 import platform
+import time
 from typing import Optional, List, Dict, Any
 
 # ── 音频目录和注册表 ──────────────────────────────────────────
@@ -48,6 +49,7 @@ class RobotTools:
         self.task_control_client = None
         self.task_request_publisher = None
         self.tracking_command_publisher = None
+        self.buzzer_publisher = None
         self._init_ros2()
 
     def _init_ros2(self):
@@ -58,7 +60,7 @@ class RobotTools:
             from icar_interfaces.srv import TaskControl
             from icar_interfaces.msg import TaskRequest
             from rclpy.qos import QoSProfile, ReliabilityPolicy
-            from std_msgs.msg import String
+            from std_msgs.msg import Bool, String
 
             qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
 
@@ -72,6 +74,10 @@ class RobotTools:
 
             self.tracking_command_publisher = self.node.create_publisher(
                 String, '/vision/target_tracking/command', qos
+            )
+
+            self.buzzer_publisher = self.node.create_publisher(
+                Bool, '/Buzzer', qos
             )
 
             self.node.get_logger().info("Robot tools initialized")
@@ -293,6 +299,8 @@ class RobotTools:
         target = self._resolve_audio_path(name, file_path)
 
         if not target:
+            if name in AUDIO_REGISTRY and self.buzzer_publisher is not None:
+                return self._play_buzzer_fallback(name, blocking=blocking)
             available = self.list_available_audio()
             return {
                 "success": False,
@@ -333,6 +341,40 @@ class RobotTools:
             "audio_name": name,
             "file_path": target,
             "volume": volume,
+        }
+
+    def _play_buzzer_fallback(self, name: str, blocking: bool = False) -> dict:
+        """Use the chassis buzzer when a predefined voice asset is absent."""
+        from std_msgs.msg import Bool
+
+        pulse_counts = {
+            "danger": 3,
+            "alert": 3,
+            "error": 3,
+            "stop": 2,
+            "complete": 2,
+        }
+        count = pulse_counts.get(name, 1)
+
+        def _play():
+            try:
+                for _ in range(count):
+                    self.buzzer_publisher.publish(Bool(data=True))
+                    time.sleep(0.16)
+                    self.buzzer_publisher.publish(Bool(data=False))
+                    time.sleep(0.12)
+            finally:
+                self.buzzer_publisher.publish(Bool(data=False))
+
+        if blocking:
+            _play()
+        else:
+            threading.Thread(target=_play, daemon=True).start()
+        return {
+            "success": True,
+            "message": f"Playing buzzer fallback: {name}",
+            "audio_name": name,
+            "fallback": "chassis_buzzer",
         }
 
     @staticmethod

@@ -49,3 +49,9 @@ LLM 通过 `play_audio` 工具自动选择音频名称：
 - "播放欢迎语音" → name="welcome"
 - "嘀一声" → name="beep"
 - "发警告" → name="alert"
+
+如果预定义音频文件尚未安装，车端会回退到 `/Buzzer` 蜂鸣提示，避免
+`alert`、`danger` 或 `complete` 步骤因为缺少音频资源而中断复杂任务。
+
+`obstacle_alarm_node` 还会监听 `/obstacle_status`：危险或建议动作变为
+`stop` 时触发三连响，危险持续时按冷却周期重复，恢复安全后关闭蜂鸣器。
