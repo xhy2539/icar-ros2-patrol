@@ -126,6 +126,11 @@ eval "$ICAR_DOCKER_CMD; export ICAR_AUDIO_DIR=/root/icar_ros2_ws/icar_ws/src/aud
 sleep 2
 
 echo "[11/14] Verifying ROS graph"
+# Foxy daemon can retain a pre-restart graph and report zero mux publishers
+# even when the fresh node is running. Rebuild the CLI graph before asserting.
+docker exec -e ROS_DOMAIN_ID=30 autodrive_ros2 bash -lc \
+  'source /opt/ros/foxy/setup.bash; ros2 daemon stop >/dev/null 2>&1 || true; ros2 daemon start >/dev/null'
+sleep 4
 CMD_INFO=""
 for _ in $(seq 1 20); do
   CMD_INFO=$(docker exec -e ROS_DOMAIN_ID=30 autodrive_ros2 bash -lc \

@@ -18,6 +18,14 @@ docker exec "$CONTAINER" pkill -f '/app_control/lib/app_control/app_bridge_node'
 docker exec "$CONTAINER" pkill -f '/app_control/lib/app_control/velocity_mux_node' 2>/dev/null || true
 docker exec "$CONTAINER" pkill -f 'ros2 run app_control app_bridge_node' 2>/dev/null || true
 docker exec "$CONTAINER" pkill -f 'ros2 run app_control velocity_mux_node' 2>/dev/null || true
+# Remove legacy nodes previously launched in this container. Their old task
+# manager and keyboard controller publish directly to /cmd_vel and bypass mux.
+docker exec "$CONTAINER" pkill -f '/task_manager/lib/task_manager/task_manager_node' 2>/dev/null || true
+docker exec "$CONTAINER" pkill -f 'ros2 run task_manager task_manager_node' 2>/dev/null || true
+docker exec "$CONTAINER" pkill -f '/llm_gateway/lib/llm_gateway/llm_gateway_node' 2>/dev/null || true
+docker exec "$CONTAINER" pkill -f 'ros2 run llm_gateway llm_gateway_node' 2>/dev/null || true
+docker exec "$CONTAINER" pkill -f '/yahboomcar_ctrl/lib/yahboomcar_ctrl/yahboom_keyboard' 2>/dev/null || true
+docker exec "$CONTAINER" pkill -f 'ros2 run yahboomcar_ctrl yahboom_keyboard' 2>/dev/null || true
 run_ros_node() {
   local executable="$1"
   local logfile="$2"
