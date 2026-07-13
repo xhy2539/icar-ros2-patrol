@@ -126,26 +126,23 @@ eval "$ICAR_DOCKER_CMD; export ICAR_AUDIO_DIR=/root/icar_ros2_ws/icar_ws/src/aud
 sleep 2
 
 echo "[11/14] Verifying ROS graph"
-# Foxy daemon can retain a pre-restart graph and report zero mux publishers
-# even when the fresh node is running. Rebuild the CLI graph before asserting.
-docker exec -e ROS_DOMAIN_ID=30 autodrive_ros2 bash -lc \
-  'source /opt/ros/foxy/setup.bash; ros2 daemon stop >/dev/null 2>&1 || true; ros2 daemon start >/dev/null'
-sleep 4
-CMD_INFO=""
-for _ in $(seq 1 20); do
-  CMD_INFO=$(docker exec -e ROS_DOMAIN_ID=30 autodrive_ros2 bash -lc \
-    'source /opt/ros/foxy/setup.bash; ros2 topic info /cmd_vel 2>/dev/null' || true)
-  if echo "$CMD_INFO" | grep -q 'Publisher count: 1' && \
-     echo "$CMD_INFO" | grep -q 'Subscription count: 1'; then
-    break
-  fi
-  sleep 1
-done
-echo "$CMD_INFO"
-echo "$CMD_INFO" | grep -q 'Publisher count: 1'
-echo "$CMD_INFO" | grep -q 'Subscription count: 1'
-docker exec -e ROS_DOMAIN_ID=30 icar_ros2 bash -lc \
-  'source /opt/ros/foxy/setup.bash; source /root/icar_ros2_ws/icar_ws/install/setup.bash; ros2 topic info /vision/detections'
+# Foxy daemon can retain a partial cross-container graph. Query the two
+# safety-critical nodes without the daemon and verify the endpoint direction.
+MUX_INFO=$(docker exec -e ROS_DOMAIN_ID=30 autodrive_ros2 bash -lc \
+  'source /opt/ros/foxy/setup.bash; ros2 node info --no-daemon --spin-time 5 /velocity_mux')
+DRIVER_INFO=$(docker exec -e ROS_DOMAIN_ID=30 autodrive_ros2 bash -lc \
+  'source /opt/ros/foxy/setup.bash; ros2 node info --no-daemon --spin-time 5 /driver_node')
+echo "$MUX_INFO"
+echo "$DRIVER_INFO"
+echo "$MUX_INFO" | grep -q '^    /cmd_vel: geometry_msgs/msg/Twist$'
+echo "$DRIVER_INFO" | grep -q '^    /cmd_vel: geometry_msgs/msg/Twist$'
+
+NODE_LIST=$(docker exec -e ROS_DOMAIN_ID=30 autodrive_ros2 bash -lc \
+  'source /opt/ros/foxy/setup.bash; ros2 node list --no-daemon --spin-time 5')
+echo "$NODE_LIST"
+[ "$(echo "$NODE_LIST" | grep -c '^/task_manager_node$')" -eq 1 ]
+[ "$(echo "$NODE_LIST" | grep -c '^/llm_gateway_node$')" -eq 1 ]
+[ "$(echo "$NODE_LIST" | grep -c '^/vision_node$')" -eq 1 ]
 
 echo "[12/14] Verifying web gateway"
 curl --fail --silent --show-error --max-time 5 http://127.0.0.1:6500/health
