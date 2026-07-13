@@ -54,4 +54,5 @@ tmp/
 # 音频生成文件 — 保留 README 和脚本，忽略生成的音频
 audio/*.wav
 audio/*.mp3
+audio/*.m4a
 !audio/README.md

@@ -125,6 +125,7 @@ class LLMGatewayNode:
             "query_navigation": self._execute_query_navigation,
             "check_safety": self._execute_check_safety,
             "play_audio": self._execute_play_audio,
+            "download_audio": self._execute_download_audio,
             "send_command": self._execute_send_command,
         }
 
@@ -184,6 +185,10 @@ class LLMGatewayNode:
                             volume: float = 1.0) -> dict:
         """播放音频（不依赖 ROS2，直接调用系统播放器）。"""
         return self.robot_tools.play_audio(name=name, file_path=file_path, volume=volume)
+
+    def _execute_download_audio(self, query: str, name: str = "") -> dict:
+        """从网络搜索并下载音频。"""
+        return self.robot_tools.download_audio(query=query, name=name)
 
     def _execute_send_command(self, type: str, payload: Dict[str, Any]) -> dict:
         cmd = TaskCommand(
