@@ -9,20 +9,23 @@ DOMAIN=30
 exec > >(tee -a "$LOG") 2>&1
 echo "=== iCar safe startup $(date) ==="
 
-echo "[1/12] Waiting for chassis serial"
+echo "[0/13] Setting USB speaker volume"
+amixer -c 0 sset PCM 80% 2>/dev/null || true
+
+echo "[1/13] Waiting for chassis serial"
 for _ in $(seq 1 30); do
   [ -e /dev/myserial ] && break
   sleep 1
 done
 [ -e /dev/myserial ] || { echo "ERROR: /dev/myserial missing"; exit 1; }
 
-echo "[2/12] Starting containers"
+echo "[2/13] Starting containers"
 docker start autodrive_ros2 >/dev/null
 docker start icar_ros2 >/dev/null
 docker update --restart unless-stopped autodrive_ros2 icar_ros2 >/dev/null
 sleep 4
 
-echo "[3/12] Installing shared ROS domain environment"
+echo "[3/13] Installing shared ROS domain environment"
 for container in autodrive_ros2 icar_ros2; do
   docker exec "$container" sh -c \
     'printf "%s\n" "export ROS_DOMAIN_ID=30" > /etc/profile.d/icar_ros_domain.sh'
@@ -31,12 +34,12 @@ done
 docker exec autodrive_ros2 bash -lc \
   'source /opt/ros/foxy/setup.bash; export ROS_DOMAIN_ID=30; ros2 daemon start >/dev/null'
 
-echo "[4/12] Removing legacy control and camera processes"
+echo "[4/13] Removing legacy control and camera processes"
 pkill -f 'Rosmaster-App/rosmaster/app.py' 2>/dev/null || true
 pkill -f '^python3 app.py$' 2>/dev/null || true
 docker exec autodrive_ros2 pkill -f '^python3 /tmp/fast_bridge.py$' 2>/dev/null || true
 
-echo "[5/12] Starting chassis bringup and lidar"
+echo "[5/13] Starting chassis bringup and lidar"
 if ! docker exec autodrive_ros2 pgrep -f 'Mcnamu_driver_X3 --ros-args' >/dev/null; then
   docker exec autodrive_ros2 bash -lc \
     'source /opt/ros/foxy/setup.bash
@@ -57,7 +60,7 @@ if ! docker exec autodrive_ros2 pgrep -x sllidar_node >/dev/null; then
   sleep 3
 fi
 
-echo "[6/12] Syncing and building app_control"
+echo "[6/13] Syncing and building app_control"
 SOURCE_REVISION=$(git -C "$REPO" rev-parse HEAD)
 if [ "$SOURCE_REVISION" != "$(docker exec autodrive_ros2 cat /root/icar_app_ws/.icar_source_revision 2>/dev/null || true)" ] || \
    ! docker exec autodrive_ros2 test -x /root/icar_app_ws/install/app_control/lib/app_control/app_bridge_node; then
@@ -69,7 +72,7 @@ if [ "$SOURCE_REVISION" != "$(docker exec autodrive_ros2 cat /root/icar_app_ws/.
   docker exec autodrive_ros2 sh -c "printf '%s\\n' '$SOURCE_REVISION' > /root/icar_app_ws/.icar_source_revision"
 fi
 
-echo "[7/12] Syncing and building task_manager + LLM + navigation"
+echo "[7/13] Syncing and building task_manager + LLM + navigation"
 ICAR_WS="/root/icar_ros2_ws/icar_ws"
 if [ "$SOURCE_REVISION" != "$(docker exec icar_ros2 cat $ICAR_WS/.icar_source_revision 2>/dev/null || true)" ]; then
   tar --exclude='._*' -C "$REPO" -cf - task_manager llm navigation icar_interfaces audio | \
@@ -80,14 +83,14 @@ if [ "$SOURCE_REVISION" != "$(docker exec icar_ros2 cat $ICAR_WS/.icar_source_re
   docker exec icar_ros2 sh -c "printf '%s\\n' '$SOURCE_REVISION' > $ICAR_WS/.icar_source_revision"
 fi
 
-echo "[8/12] Starting camera and vision stack"
+echo "[8/13] Starting camera and vision stack"
 ICAR_ROS_DOMAIN_ID="$DOMAIN" "$REPO/scripts/start_car_vision_stack.sh"
 
-echo "[9/12] Starting safe App/video/control stack"
+echo "[9/13] Starting safe App/video/control stack"
 ICAR_ROS_CONTAINER=autodrive_ros2 ROS_DOMAIN_ID="$DOMAIN" \
   "$REPO/scripts/start_car_app_stack.sh"
 
-echo "[10/12] Starting task_manager + LLM gateway + obstacle_avoid"
+echo "[10/13] Starting task_manager + LLM gateway + obstacle_avoid"
 export DEEPSEEK_API_KEY="${DEEPSEEK_API_KEY:-}"
 ICAR_DOCKER_CMD="docker exec icar_ros2 bash -lc 'source /opt/ros/foxy/setup.bash; source $ICAR_WS/install/setup.bash; export ROS_DOMAIN_ID=30"
 if [ -n "$DEEPSEEK_API_KEY" ]; then
@@ -109,7 +112,7 @@ if ! docker exec icar_ros2 pgrep -f llm_gateway_node >/dev/null 2>&1; then
   sleep 2
 fi
 
-echo "[11/12] Verifying ROS graph"
+echo "[11/13] Verifying ROS graph"
 CMD_INFO=""
 for _ in $(seq 1 20); do
   CMD_INFO=$(docker exec -e ROS_DOMAIN_ID=30 autodrive_ros2 bash -lc \
@@ -126,7 +129,7 @@ echo "$CMD_INFO" | grep -q 'Subscription count: 1'
 docker exec -e ROS_DOMAIN_ID=30 icar_ros2 bash -lc \
   'source /opt/ros/foxy/setup.bash; source /root/icar_ros2_ws/icar_ws/install/setup.bash; ros2 topic info /vision/detections'
 
-echo "[12/12] Verifying web gateway"
+echo "[12/13] Verifying web gateway"
 curl --fail --silent --show-error --max-time 5 http://127.0.0.1:6500/health
 echo
 echo "=== iCar safe startup complete ==="
