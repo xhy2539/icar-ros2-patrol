@@ -203,6 +203,21 @@ class CloudBridgeNode(Node):
             "severity": msg.severity,
         })
 
+    def _on_llm_response(self, msg: ROSString):
+        try:
+            data = json.loads(msg.data)
+            self._publish_mqtt("/icar/llm/response", {
+                "success": data.get("success", False),
+                "tool_name": data.get("tool_name", ""),
+                "message": data.get("message", ""),
+                "route": data.get("route", []),
+                "result": data.get("result", {}),
+                "command": data.get("command", {}),
+            })
+            self.get_logger().info(f"已转发LLM响应: tool_name={data.get('tool_name', '')}")
+        except json.JSONDecodeError:
+            self.get_logger().warn(f"LLM响应解析失败: {msg.data[:50]}...")
+
     def _publish_mqtt(self, topic, data: dict):
         try:
             self.mqtt.publish(topic, json.dumps(data, ensure_ascii=False))
