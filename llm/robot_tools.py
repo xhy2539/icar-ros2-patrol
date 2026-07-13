@@ -47,6 +47,7 @@ class RobotTools:
         self.node = node
         self.task_control_client = None
         self.task_request_publisher = None
+        self.tracking_command_publisher = None
         self._init_ros2()
 
     def _init_ros2(self):
@@ -57,6 +58,7 @@ class RobotTools:
             from icar_interfaces.srv import TaskControl
             from icar_interfaces.msg import TaskRequest
             from rclpy.qos import QoSProfile, ReliabilityPolicy
+            from std_msgs.msg import String
 
             qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
 
@@ -66,6 +68,10 @@ class RobotTools:
 
             self.task_request_publisher = self.node.create_publisher(
                 TaskRequest, '/task/request', qos
+            )
+
+            self.tracking_command_publisher = self.node.create_publisher(
+                String, '/vision/target_tracking/command', qos
             )
 
             self.node.get_logger().info("Robot tools initialized")
@@ -79,7 +85,6 @@ class RobotTools:
             return {"success": False, "message": "ROS2 node not initialized, cannot call /task/control"}
 
         from icar_interfaces.srv import TaskControl
-        import rclpy
 
         req = TaskControl.Request()
         req.action = action
@@ -90,7 +95,10 @@ class RobotTools:
             return {"success": False, "message": "Service /task/control not available"}
 
         future = self.task_control_client.call_async(req)
-        rclpy.spin_until_future_complete(self.node, future)
+        completed = threading.Event()
+        future.add_done_callback(lambda _future: completed.set())
+        if not completed.wait(timeout=3.0):
+            return {"success": False, "message": "/task/control response timed out"}
 
         try:
             response = future.result()
@@ -154,6 +162,52 @@ class RobotTools:
             "task_type": "patrol",
             "route": route
         }
+
+    def start_tracking(
+        self, target_classes: Optional[List[str]] = None, user_text: str = ""
+    ) -> dict:
+        """Enable safe visual tracking through the tracker command topic."""
+        if self.tracking_command_publisher is None:
+            return {
+                "success": False,
+                "message": "ROS2 node not initialized, cannot start tracking",
+            }
+        from std_msgs.msg import String
+
+        classes = [str(item) for item in (target_classes or ["person"]) if str(item)]
+        message = String()
+        message.data = json.dumps(
+            {
+                "action": "start",
+                "target_classes": classes or ["person"],
+                "source": "llm",
+                "user_text": user_text,
+            },
+            ensure_ascii=False,
+        )
+        self.tracking_command_publisher.publish(message)
+        return {
+            "success": True,
+            "message": f"Tracking started: {classes or ['person']}",
+            "target_classes": classes or ["person"],
+        }
+
+    def stop_tracking(self, reason: str = "user stopped tracking") -> dict:
+        """Disable visual tracking; the tracker publishes an immediate zero Twist."""
+        if self.tracking_command_publisher is None:
+            return {
+                "success": False,
+                "message": "ROS2 node not initialized, cannot stop tracking",
+            }
+        from std_msgs.msg import String
+
+        message = String()
+        message.data = json.dumps(
+            {"action": "stop", "source": "llm", "reason": reason},
+            ensure_ascii=False,
+        )
+        self.tracking_command_publisher.publish(message)
+        return {"success": True, "message": f"Tracking stopped: {reason}"}
 
     # ── 信息查询工具（读取节点缓存的最新数据）─────────────────
 
@@ -493,6 +547,34 @@ class RobotTools:
                     "type": "string",
                     "required": False,
                     "description": "保存文件名（不含扩展名），默认由 query 生成"
+                }
+            }
+        },
+        {
+            "tool_name": "start_tracking",
+            "description": "启动视觉目标跟踪；默认跟踪 person，速度必须经过安全速度仲裁",
+            "parameters": {
+                "target_classes": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "required": False,
+                    "description": "目标类别数组，默认 ['person']"
+                },
+                "user_text": {
+                    "type": "string",
+                    "required": False,
+                    "description": "原始用户指令"
+                }
+            }
+        },
+        {
+            "tool_name": "stop_tracking",
+            "description": "停止视觉目标跟踪并输出零速度",
+            "parameters": {
+                "reason": {
+                    "type": "string",
+                    "required": False,
+                    "description": "停止原因"
                 }
             }
         }

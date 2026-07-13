@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from app_control.command_parser import Motion, parse_command
+from app_control.command_parser import Motion, is_emergency_stop_text, parse_command
 
 
 def test_stop_is_always_zero():
@@ -21,3 +21,14 @@ def test_motion_values_are_bounded():
 def test_unknown_command_is_rejected():
     with pytest.raises(ValueError):
         parse_command("launch_missiles")
+
+
+def test_explicit_natural_language_stop_is_emergency():
+    assert is_emergency_stop_text("立即停下")
+    assert is_emergency_stop_text("别动")
+    assert is_emergency_stop_text("紧急停止！")
+
+
+def test_stopping_tracking_does_not_latch_global_estop():
+    assert not is_emergency_stop_text("停止跟踪")
+    assert not is_emergency_stop_text("停止播放音乐")

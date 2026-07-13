@@ -18,7 +18,6 @@ docker exec "$CONTAINER" pkill -f '/app_control/lib/app_control/app_bridge_node'
 docker exec "$CONTAINER" pkill -f '/app_control/lib/app_control/velocity_mux_node' 2>/dev/null || true
 docker exec "$CONTAINER" pkill -f 'ros2 run app_control app_bridge_node' 2>/dev/null || true
 docker exec "$CONTAINER" pkill -f 'ros2 run app_control velocity_mux_node' 2>/dev/null || true
-
 run_ros_node() {
   local executable="$1"
   local logfile="$2"

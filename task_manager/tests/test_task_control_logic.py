@@ -48,6 +48,7 @@ class TaskControlLogicTest(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertTrue(result.should_stop)
         self.assertEqual(result.next_state, "CANCELLED")
+        self.assertTrue(result.emergency_stop_active)
         self.assertEqual(result.event_type, "LLM_CONTROL")
 
     def test_stop_from_pending_still_publishes_safe_stop(self):
@@ -79,6 +80,32 @@ class TaskControlLogicTest(unittest.TestCase):
         self.assertFalse(result.should_stop)
         self.assertEqual(result.next_state, "PENDING")
         self.assertFalse(result.emergency_stop_active)
+
+    def test_reset_pending_estop_requires_explicit_reset_but_no_state_change(self):
+        result = self.logic.plan_task_control(
+            action="reset",
+            state="PENDING",
+            task_id="",
+            route=[],
+            route_index=0,
+            emergency_stop_active=True,
+        )
+
+        self.assertTrue(result.success)
+        self.assertIsNone(result.next_state)
+        self.assertFalse(result.emergency_stop_active)
+
+    def test_reset_pending_without_estop_is_rejected(self):
+        result = self.logic.plan_task_control(
+            action="reset",
+            state="PENDING",
+            task_id="",
+            route=[],
+            route_index=0,
+            emergency_stop_active=False,
+        )
+
+        self.assertFalse(result.success)
 
     def test_invalid_action_is_rejected(self):
         result = self.logic.plan_task_control(
