@@ -103,6 +103,7 @@ ICAR_ROS_DOMAIN_ID="$DOMAIN" "$REPO/scripts/start_car_vision_stack.sh"
 
 echo "[9/14] Starting safe App/video/control stack"
 ICAR_ROS_CONTAINER=autodrive_ros2 ROS_DOMAIN_ID="$DOMAIN" \
+  ICAR_REPO_DIR="$REPO" \
   "$REPO/scripts/start_car_app_stack.sh"
 
 echo "[10/14] Starting task_manager + LLM gateway + obstacle_avoid"
