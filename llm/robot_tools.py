@@ -311,6 +311,9 @@ class RobotTools:
         else:
             return {"success": False, "message": f"Unsupported platform: {sysname}"}
 
+        # 杀掉已有播放，保证同时只播一个
+        self._stop_all_audio()
+
         def _play():
             try:
                 subprocess.run(cmd, check=True,
@@ -333,6 +336,17 @@ class RobotTools:
         }
 
     @staticmethod
+    def _stop_all_audio():
+        """杀掉所有正在播放的 ffplay/afplay，保证同时只播一个。"""
+        for proc_name in ("ffplay", "afplay", "aplay", "paplay"):
+            try:
+                subprocess.run(["pkill", "-9", proc_name],
+                               stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, timeout=2)
+            except Exception:
+                pass
+
+    @staticmethod
     def _build_linux_play_cmd(target: str, volume: float) -> list:
         ext = os.path.splitext(target)[1].lower()
         if shutil.which("ffplay"):
@@ -347,24 +361,31 @@ class RobotTools:
 
     # ── 网络音频搜索下载 ──────────────────────────────────────
 
-    def download_audio(self, query: str, name: str = "",
+    def download_audio(self, query: str = "", url: str = "", name: str = "",
                        blocking: bool = True) -> dict:
-        """从 YouTube 搜索音频并下载到 audio/ 目录。
+        """搜索并下载音频到 audio/ 目录。
 
         Parameters
         ----------
-        query: 搜索关键词（如 "bird song"、"报警音效"）。
-        name:  保存的文件名（不含扩展名），默认从 query 生成。
+        query: YouTube 搜索关键词（如 "bird song"），YouTube 不通时无效。
+        url:   直接下载 URL（B站/freesound/任意视频），优先于 query。
+        name:  保存的文件名（不含扩展名）。
         blocking: 是否阻塞等待下载完成。
-
-        Returns
-        -------
-        dict with success, name, file_path, query
         """
-        if not query.strip():
-            return {"success": False, "message": "search query is required"}
+        download_src = url.strip() if url else ""
+        search_query = query.strip()
 
-        safe_name = name.strip() if name else query.strip()
+        if not download_src and not search_query:
+            return {"success": False, "message": "query or url is required"}
+
+        # yt-dlp 下载目标：URL直接下载，关键词走B站搜索（国内可用）
+        if download_src:
+            yt_input = download_src
+        else:
+            yt_input = f"bilisearch1:{search_query}"
+
+        safe_name = name.strip() if name.strip() else (
+            search_query if search_query else "downloaded")
         # 文件名只保留字母数字和常用字符
         import re
         safe_name = re.sub(r'[^a-zA-Z0-9一-鿿_-]', '_', safe_name)[:50]
@@ -395,12 +416,16 @@ class RobotTools:
             'extractor_retries': 1,
             'fragment_retries': 1,
             'retries': 1,
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36',
+                'Referer': 'https://www.bilibili.com/',
+            },
         }
 
         def _download():
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([f"ytsearch1:{query}"])
+                    ydl.download([yt_input])
             except Exception:
                 pass  # 网络问题等，由结果文件是否存在来判断
 
@@ -545,12 +570,17 @@ class RobotTools:
         },
         {
             "tool_name": "download_audio",
-            "description": "从网络搜索并下载音频文件到 audio/ 目录。当 play_audio 找不到本地音频时，用此工具从 YouTube 搜索下载。下载成功后自动可用于 play_audio。",
+            "description": "从网络搜索或下载音频文件到 audio/ 目录。支持 YouTube 搜索(query)或直接 URL 下载(url,如B站/freesound)。下载后自动可用于 play_audio。",
             "parameters": {
                 "query": {
                     "type": "string",
-                    "required": True,
-                    "description": "搜索关键词（如 'bird song'、'警笛声'、'背景音乐'）"
+                    "required": False,
+                    "description": "YouTube搜索关键词（YouTube不通时无效）"
+                },
+                "url": {
+                    "type": "string",
+                    "required": False,
+                    "description": "直接下载URL（B站视频/freesound/任意音频链接），优先于query"
                 },
                 "name": {
                     "type": "string",
