@@ -90,10 +90,12 @@ target_tracker_node
 `scripts/start_car_app_stack.sh` 会启动：
 
 1. `velocity_mux_node`
-2. `task_manager_node`
-3. `llm_gateway_node`，参数 `tool_mode:=true`
-4. `app_bridge_node`
-5. Web 网关
+2. `app_bridge_node`
+3. Web 网关
+
+`scripts/icar_startup.sh` 随后在 `icar_ros2` 容器中单独启动
+`task_manager_node`、`obstacle_avoid_node --mode real` 和
+`llm_gateway_node tool_mode:=true`，避免两个容器重复运行同名控制节点。
 
 未配置 API Key 时，巡检、停车、查询和目标跟踪等明确指令仍可通过本地规则工作。
 

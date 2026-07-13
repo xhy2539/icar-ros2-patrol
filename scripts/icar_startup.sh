@@ -44,6 +44,13 @@ pkill -f '^python3 app.py$' 2>/dev/null || true
 docker exec autodrive_ros2 pkill -f '^python3 /tmp/fast_bridge.py$' 2>/dev/null || true
 
 echo "[5/14] Starting chassis bringup and lidar"
+# A container restart can restore a launch process a few seconds after Docker is
+# reported as running. Wait before deciding that standalone bringup is needed;
+# otherwise both launch files can race and open the chassis serial twice.
+for _ in $(seq 1 10); do
+  docker exec autodrive_ros2 pgrep -f 'Mcnamu_driver_X3 --ros-args' >/dev/null && break
+  sleep 1
+done
 if ! docker exec autodrive_ros2 pgrep -f 'Mcnamu_driver_X3 --ros-args' >/dev/null; then
   docker exec autodrive_ros2 bash -lc \
     'source /opt/ros/foxy/setup.bash
@@ -65,7 +72,11 @@ if ! docker exec autodrive_ros2 pgrep -x sllidar_node >/dev/null; then
 fi
 
 echo "[6/14] Syncing and building app_control"
-SOURCE_REVISION=$(git -C "$REPO" rev-parse HEAD)
+if [ -s "$REPO/.icar_deploy_revision" ]; then
+  SOURCE_REVISION=$(tr -d '[:space:]' < "$REPO/.icar_deploy_revision")
+else
+  SOURCE_REVISION=$(git -c safe.directory="$REPO" -C "$REPO" rev-parse HEAD)
+fi
 if [ "$SOURCE_REVISION" != "$(docker exec autodrive_ros2 cat /root/icar_app_ws/.icar_source_revision 2>/dev/null || true)" ] || \
    ! docker exec autodrive_ros2 test -x /root/icar_app_ws/install/app_control/lib/app_control/app_bridge_node; then
   tar --exclude='._*' -C "$REPO" -cf - app_control icar_interfaces | \
@@ -100,21 +111,18 @@ ICAR_DOCKER_CMD="docker exec icar_ros2 bash -lc 'source /opt/ros/foxy/setup.bash
 if [ -n "$DEEPSEEK_API_KEY" ]; then
   ICAR_DOCKER_CMD="$ICAR_DOCKER_CMD; export DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY"
 fi
-# task_manager
-if ! docker exec icar_ros2 pgrep -f task_manager_node >/dev/null 2>&1; then
-  eval "$ICAR_DOCKER_CMD; nohup ros2 run task_manager task_manager_node </dev/null >/tmp/task_manager.log 2>&1 &'"
-  sleep 2
-fi
-# obstacle_avoid (real radar, not mock)
-if ! docker exec icar_ros2 pgrep -f obstacle_avoid_node >/dev/null 2>&1; then
-  eval "$ICAR_DOCKER_CMD; nohup ros2 run navigation obstacle_avoid_node --mode real </dev/null >/tmp/obstacle_avoid.log 2>&1 &'"
-  sleep 1
-fi
-# llm_gateway (with tool_mode)
-if ! docker exec icar_ros2 pgrep -f llm_gateway_node >/dev/null 2>&1; then
-  eval "$ICAR_DOCKER_CMD; export ICAR_AUDIO_DIR=/root/icar_ros2_ws/icar_ws/src/audio; nohup ros2 run llm_gateway llm_gateway_node --ros-args -p tool_mode:=true </dev/null >/tmp/llm_gateway.log 2>&1 &'"
-  sleep 2
-fi
+# Restart these nodes from the freshly built install tree. Merely checking for
+# an old process leaves the previous Python code loaded after a deployment.
+docker exec icar_ros2 pkill -f '/task_manager/lib/task_manager/task_manager_node' 2>/dev/null || true
+docker exec icar_ros2 pkill -f '/navigation/lib/navigation/obstacle_avoid_node' 2>/dev/null || true
+docker exec icar_ros2 pkill -f '/llm_gateway/lib/llm_gateway/llm_gateway_node' 2>/dev/null || true
+sleep 1
+eval "$ICAR_DOCKER_CMD; nohup ros2 run task_manager task_manager_node </dev/null >/tmp/task_manager.log 2>&1 &'"
+sleep 2
+eval "$ICAR_DOCKER_CMD; nohup ros2 run navigation obstacle_avoid_node --mode real </dev/null >/tmp/obstacle_avoid.log 2>&1 &'"
+sleep 1
+eval "$ICAR_DOCKER_CMD; export ICAR_AUDIO_DIR=/root/icar_ros2_ws/icar_ws/src/audio; nohup ros2 run llm_gateway llm_gateway_node --ros-args -p tool_mode:=true </dev/null >/tmp/llm_gateway.log 2>&1 &'"
+sleep 2
 
 echo "[11/14] Verifying ROS graph"
 CMD_INFO=""
