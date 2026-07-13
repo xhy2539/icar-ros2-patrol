@@ -7,6 +7,8 @@ from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPo
 from sensor_msgs.msg import Image
 from std_msgs.msg import String
 
+from .fall_detection_logic import classify_person_fall
+
 try:
     from icar_interfaces.msg import Detection, DetectionArray
 except ImportError:
@@ -89,6 +91,7 @@ class VisionNode(Node):
         self.declare_parameter("yolo_confidence", 0.35)
         self.declare_parameter("yolo_iou", 0.5)
         self.declare_parameter("yolo_imgsz", 640)
+        self.declare_parameter("inference_frame_stride", 1)
         self.declare_parameter("target_classes", [""])
         self.declare_parameter("obstacle_alias_enabled", True)
         self.declare_parameter("obstacle_classes", DEFAULT_OBSTACLE_CLASSES)
@@ -102,6 +105,11 @@ class VisionNode(Node):
         self.declare_parameter("water_device", "")
         self.declare_parameter("water_min_area_ratio", 0.002)
         self.declare_parameter("water_class_name", "water")
+        self.declare_parameter("fall_detection_enabled", True)
+        self.declare_parameter("fall_aspect_ratio", 1.15)
+        self.declare_parameter("fall_min_area_ratio", 0.012)
+        self.declare_parameter("fall_keypoint_confidence", 0.25)
+        self.declare_parameter("fall_torso_horizontal_ratio", 0.9)
 
         self.image_topic = self.get_parameter("image_topic").value
         self.detections_topic = self.get_parameter("detections_topic").value
@@ -120,6 +128,9 @@ class VisionNode(Node):
         self.yolo_confidence = float(self.get_parameter("yolo_confidence").value)
         self.yolo_iou = float(self.get_parameter("yolo_iou").value)
         self.yolo_imgsz = int(self.get_parameter("yolo_imgsz").value)
+        self.inference_frame_stride = max(
+            1, int(self.get_parameter("inference_frame_stride").value)
+        )
         self.target_classes = self.normalize_class_list(
             self.get_parameter("target_classes").value
         )
@@ -151,6 +162,21 @@ class VisionNode(Node):
         )
         self.water_class_name = (
             str(self.get_parameter("water_class_name").value).strip() or "water"
+        )
+        self.fall_detection_enabled = bool(
+            self.get_parameter("fall_detection_enabled").value
+        )
+        self.fall_aspect_ratio = float(
+            self.get_parameter("fall_aspect_ratio").value
+        )
+        self.fall_min_area_ratio = float(
+            self.get_parameter("fall_min_area_ratio").value
+        )
+        self.fall_keypoint_confidence = float(
+            self.get_parameter("fall_keypoint_confidence").value
+        )
+        self.fall_torso_horizontal_ratio = float(
+            self.get_parameter("fall_torso_horizontal_ratio").value
         )
 
         self.bridge = CvBridge() if CvBridge else None
@@ -264,6 +290,8 @@ class VisionNode(Node):
 
     def on_image(self, msg):
         self.frame_count += 1
+        if self.frame_count % self.inference_frame_stride != 0:
+            return
         frame = self.to_cv_frame(msg)
 
         detections = self.run_object_detection(frame)
@@ -355,12 +383,27 @@ class VisionNode(Node):
                 if area < self.min_color_area:
                     continue
                 x, y, w, h = cv2.boundingRect(contour)
+                mapped_class = class_name
+                fall_reason = ""
+                if self.fall_detection_enabled and class_name == "person":
+                    mapped_class, _, fall_reason = classify_person_fall(
+                        class_name,
+                        class_name,
+                        [x, y, x + w, y + h],
+                        frame.shape[1],
+                        frame.shape[0],
+                        aspect_ratio_threshold=self.fall_aspect_ratio,
+                        min_area_ratio=self.fall_min_area_ratio,
+                        keypoint_confidence=self.fall_keypoint_confidence,
+                        torso_horizontal_ratio=self.fall_torso_horizontal_ratio,
+                    )
                 detections.append(
                     {
-                        "class_name": class_name,
+                        "class_name": mapped_class,
                         "confidence": round(min(0.99, 0.45 + area / 12000.0), 2),
                         "bbox": [int(x), int(y), int(x + w), int(y + h)],
                         "source": f"color_{color_name}",
+                        "fall_reason": fall_reason,
                     }
                 )
         return detections
@@ -421,6 +464,7 @@ class VisionNode(Node):
 
         detections = []
         track_ids = getattr(boxes, "id", None)
+        pose_keypoints = getattr(getattr(result, "keypoints", None), "data", None)
         height, width = frame.shape[:2]
         for index, box in enumerate(boxes):
             cls_id = int(box.cls[0].item())
@@ -435,15 +479,41 @@ class VisionNode(Node):
             )
             if class_name is None:
                 continue
+            fall_reason = ""
+            is_fallen = False
+            keypoints = None
+            if pose_keypoints is not None and index < len(pose_keypoints):
+                try:
+                    keypoints = pose_keypoints[index].tolist()
+                except (AttributeError, TypeError):
+                    keypoints = None
+            if self.fall_detection_enabled:
+                class_name, is_fallen, fall_reason = classify_person_fall(
+                    raw_class_name,
+                    class_name,
+                    [x1, y1, x2, y2],
+                    width,
+                    height,
+                    keypoints=keypoints,
+                    aspect_ratio_threshold=self.fall_aspect_ratio,
+                    min_area_ratio=self.fall_min_area_ratio,
+                    keypoint_confidence=self.fall_keypoint_confidence,
+                    torso_horizontal_ratio=self.fall_torso_horizontal_ratio,
+                )
             if not self.keep_detection_class(raw_class_name, class_name):
                 continue
             det = {
                 "class_name": class_name,
                 "confidence": round(confidence, 3),
                 "bbox": [x1, y1, x2, y2],
-                "source": "yolo_obstacle" if is_obstacle else "yolo",
+                "source": (
+                    "yolo_fall"
+                    if is_fallen
+                    else ("yolo_obstacle" if is_obstacle else "yolo")
+                ),
                 "model": self.yolo_model_path,
                 "raw_class_name": raw_class_name,
+                "fall_reason": fall_reason,
             }
             if track_ids is not None and index < len(track_ids):
                 det["track_id"] = int(track_ids[index].item())

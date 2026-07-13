@@ -1,0 +1,101 @@
+name: 版本发布
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 发布版本号（例如 v1.0.0-rc1）
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: 构建可校验发布产物
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 确定版本号
+        id: version
+        env:
+          MANUAL_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            version="$GITHUB_REF_NAME"
+          else
+            version="$MANUAL_VERSION"
+          fi
+          if ! [[ "$version" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::版本号格式非法"
+            exit 1
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - name: 设置 Python 3.8
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.8'
+
+      - name: 运行全部离线 Python 测试
+        env:
+          PYTHONPATH: app_control:cloud_bridge:llm/llm_gateway:navigation:task_manager:vision/vision_patrol
+        run: |
+          python -m pip install 'pytest>=7,<9'
+          python -m pytest \
+            app_control/tests cloud_bridge/test llm/llm_gateway/test \
+            navigation/tests task_manager/tests vision/vision_patrol/test -q
+
+      - name: 设置 Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 设置 Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.6'
+          channel: stable
+          cache: true
+
+      - name: 检查、测试并构建 APP
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
+          flutter build apk --release
+
+      - name: 生成 ROS2 发布包与校验文件
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          chmod +x scripts/*release*.sh
+          scripts/build_release_bundle.sh "$VERSION"
+          scripts/verify_release_bundle.sh \
+            "dist/icar-ros2-$VERSION.tar.gz" \
+            "dist/icar-ros2-$VERSION.tar.gz.sha256"
+          cp build/app/outputs/flutter-apk/app-release.apk \
+            "dist/icar-app-$VERSION.apk"
+          (cd dist && sha256sum "icar-app-$VERSION.apk" > \
+            "icar-app-$VERSION.apk.sha256")
+
+      - name: 保存审批后的构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: icar-release-${{ steps.version.outputs.value }}
+          path: dist/*
+          retention-days: 30
+
+      - name: 发布 Tag 对应的 GitHub Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: gh release create "$VERSION" dist/* --verify-tag --generate-notes

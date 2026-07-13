@@ -64,6 +64,17 @@ jobs:
             fi
           done
 
+      - name: 检查 ROS2 包结构（云桥包）
+        run: |
+          for f in cloud_bridge/package.xml cloud_bridge/setup.py cloud_bridge/resource/cloud_bridge; do
+            if [ -f "$f" ]; then
+              echo "✅ $f"
+            else
+              echo "::error::缺少或错放 $f"
+              exit 1
+            fi
+          done
+
   # ------------------------------------------------------------------
   # 2. README 存在性检查
   # ------------------------------------------------------------------
@@ -200,6 +211,8 @@ jobs:
           )
           EXPECTED_SRVS=(
             "icar_interfaces/srv/ParseTask.srv"
+            "icar_interfaces/srv/GenerateReport.srv"
+            "icar_interfaces/srv/TaskControl.srv"
           )
           ALL_OK=true
           for m in "${EXPECTED_MSGS[@]}" "${EXPECTED_SRVS[@]}"; do
@@ -215,3 +228,158 @@ jobs:
           fi
           echo ""
           echo "所有 $((${#EXPECTED_MSGS[@]} + ${#EXPECTED_SRVS[@]})) 个消息/服务文件完整 ✅"
+
+  # ------------------------------------------------------------------
+  # 6. 云桥协议离线单元测试（不依赖 ROS2、小车或云服务器）
+  # ------------------------------------------------------------------
+  test-cloud-protocol:
+    name: 云桥协议单元测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 设置 Python 3.8（与 ROS2 Foxy 运行环境一致）
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.8'
+
+      - name: 运行 cloud_bridge 离线测试
+        run: python -m unittest discover -s cloud_bridge/test -p 'test_*.py' -v
+
+  # ------------------------------------------------------------------
+  # 7. 全仓纯逻辑测试（不依赖 ROS2、小车、相机或真实 LLM API）
+  # ------------------------------------------------------------------
+  test-offline-python:
+    name: 全仓离线 Python 测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 设置 Python 3.8（与 ROS2 Foxy 运行环境一致）
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.8'
+
+      - name: 安装测试运行器
+        run: python -m pip install 'pytest>=7,<9'
+
+      - name: 运行所有硬件无关测试
+        env:
+          PYTHONPATH: app_control:cloud_bridge:llm/llm_gateway:navigation:task_manager:vision/vision_patrol
+        run: |
+          python -m pytest \
+            app_control/tests \
+            cloud_bridge/test \
+            llm/llm_gateway/test \
+            navigation/tests \
+            task_manager/tests \
+            vision/vision_patrol/test \
+            -q
+
+  # ------------------------------------------------------------------
+  # 8. Flutter APP 静态检查、测试与 APK 构建
+  # ------------------------------------------------------------------
+  test-flutter-app:
+    name: Flutter APP 检查与构建
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 设置 Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 设置 Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.6'
+          channel: stable
+          cache: true
+
+      - name: 安装 Flutter 依赖
+        run: flutter pub get
+
+      - name: Flutter 静态检查
+        run: flutter analyze
+
+      - name: Flutter 单元测试
+        run: flutter test
+
+      - name: 构建 Android APK
+        run: flutter build apk --release
+
+      - name: 保存 APK 构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: icar-app-${{ github.sha }}
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 14
+
+  # ------------------------------------------------------------------
+  # 9. 车端发布包生成、校验和离线暂存演练
+  # ------------------------------------------------------------------
+  test-release-bundle:
+    name: 发布与回滚脚本离线演练
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 生成并校验版本包
+        run: |
+          chmod +x scripts/*release*.sh
+          ICAR_DIST_DIR="$RUNNER_TEMP/dist" \
+            scripts/build_release_bundle.sh "$GITHUB_SHA"
+          archive="$RUNNER_TEMP/dist/icar-ros2-$GITHUB_SHA.tar.gz"
+          scripts/verify_release_bundle.sh "$archive" "$archive.sha256"
+
+      - name: 演练车端暂存（不启动服务）
+        run: |
+          archive="$RUNNER_TEMP/dist/icar-ros2-$GITHUB_SHA.tar.gz"
+          ICAR_DEPLOY_ROOT="$RUNNER_TEMP/icar-deploy" \
+            scripts/install_release.sh "$archive" "$archive.sha256" --stage-only
+          test -f "$RUNNER_TEMP/icar-deploy/releases/$GITHUB_SHA/release-manifest.json"
+
+      - name: 演练激活、手动回滚和失败自动回滚
+        run: |
+          archive="$RUNNER_TEMP/dist/icar-ros2-$GITHUB_SHA.tar.gz"
+          common_env=(
+            ICAR_INSTALL_SYSTEMD=0
+            ICAR_DEPLOY_ROOT="$RUNNER_TEMP/icar-deploy"
+            ICAR_RESTART_COMMAND=true
+          )
+          env "${common_env[@]}" ICAR_HEALTH_COMMAND=true \
+            scripts/install_release.sh "$archive" "$archive.sha256"
+
+          next="$GITHUB_SHA-next"
+          ICAR_DIST_DIR="$RUNNER_TEMP/dist" scripts/build_release_bundle.sh "$next"
+          next_archive="$RUNNER_TEMP/dist/icar-ros2-$next.tar.gz"
+          env "${common_env[@]}" ICAR_HEALTH_COMMAND=true \
+            scripts/install_release.sh "$next_archive" "$next_archive.sha256"
+          env ICAR_DEPLOY_ROOT="$RUNNER_TEMP/icar-deploy" \
+            ICAR_RESTART_COMMAND=true ICAR_HEALTH_COMMAND=true \
+            scripts/rollback_release.sh
+          test "$(readlink "$RUNNER_TEMP/icar-deploy/current")" = \
+            "$RUNNER_TEMP/icar-deploy/releases/$GITHUB_SHA"
+
+          failed="$GITHUB_SHA-failed"
+          ICAR_DIST_DIR="$RUNNER_TEMP/dist" scripts/build_release_bundle.sh "$failed"
+          failed_archive="$RUNNER_TEMP/dist/icar-ros2-$failed.tar.gz"
+          set +e
+          env "${common_env[@]}" ICAR_HEALTH_COMMAND=false \
+            scripts/install_release.sh "$failed_archive" "$failed_archive.sha256"
+          rc=$?
+          set -e
+          test "$rc" -ne 0
+          test "$(readlink "$RUNNER_TEMP/icar-deploy/current")" = \
+            "$RUNNER_TEMP/icar-deploy/releases/$GITHUB_SHA"
+
+      - name: 保存 ROS2 发布包
+        uses: actions/upload-artifact@v4
+        with:
+          name: icar-ros2-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/dist/icar-ros2-${{ github.sha }}.tar.gz
+            ${{ runner.temp }}/dist/icar-ros2-${{ github.sha }}.tar.gz.sha256
+          retention-days: 14

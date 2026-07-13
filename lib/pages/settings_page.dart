@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/app_theme.dart';
 import '../services/car_controller.dart';
+import '../services/cloud_protocol.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -15,6 +16,14 @@ class _SettingsPageState extends State<SettingsPage> {
 
   late String _carIp;
   late int _wsPort;
+  late CarConnectionMode _connectionMode;
+  late String _mqttHost;
+  late int _mqttPort;
+  late String _mqttUser;
+  late String _mqttPassword;
+  late String _mqttTopicPrefix;
+  late String _deviceId;
+  late bool _mqttTls;
   late double _defaultSpeed;
   late bool _autoReconnect;
   late bool _hapticFeedback;
@@ -25,18 +34,38 @@ class _SettingsPageState extends State<SettingsPage> {
 
   late final TextEditingController _ipCtrl;
   late final TextEditingController _portCtrl;
+  late final TextEditingController _mqttHostCtrl;
+  late final TextEditingController _mqttPortCtrl;
+  late final TextEditingController _mqttUserCtrl;
+  late final TextEditingController _mqttPasswordCtrl;
+  late final TextEditingController _mqttTopicPrefixCtrl;
+  late final TextEditingController _deviceIdCtrl;
 
   @override
   void initState() {
     super.initState();
     _carIp = _ctrl.host;
     _wsPort = _ctrl.port;
+    _connectionMode = _ctrl.connectionMode;
+    _mqttHost = _ctrl.mqttHost;
+    _mqttPort = _ctrl.mqttPort;
+    _mqttUser = _ctrl.mqttUser;
+    _mqttPassword = _ctrl.mqttPassword;
+    _mqttTopicPrefix = _ctrl.mqttTopicPrefix;
+    _deviceId = _ctrl.deviceId;
+    _mqttTls = _ctrl.mqttTls;
     _defaultSpeed = _ctrl.speed;
     _autoReconnect = _ctrl.autoReconnect;
     _hapticFeedback = _ctrl.hapticEnabled;
 
     _ipCtrl = TextEditingController(text: _carIp);
     _portCtrl = TextEditingController(text: _wsPort.toString());
+    _mqttHostCtrl = TextEditingController(text: _mqttHost);
+    _mqttPortCtrl = TextEditingController(text: _mqttPort.toString());
+    _mqttUserCtrl = TextEditingController(text: _mqttUser);
+    _mqttPasswordCtrl = TextEditingController(text: _mqttPassword);
+    _mqttTopicPrefixCtrl = TextEditingController(text: _mqttTopicPrefix);
+    _deviceIdCtrl = TextEditingController(text: _deviceId);
 
     _loadPersisted();
   }
@@ -45,6 +74,12 @@ class _SettingsPageState extends State<SettingsPage> {
   void dispose() {
     _ipCtrl.dispose();
     _portCtrl.dispose();
+    _mqttHostCtrl.dispose();
+    _mqttPortCtrl.dispose();
+    _mqttUserCtrl.dispose();
+    _mqttPasswordCtrl.dispose();
+    _mqttTopicPrefixCtrl.dispose();
+    _deviceIdCtrl.dispose();
     super.dispose();
   }
 
@@ -53,6 +88,17 @@ class _SettingsPageState extends State<SettingsPage> {
     setState(() {
       _carIp = prefs.getString('car_ip') ?? _ctrl.host;
       _wsPort = prefs.getInt('ws_port') ?? _ctrl.port;
+      _connectionMode = CarConnectionModeX.fromStorage(
+        prefs.getString('connection_mode'),
+      );
+      _mqttHost = prefs.getString('mqtt_host') ?? _ctrl.mqttHost;
+      _mqttPort = prefs.getInt('mqtt_port') ?? _ctrl.mqttPort;
+      _mqttUser = prefs.getString('mqtt_user') ?? _ctrl.mqttUser;
+      _mqttPassword = prefs.getString('mqtt_password') ?? _ctrl.mqttPassword;
+      _mqttTopicPrefix =
+          prefs.getString('mqtt_topic_prefix') ?? _ctrl.mqttTopicPrefix;
+      _deviceId = prefs.getString('mqtt_device_id') ?? _ctrl.deviceId;
+      _mqttTls = prefs.getBool('mqtt_tls') ?? _ctrl.mqttTls;
       _defaultSpeed = prefs.getDouble('default_speed') ?? _ctrl.speed;
       _autoReconnect = prefs.getBool('auto_reconnect') ?? _ctrl.autoReconnect;
       _hapticFeedback = prefs.getBool('haptic_feedback') ?? _ctrl.hapticEnabled;
@@ -60,6 +106,12 @@ class _SettingsPageState extends State<SettingsPage> {
 
       _ipCtrl.text = _carIp;
       _portCtrl.text = _wsPort.toString();
+      _mqttHostCtrl.text = _mqttHost;
+      _mqttPortCtrl.text = _mqttPort.toString();
+      _mqttUserCtrl.text = _mqttUser;
+      _mqttPasswordCtrl.text = _mqttPassword;
+      _mqttTopicPrefixCtrl.text = _mqttTopicPrefix;
+      _deviceIdCtrl.text = _deviceId;
     });
   }
 
@@ -74,6 +126,14 @@ class _SettingsPageState extends State<SettingsPage> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('car_ip', _carIp);
     await prefs.setInt('ws_port', _wsPort);
+    await prefs.setString('connection_mode', _connectionMode.storageValue);
+    await prefs.setString('mqtt_host', _mqttHost);
+    await prefs.setInt('mqtt_port', _mqttPort);
+    await prefs.setString('mqtt_user', _mqttUser);
+    await prefs.setString('mqtt_password', _mqttPassword);
+    await prefs.setString('mqtt_topic_prefix', _mqttTopicPrefix);
+    await prefs.setString('mqtt_device_id', _deviceId);
+    await prefs.setBool('mqtt_tls', _mqttTls);
     await prefs.setDouble('default_speed', _defaultSpeed);
     await prefs.setBool('auto_reconnect', _autoReconnect);
     await prefs.setBool('haptic_feedback', _hapticFeedback);
@@ -81,8 +141,16 @@ class _SettingsPageState extends State<SettingsPage> {
 
     // 应用到 CarController
     await _ctrl.updateSettings(
+      connectionMode: _connectionMode,
       host: _carIp,
       port: _wsPort,
+      mqttHost: _mqttHost,
+      mqttPort: _mqttPort,
+      mqttUser: _mqttUser,
+      mqttPassword: _mqttPassword,
+      mqttTopicPrefix: _mqttTopicPrefix,
+      deviceId: _deviceId,
+      mqttTls: _mqttTls,
       speed: _defaultSpeed,
       autoReconnect: _autoReconnect,
       hapticEnabled: _hapticFeedback,
@@ -157,29 +225,142 @@ class _SettingsPageState extends State<SettingsPage> {
       icon: Icons.settings_ethernet,
       child: Column(
         children: [
-          _buildTextField(
-            label: '小车 IP 地址',
-            controller: _ipCtrl,
-            icon: Icons.dns,
-            onChanged: (value) {
-              _carIp = value;
-              _markDirty();
-            },
+          Row(
+            children: [
+              Icon(
+                _connectionMode == CarConnectionMode.cloud
+                    ? Icons.cloud
+                    : Icons.wifi,
+                color: AppColors.blueGray,
+                size: 18,
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text(
+                  '连接模式',
+                  style: TextStyle(color: AppColors.darkNavy, fontSize: 14),
+                ),
+              ),
+              DropdownButton<CarConnectionMode>(
+                value: _connectionMode,
+                items: CarConnectionMode.values
+                    .map(
+                      (mode) => DropdownMenuItem(
+                        value: mode,
+                        child: Text(mode.label),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (mode) {
+                  if (mode == null) return;
+                  setState(() => _connectionMode = mode);
+                  _markDirty();
+                },
+              ),
+            ],
           ),
           const SizedBox(height: 16),
-          _buildTextField(
-            label: 'WebSocket 端口',
-            controller: _portCtrl,
-            icon: Icons.lan,
-            keyboardType: TextInputType.number,
-            onChanged: (value) {
-              int? port = int.tryParse(value);
-              if (port != null && port > 0 && port < 65536) {
-                _wsPort = port;
+          if (_connectionMode == CarConnectionMode.local) ...[
+            _buildTextField(
+              label: '小车 IP 地址',
+              controller: _ipCtrl,
+              icon: Icons.dns,
+              onChanged: (value) {
+                _carIp = value;
                 _markDirty();
-              }
-            },
-          ),
+              },
+            ),
+            const SizedBox(height: 16),
+            _buildTextField(
+              label: 'WebSocket 端口',
+              controller: _portCtrl,
+              icon: Icons.lan,
+              keyboardType: TextInputType.number,
+              onChanged: (value) {
+                final port = int.tryParse(value);
+                if (port != null && port > 0 && port < 65536) {
+                  _wsPort = port;
+                  _markDirty();
+                }
+              },
+            ),
+          ] else ...[
+            _buildTextField(
+              label: 'MQTT 服务器',
+              controller: _mqttHostCtrl,
+              icon: Icons.cloud_queue,
+              onChanged: (value) {
+                _mqttHost = value.trim();
+                _markDirty();
+              },
+            ),
+            const SizedBox(height: 16),
+            _buildTextField(
+              label: 'MQTT 端口',
+              controller: _mqttPortCtrl,
+              icon: Icons.lan,
+              keyboardType: TextInputType.number,
+              onChanged: (value) {
+                final port = int.tryParse(value);
+                if (port != null && port > 0 && port < 65536) {
+                  _mqttPort = port;
+                  _markDirty();
+                }
+              },
+            ),
+            const SizedBox(height: 16),
+            _buildTextField(
+              label: 'MQTT 用户名',
+              controller: _mqttUserCtrl,
+              icon: Icons.person,
+              onChanged: (value) {
+                _mqttUser = value;
+                _markDirty();
+              },
+            ),
+            const SizedBox(height: 16),
+            _buildTextField(
+              label: 'MQTT 密码',
+              controller: _mqttPasswordCtrl,
+              icon: Icons.password,
+              obscureText: true,
+              onChanged: (value) {
+                _mqttPassword = value;
+                _markDirty();
+              },
+            ),
+            const SizedBox(height: 16),
+            _buildTextField(
+              label: 'Topic 前缀',
+              controller: _mqttTopicPrefixCtrl,
+              icon: Icons.account_tree,
+              onChanged: (value) {
+                _mqttTopicPrefix = value.trim();
+                _markDirty();
+              },
+            ),
+            const SizedBox(height: 16),
+            _buildTextField(
+              label: '设备 ID（可空）',
+              controller: _deviceIdCtrl,
+              icon: Icons.precision_manufacturing,
+              onChanged: (value) {
+                _deviceId = value.trim();
+                _markDirty();
+              },
+            ),
+            const SizedBox(height: 16),
+            _buildSwitchRow(
+              icon: Icons.lock,
+              label: 'MQTT TLS',
+              subtitle: _mqttTls ? '使用加密连接' : '当前为测试用明文连接',
+              value: _mqttTls,
+              onChanged: (value) {
+                setState(() => _mqttTls = value);
+                _markDirty();
+              },
+            ),
+          ],
           const SizedBox(height: 16),
           Container(
             padding: const EdgeInsets.all(12),
@@ -187,20 +368,22 @@ class _SettingsPageState extends State<SettingsPage> {
               color: AppColors.surfaceAlt,
               borderRadius: BorderRadius.circular(12),
             ),
-            child: const Column(
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
-                    Icon(
+                    const Icon(
                       Icons.info_outline,
                       color: AppColors.bluePurple,
                       size: 16,
                     ),
-                    SizedBox(width: 8),
+                    const SizedBox(width: 8),
                     Text(
-                      'WiFi 热点配置',
-                      style: TextStyle(
+                      _connectionMode == CarConnectionMode.cloud
+                          ? '远程连接说明'
+                          : 'WiFi 热点配置',
+                      style: const TextStyle(
                         color: AppColors.bluePurple,
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
@@ -208,10 +391,12 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                   ],
                 ),
-                SizedBox(height: 8),
+                const SizedBox(height: 8),
                 Text(
-                  '热点: ohcar121 / 12345678\nVNC 密码: yahboom\n底盘串口: /dev/myserial (ttyUSB1)',
-                  style: TextStyle(
+                  _connectionMode == CarConnectionMode.cloud
+                      ? '手机和小车无需连接同一热点。云桥在线后可查看状态、下发巡检并使用带超时保护的方向控制。'
+                      : '热点: ohcar121 / 12345678\nVNC 密码: yahboom\n底盘串口: /dev/myserial (ttyUSB1)',
+                  style: const TextStyle(
                     color: AppColors.blueGrayDark,
                     fontSize: 12,
                     height: 1.6,
@@ -316,9 +501,9 @@ class _SettingsPageState extends State<SettingsPage> {
           const Divider(height: 16),
           _buildInfoRow('项目', '2026 小学期实训'),
           const Divider(height: 16),
-          _buildInfoRow('技术栈', 'Flutter + WebSocket'),
+          _buildInfoRow('技术栈', 'Flutter + WebSocket + MQTT'),
           const Divider(height: 16),
-          _buildInfoRow('当前连接', '${_ctrl.host}:${_ctrl.port}'),
+          _buildInfoRow('当前连接', _ctrl.connectionLabel),
         ],
       ),
     );
@@ -330,6 +515,7 @@ class _SettingsPageState extends State<SettingsPage> {
     required IconData icon,
     required ValueChanged<String> onChanged,
     TextInputType? keyboardType,
+    bool obscureText = false,
   }) {
     return Row(
       children: [
@@ -347,6 +533,7 @@ class _SettingsPageState extends State<SettingsPage> {
             controller: controller,
             style: const TextStyle(color: AppColors.darkNavy, fontSize: 14),
             keyboardType: keyboardType,
+            obscureText: obscureText,
             decoration: InputDecoration(
               isDense: true,
               contentPadding: const EdgeInsets.symmetric(

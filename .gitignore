@@ -15,6 +15,7 @@ log/
 # 构建产物
 build/
 install/
+dist/
 
 # ROS2 bag 和数据文件
 *.bag

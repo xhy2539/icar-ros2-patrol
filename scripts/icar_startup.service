@@ -1,13 +1,23 @@
 [Unit]
 Description=iCar ROS2 Patrol Startup
 After=docker.service network-online.target
-Wants=network-online.target
+Wants=network-online.target docker.service
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 User=root
-ExecStart=/bin/bash /home/jetson/icar-ros2-patrol/scripts/icar_startup.sh
+
+# 确保 Docker 容器开机自动恢复（即使 icar_startup 还没跑完）
+ExecStartPre=/bin/bash -c 'docker update --restart unless-stopped autodrive_ros2 icar_ros2 2>/dev/null || true'
+# 确保 uvcvideo 已加载且绑定 RGB 摄像头
+ExecStartPre=/bin/bash -c 'lsmod | grep -q "^uvcvideo" || modprobe uvcvideo 2>/dev/null || true'
+ExecStartPre=/bin/bash -c '[ -e /dev/video0 ] || printf "2bc5 050f\n" > /sys/bus/usb/drivers/uvcvideo/new_id 2>/dev/null || true'
+
+# 优先用 release 路径，不存在则用 git 仓库
+ExecStartPre=/bin/bash -c '[ -x /home/jetson/icar-deploy/current/scripts/icar_startup.sh ] || [ -x /home/jetson/icar-ros2-patrol/scripts/icar_startup.sh ] || (echo "startup script missing" && exit 1)'
+ExecStart=/bin/bash -c 'if [ -x /home/jetson/icar-deploy/current/scripts/icar_startup.sh ]; then /home/jetson/icar-deploy/current/scripts/icar_startup.sh; else /home/jetson/icar-ros2-patrol/scripts/icar_startup.sh; fi'
+
 Restart=on-failure
 RestartSec=30
 

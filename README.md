@@ -258,6 +258,21 @@ source install/setup.bash
 - `/map`、`/pose`、`/goal_pose`、`/scan` 使用标准 ROS2 消息
 - `/nav_status`、`/obstacle_status` 使用正式自定义消息；`/obstacle_status` 默认由真实 `/scan` 前方扇区判定生成
 - 当前运行的是正式模块目录下的 mock 数据模式，不再使用 `mock_*` 实现文件作为工程主结构
+
+### 障碍绕行与积水告警
+
+- 雷达进入 `danger/stop` 时立即重发当前目标，由 Nav2 重新规划。安全仲裁层
+  只禁止继续朝障碍方向前进，仍允许 Nav2 原地转向或后退，因此静态障碍不会
+  造成停车死锁。连续安全 `1s` 后结束本次阻塞事件；最多处理 3 次，单次持续
+  阻塞 20 秒则完全停车并把任务转为 `FAILED`。
+- 视觉连续 2 帧检测到置信度不低于 `0.7` 的积水或障碍物后，蜂鸣、记录并
+  上报，同时在巡检中请求 Nav2 重新规划；不发布急停、不终止导航。事件进入
+  `/task/log`、App 的 `safety_alarm` 和云端 `/icar/alert`，连续 5 帧未检测
+  到后自动解除。二维视觉只能触发重规划；要保证绕开积水，还需把深度/标定后
+  的地面坐标写入 Nav2 代价地图。
+- 真车绕行要求地图和定位已经就绪。安全启动脚本默认不自动开启 Nav2；确认
+  条件满足后设置 `ICAR_ENABLE_NAV2=1`。Nav2 的速度统一重映射到
+  `/cmd_vel_nav`，仍由 `velocity_mux` 仲裁。
 - 后续真车恢复后，优先保持 Topic 名和字段约定不变，再切回真实数据源
 
 后续各模块需要提供的 Topic、字段和验收材料见 `docs/模块集成产出清单.md`。
@@ -288,9 +303,9 @@ source install/setup.bash
 | 目录结构 | app/navigation/vision/sensor/llm/docs/scripts/test/videos/config/logs | 熊浩宇 | README中说明目录用途 |
 | 分支策略 | main主分支 + 模块文件夹协作 | 熊浩宇/全员 | 提交记录清晰 |
 | 提交规范 | 格式：`模块名：动作说明`，如 `navigation：新增目标点导航测试记录` | 全员 | 每日有效提交或文档更新 |
-| CI基础检查 | 检查README、目录完整性、Python语法、Shell脚本存在性/可执行性 | 熊浩宇 | CI配置文件或检查截图 |
+| CI/CD流水线 | 检查目录/Python/Shell/Flutter，运行硬件无关测试，构建 APK 与 ROS2 发布包，校验 SHA-256 和回滚演练 | 熊浩宇 | CI记录、Release产物、校验文件和回滚日志 |
 | 启动脚本 | start_app/navigation/vision/sensor/demo.sh | 熊浩宇统筹 | 按脚本可复现核心模块 |
-| 版本交付 | 中期 v0.1-mid，最终 v1.0-final | 熊浩宇 | Release/压缩包/提交记录 |
+| 版本交付 | 中期 v0.1-mid，最终 v1.0-final；小车拉取指定版本，健康失败自动回滚 | 熊浩宇 | Release/压缩包/提交记录 |
 
 ---
 

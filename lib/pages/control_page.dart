@@ -49,12 +49,18 @@ class _ControlPageState extends State<ControlPage> with WidgetsBindingObserver {
   }
 
   void _onControllerChanged() {
+    final endpoint = _ctrl.isCloudMode ? _ctrl.mqttHost : _ctrl.host;
+    if (_ipController.text != endpoint) {
+      _ipController.text = endpoint;
+    }
     if (mounted) setState(() {});
   }
 
   void _toggleConnection() {
     if (_ctrl.isConnected) {
       _ctrl.disconnect();
+    } else if (_ctrl.isCloudMode) {
+      _ctrl.connect();
     } else {
       _ctrl.connect(_ipController.text.trim());
     }
@@ -63,22 +69,26 @@ class _ControlPageState extends State<ControlPage> with WidgetsBindingObserver {
 
   /// 按下方向键：发送方向指令，持续运动
   void _onPress(String direction) {
-    if (!_ctrl.isConnected) {
+    if (!_ctrl.canManualControl) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('请先连接小车'),
+        SnackBar(
+          content: Text(
+            _ctrl.isCloudMode && _ctrl.isConnected
+                ? '云端已连接，但小车云桥尚未上线'
+                : '请先连接小车',
+          ),
           backgroundColor: AppColors.orange,
           duration: Duration(seconds: 1),
         ),
       );
       return;
     }
-    _ctrl.sendCommand(direction);
+    if (!_ctrl.sendCommand(direction)) return;
     setState(() => _activeDirection = direction);
     _motionHeartbeat?.cancel();
     // 与网页一致：车端看门狗要求长按期间持续续租。
     _motionHeartbeat = Timer.periodic(const Duration(milliseconds: 100), (_) {
-      if (_activeDirection.isNotEmpty && _ctrl.isConnected) {
+      if (_activeDirection.isNotEmpty && _ctrl.canManualControl) {
         _ctrl.sendCommand(_activeDirection);
       }
     });
@@ -151,9 +161,12 @@ class _ControlPageState extends State<ControlPage> with WidgetsBindingObserver {
     if (isConnecting) {
       badgeText = '连接中';
       badgeColor = AppColors.warningOrange;
-    } else if (isConnected) {
-      badgeText = '已连接';
+    } else if (isConnected && _ctrl.robotOnline) {
+      badgeText = _ctrl.isCloudMode ? '远程已连接' : '已连接';
       badgeColor = AppColors.successGreen;
+    } else if (isConnected && _ctrl.isCloudMode) {
+      badgeText = '云已连/车离线';
+      badgeColor = AppColors.warningOrange;
     } else if (isError) {
       badgeText = '连接错误';
       badgeColor = AppColors.errorRed;
@@ -164,7 +177,7 @@ class _ControlPageState extends State<ControlPage> with WidgetsBindingObserver {
 
     return AppCard(
       title: '连接状态',
-      icon: Icons.wifi,
+      icon: _ctrl.isCloudMode ? Icons.cloud : Icons.wifi,
       child: Row(
         children: [
           StatusBadge(text: badgeText, color: badgeColor),
@@ -180,14 +193,14 @@ class _ControlPageState extends State<ControlPage> with WidgetsBindingObserver {
                   horizontal: 12,
                   vertical: 10,
                 ),
-                hintText: '小车 IP 地址',
+                hintText: _ctrl.isCloudMode ? 'MQTT 云服务器' : '小车 IP 地址',
                 prefixIcon: const Icon(
                   Icons.dns,
                   size: 18,
                   color: AppColors.blueGray,
                 ),
               ),
-              enabled: !isConnected && !isConnecting,
+              enabled: !_ctrl.isCloudMode && !isConnected && !isConnecting,
             ),
           ),
           const SizedBox(width: 12),
@@ -210,7 +223,9 @@ class _ControlPageState extends State<ControlPage> with WidgetsBindingObserver {
                         color: Colors.white,
                       ),
                     )
-                  : Text(isConnected ? '断开' : '连接'),
+                  : Text(
+                      isConnected ? '断开' : (_ctrl.isCloudMode ? '连云' : '连接'),
+                    ),
             ),
           ),
         ],
@@ -570,7 +585,7 @@ class _ControlPageState extends State<ControlPage> with WidgetsBindingObserver {
               fontWeight: FontWeight.w600,
             ),
           ),
-          if (_ctrl.currentDirection.isNotEmpty && _ctrl.isConnected)
+          if (_ctrl.currentDirection.isNotEmpty && _ctrl.canManualControl)
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
@@ -617,7 +632,7 @@ class _ControlPageState extends State<ControlPage> with WidgetsBindingObserver {
             child: _buildQuickButton(
               icon: Icons.center_focus_strong,
               label: '自动归位',
-              onTap: _ctrl.isConnected ? _ctrl.sendAutoReturn : null,
+              onTap: _ctrl.hasLocalMedia ? _ctrl.sendAutoReturn : null,
             ),
           ),
           const SizedBox(width: 12),
@@ -625,7 +640,7 @@ class _ControlPageState extends State<ControlPage> with WidgetsBindingObserver {
             child: _buildQuickButton(
               icon: Icons.screenshot_monitor,
               label: '截图',
-              onTap: _ctrl.isConnected ? _ctrl.sendScreenshot : null,
+              onTap: _ctrl.hasLocalMedia ? _ctrl.sendScreenshot : null,
             ),
           ),
           const SizedBox(width: 12),
@@ -633,7 +648,7 @@ class _ControlPageState extends State<ControlPage> with WidgetsBindingObserver {
             child: _buildQuickButton(
               icon: Icons.videocam,
               label: '录制',
-              onTap: _ctrl.isConnected ? _ctrl.sendRecord : null,
+              onTap: _ctrl.hasLocalMedia ? _ctrl.sendRecord : null,
             ),
           ),
         ],

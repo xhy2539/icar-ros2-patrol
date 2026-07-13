@@ -9,6 +9,7 @@ import 'pages/sensor_page.dart';
 import 'pages/mission_page.dart';
 import 'pages/settings_page.dart';
 import 'services/car_controller.dart';
+import 'services/cloud_protocol.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -35,8 +36,18 @@ void main() async {
     await prefs.setString('car_ip', carHost);
   }
   await CarController.instance.updateSettings(
+    connectionMode: CarConnectionModeX.fromStorage(
+      prefs.getString('connection_mode'),
+    ),
     host: carHost,
     port: prefs.getInt('ws_port'),
+    mqttHost: prefs.getString('mqtt_host'),
+    mqttPort: prefs.getInt('mqtt_port'),
+    mqttUser: prefs.getString('mqtt_user'),
+    mqttPassword: prefs.getString('mqtt_password'),
+    mqttTopicPrefix: prefs.getString('mqtt_topic_prefix'),
+    deviceId: prefs.getString('mqtt_device_id'),
+    mqttTls: prefs.getBool('mqtt_tls'),
     speed: prefs.getDouble('default_speed'),
     autoReconnect: prefs.getBool('auto_reconnect'),
     hapticEnabled: prefs.getBool('haptic_feedback'),
@@ -188,17 +199,17 @@ class _MainScreenState extends State<MainScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '1. 连接 WiFi 热点 ohcar121 (密码 12345678)，小车 IP: 192.168.137.117',
+                '1. 在设置中选择“局域网直连”或“云端远程”模式',
                 style: TextStyle(color: AppColors.blueGrayDark, fontSize: 13),
               ),
               SizedBox(height: 8),
               Text(
-                '2. 在控制页面输入小车 IP 地址并点击连接',
+                '2. 局域网模式需要连接小车热点；云端模式可使用任意网络',
                 style: TextStyle(color: AppColors.blueGrayDark, fontSize: 13),
               ),
               SizedBox(height: 8),
               Text(
-                '3. 连接成功后可使用方向按钮控制小车',
+                '3. 小车在线后可长按方向键控制，松手或断线会自动停车',
                 style: TextStyle(color: AppColors.blueGrayDark, fontSize: 13),
               ),
               SizedBox(height: 8),

@@ -8,6 +8,110 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 
 // ═══════════════════════════════════════════
+// RobotPose — /pose / MQTT pose
+// ═══════════════════════════════════════════
+
+class RobotPose {
+  final double x;
+  final double y;
+  final double z;
+  final String frameId;
+  final String timestamp;
+
+  const RobotPose({
+    this.x = 0.0,
+    this.y = 0.0,
+    this.z = 0.0,
+    this.frameId = 'map',
+    this.timestamp = '',
+  });
+
+  factory RobotPose.fromJson(Map<String, dynamic> json) {
+    return RobotPose(
+      x: (json['x'] as num?)?.toDouble() ?? 0.0,
+      y: (json['y'] as num?)?.toDouble() ?? 0.0,
+      z: (json['z'] as num?)?.toDouble() ?? 0.0,
+      frameId: json['frame_id']?.toString() ?? 'map',
+      timestamp: json['timestamp']?.toString() ?? '',
+    );
+  }
+}
+
+// ═══════════════════════════════════════════
+// SafetyAlarm — /safety/alarm / MQTT alert
+// ═══════════════════════════════════════════
+
+class SafetyAlarm {
+  final String hazardType;
+  final String event;
+  final bool active;
+  final String action;
+  final double confidence;
+  final double distance;
+  final String direction;
+  final String className;
+  final String imagePath;
+  final String checkpoint;
+  final String severity;
+  final String message;
+  final RobotPose pose;
+
+  const SafetyAlarm({
+    this.hazardType = '',
+    this.event = '',
+    this.active = false,
+    this.action = '',
+    this.confidence = 0.0,
+    this.distance = 0.0,
+    this.direction = '',
+    this.className = '',
+    this.imagePath = '',
+    this.checkpoint = '',
+    this.severity = 'WARN',
+    this.message = '',
+    this.pose = const RobotPose(),
+  });
+
+  factory SafetyAlarm.fromJson(Map<String, dynamic> json) {
+    final rawPose = json['pose'];
+    return SafetyAlarm(
+      hazardType: json['hazard_type']?.toString() ?? '',
+      event: json['event']?.toString() ?? '',
+      active: json['active'] == true,
+      action: json['action']?.toString() ?? '',
+      confidence: (json['confidence'] as num?)?.toDouble() ?? 0.0,
+      distance: (json['distance'] as num?)?.toDouble() ?? 0.0,
+      direction: json['direction']?.toString() ?? '',
+      className: json['class_name']?.toString() ?? '',
+      imagePath: json['image_path']?.toString() ?? '',
+      checkpoint: json['checkpoint']?.toString() ?? '',
+      severity: json['severity']?.toString() ?? 'WARN',
+      message: json['message']?.toString() ?? '',
+      pose: rawPose is Map
+          ? RobotPose.fromJson(Map<String, dynamic>.from(rawPose))
+          : const RobotPose(),
+    );
+  }
+
+  bool get isCritical => hazardType == 'fallen_person' || severity == 'ERROR';
+
+  String get typeZh {
+    switch (hazardType) {
+      case 'water':
+        return '积水';
+      case 'visual_obstacle':
+        return '视觉障碍物';
+      case 'fallen_person':
+        return '人员摔倒';
+      case 'obstacle':
+        return '雷达障碍物';
+      default:
+        return hazardType.isEmpty ? '安全告警' : hazardType;
+    }
+  }
+}
+
+// ═══════════════════════════════════════════
 // ObstacleStatus — /obstacle_status
 // ═══════════════════════════════════════════
 

@@ -1,3 +1,5 @@
+from glob import glob
+
 from setuptools import find_packages, setup
 
 
@@ -10,6 +12,7 @@ setup(
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/app_control"]),
         (f"share/{package_name}", ["package.xml"]),
+        (f"share/{package_name}/launch", glob("launch/*.launch.py")),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
@@ -21,6 +24,7 @@ setup(
         "console_scripts": [
             "app_bridge_node = app_control.app_bridge_node:main",
             "velocity_mux_node = app_control.velocity_mux_node:main",
+            "nav2_goal_adapter_node = app_control.nav2_goal_adapter_node:main",
         ]
     },
 )

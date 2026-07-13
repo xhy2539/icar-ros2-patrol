@@ -77,6 +77,7 @@ class AppBridgeNode(Node):
             ObstacleStatus, "/obstacle_status", self._on_obstacle, 10
         )
         self.create_subscription(NavStatus, "/nav_status", self._on_nav, 10)
+        self.create_subscription(PoseStamped, "/pose", self._on_pose, 10)
         self.create_subscription(
             TaskStatus, "/task/status", self._on_task_status, 10
         )
@@ -98,6 +99,12 @@ class AppBridgeNode(Node):
             String,
             "/vision/target_tracking/status",
             lambda msg: self._on_json_string("tracking_status", msg),
+            10,
+        )
+        self.create_subscription(
+            String,
+            "/safety/alarm",
+            lambda msg: self._on_json_string("safety_alarm", msg),
             10,
         )
         self.create_subscription(
@@ -448,6 +455,20 @@ class AppBridgeNode(Node):
             "progress": float(msg.progress),
             "distance_remain": float(msg.distance_remain),
             "message": msg.message,
+        })
+
+    def _on_pose(self, msg: PoseStamped) -> None:
+        self._broadcast("robot_pose", {
+            "x": float(msg.pose.position.x),
+            "y": float(msg.pose.position.y),
+            "z": float(msg.pose.position.z),
+            "orientation_z": float(msg.pose.orientation.z),
+            "orientation_w": float(msg.pose.orientation.w),
+            "frame_id": msg.header.frame_id or "map",
+            "timestamp": {
+                "sec": int(msg.header.stamp.sec),
+                "nanosec": int(msg.header.stamp.nanosec),
+            },
         })
 
     def _on_task_status(self, msg: TaskStatus) -> None:

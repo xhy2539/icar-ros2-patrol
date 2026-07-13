@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'car_tcp_service.dart';
 import 'car_commands.dart';
+import 'cloud_mqtt_service.dart';
+import 'cloud_protocol.dart';
 import 'vision_models.dart';
 import 'data_models.dart';
 
@@ -19,15 +21,19 @@ class CarController extends ChangeNotifier {
 
   static final CarController instance = CarController._();
   CarController._() {
-    _service.onStateChanged = _onStateChanged;
+    _service.onStateChanged = (state) {
+      if (_connectionMode == CarConnectionMode.local) {
+        _onStateChanged(state);
+      }
+    };
     _service.onError = _onError;
     _service.onLog = _onLog;
     _service.responseStream.listen(_onResponse);
     _service.detectionStream.listen(_onDetection);
     _service.captureStatusStream.listen(_onCaptureStatus);
-    _service.parseTaskStream.listen(_onParseTaskResult);
-    _service.reportStream.listen(_onReportResult);
-    _service.llmCommandStream.listen(_onLlmCommandResult);
+    _service.parseTaskStream.listen(_forwardParseTaskResult);
+    _service.reportStream.listen(_forwardReportResult);
+    _service.llmCommandStream.listen(_forwardLlmCommandResult);
     _service.obstacleStream.listen(_onObstacleStatus);
     _service.navStatusStream.listen(_onNavStatus);
     _service.taskStatusStream.listen(_onTaskStatus);
@@ -35,17 +41,68 @@ class CarController extends ChangeNotifier {
     _service.envDataStream.listen(_onEnvData);
     _service.sensorAlertStream.listen(_onSensorAlert);
     _service.trackingStream.listen(_onTrackingStatus);
+    _service.imageFrameStream.listen(_imageFrameEvents.add);
+
+    _cloudService.onStateChanged = (state) {
+      if (_connectionMode == CarConnectionMode.cloud) {
+        _onStateChanged(state);
+      }
+    };
+    _cloudService.onError = _onError;
+    _cloudService.onLog = _onLog;
+    _cloudService.taskStatusStream.listen(_onTaskStatus);
+    _cloudService.navStatusStream.listen(_onNavStatus);
+    _cloudService.obstacleStream.listen(_onObstacleStatus);
+    _cloudService.envDataStream.listen(_onEnvData);
+    _cloudService.sensorAlertStream.listen(_onSensorAlert);
+    _cloudService.taskLogStream.listen(_onTaskLog);
+    _cloudService.llmCommandStream.listen(_forwardLlmCommandResult);
+    _cloudService.reportStream.listen(_forwardReportResult);
+    _cloudService.ackStream.listen(_onCloudAck);
+    _cloudService.onlineStream.listen(_onRobotOnline);
+    _cloudService.snapshotStream.listen(_onRemoteSnapshot);
   }
 
   final CarWebSocketService _service = CarWebSocketService();
+  final CloudMqttService _cloudService = CloudMqttService();
+  final _parseTaskEvents = StreamController<Map<String, dynamic>>.broadcast();
+  final _reportEvents = StreamController<Map<String, dynamic>>.broadcast();
+  final _llmCommandEvents = StreamController<Map<String, dynamic>>.broadcast();
+  final _imageFrameEvents = StreamController<String>.broadcast();
 
   // ═══════════════════════════════════════════
   // 状态（UI 可直接读取）
   // ═══════════════════════════════════════════
 
   /// 连接状态
-  CarConnectionState get connectionState => _service.state;
-  bool get isConnected => _service.isConnected;
+  CarConnectionState get connectionState =>
+      isCloudMode ? _cloudService.state : _service.state;
+  bool get isConnected =>
+      isCloudMode ? _cloudService.isConnected : _service.isConnected;
+
+  CarConnectionMode _connectionMode = CarConnectionMode.local;
+  CarConnectionMode get connectionMode => _connectionMode;
+  bool get isCloudMode => _connectionMode == CarConnectionMode.cloud;
+  bool get robotOnline => !isCloudMode || _cloudService.robotOnline;
+  bool get canSendCommands => isConnected && robotOnline;
+  bool get canManualControl => canSendCommands;
+  bool get hasLocalMedia => !isCloudMode && _service.isConnected;
+
+  String _mqttHost = CloudMqttConfig.defaults.host;
+  int _mqttPort = CloudMqttConfig.defaults.port;
+  String _mqttUser = CloudMqttConfig.defaults.username;
+  String _mqttPassword = CloudMqttConfig.defaults.password;
+  String _mqttTopicPrefix = CloudMqttConfig.defaults.topicPrefix;
+  String _deviceId = CloudMqttConfig.defaults.deviceId;
+  bool _mqttTls = CloudMqttConfig.defaults.useTls;
+
+  String get mqttHost => _mqttHost;
+  int get mqttPort => _mqttPort;
+  String get mqttUser => _mqttUser;
+  String get mqttPassword => _mqttPassword;
+  String get mqttTopicPrefix => _mqttTopicPrefix;
+  String get deviceId => _deviceId;
+  bool get mqttTls => _mqttTls;
 
   /// 当前 IP
   String get host => _host;
@@ -95,22 +152,58 @@ class CarController extends ChangeNotifier {
   ///
   /// 如果当前未连接，只保存配置；如果已连接且 IP/端口变化，会断开旧连接并用新地址重连。
   Future<void> updateSettings({
+    CarConnectionMode? connectionMode,
     String? host,
     int? port,
+    String? mqttHost,
+    int? mqttPort,
+    String? mqttUser,
+    String? mqttPassword,
+    String? mqttTopicPrefix,
+    String? deviceId,
+    bool? mqttTls,
     double? speed,
     bool? autoReconnect,
     bool? hapticEnabled,
   }) async {
-    bool needReconnect = false;
+    final oldMode = _connectionMode;
+    final wasConnected = isConnected;
+    final needReconnect =
+        (connectionMode != null && connectionMode != _connectionMode) ||
+        (host != null && host.isNotEmpty && host != _host) ||
+        (port != null && port != _port) ||
+        (mqttHost != null && mqttHost.isNotEmpty && mqttHost != _mqttHost) ||
+        (mqttPort != null && mqttPort != _mqttPort) ||
+        (mqttUser != null && mqttUser != _mqttUser) ||
+        (mqttPassword != null && mqttPassword != _mqttPassword) ||
+        (mqttTopicPrefix != null && mqttTopicPrefix != _mqttTopicPrefix) ||
+        (deviceId != null && deviceId != _deviceId) ||
+        (mqttTls != null && mqttTls != _mqttTls);
 
+    if (wasConnected && needReconnect) {
+      if (oldMode == CarConnectionMode.cloud) {
+        await _cloudService.disconnect();
+      } else {
+        await _service.disconnect();
+      }
+    }
+
+    _connectionMode = connectionMode ?? _connectionMode;
     if (host != null && host.isNotEmpty && host != _host) {
       _host = host;
-      needReconnect = true;
     }
     if (port != null && port != _port) {
       _port = port;
-      needReconnect = true;
     }
+    if (mqttHost != null && mqttHost.isNotEmpty) _mqttHost = mqttHost;
+    if (mqttPort != null) _mqttPort = mqttPort;
+    if (mqttUser != null) _mqttUser = mqttUser;
+    if (mqttPassword != null) _mqttPassword = mqttPassword;
+    if (mqttTopicPrefix != null && mqttTopicPrefix.isNotEmpty) {
+      _mqttTopicPrefix = mqttTopicPrefix;
+    }
+    if (deviceId != null) _deviceId = deviceId;
+    if (mqttTls != null) _mqttTls = mqttTls;
     if (speed != null) {
       _speed = speed.clamp(0.0, 1.0);
     }
@@ -126,14 +219,23 @@ class CarController extends ChangeNotifier {
       _hapticEnabled = hapticEnabled;
     }
 
-    // 如果已连接且地址变了，重连
-    if (needReconnect && isConnected) {
-      await disconnect();
-      await connect(_host, _port);
+    if (wasConnected && needReconnect) {
+      await connect();
     }
 
     notifyListeners();
   }
+
+  CloudMqttConfig get _cloudConfig => CloudMqttConfig(
+    host: _mqttHost,
+    port: _mqttPort,
+    username: _mqttUser,
+    password: _mqttPassword,
+    topicPrefix: _mqttTopicPrefix,
+    deviceId: _deviceId,
+    useTls: _mqttTls,
+    autoReconnect: _autoReconnect,
+  );
 
   // ═══════════════════════════════════════════
   // 视觉状态
@@ -154,21 +256,20 @@ class CarController extends ChangeNotifier {
   Stream<CaptureStatus> get captureStatusStream => _service.captureStatusStream;
 
   /// 摄像头帧流（base64 JPEG）
-  Stream<String> get imageFrameStream => _service.imageFrameStream;
+  Stream<String> get imageFrameStream => _imageFrameEvents.stream;
 
   // ═══════════════════════════════════════════
   // LLM 状态
   // ═══════════════════════════════════════════
 
   /// LLM parse_task 流
-  Stream<Map<String, dynamic>> get parseTaskStream => _service.parseTaskStream;
+  Stream<Map<String, dynamic>> get parseTaskStream => _parseTaskEvents.stream;
 
   /// LLM generate_report 流
-  Stream<Map<String, dynamic>> get reportStream => _service.reportStream;
+  Stream<Map<String, dynamic>> get reportStream => _reportEvents.stream;
 
   /// 可执行 LLM 指挥结果流
-  Stream<Map<String, dynamic>> get llmCommandStream =>
-      _service.llmCommandStream;
+  Stream<Map<String, dynamic>> get llmCommandStream => _llmCommandEvents.stream;
 
   /// 最新 parse_task 结果
   Map<String, dynamic>? _latestParseResult;
@@ -242,6 +343,9 @@ class CarController extends ChangeNotifier {
 
   /// WebSocket 连接 URL
   String get wsUrl => _service.buildWsUrl(_host, _port);
+  String get connectionLabel => isCloudMode
+      ? 'mqtt${_mqttTls ? 's' : ''}://$_mqttHost:$_mqttPort'
+      : wsUrl;
 
   // ═══════════════════════════════════════════
   // 操作
@@ -251,6 +355,15 @@ class CarController extends ChangeNotifier {
   Future<bool> connect([String? host, int? port]) async {
     _host = host ?? _host;
     _port = port ?? _port;
+
+    if (isCloudMode) {
+      _addMessage('正在连接云端 $connectionLabel ...');
+      final ok = await _cloudService.connect(_cloudConfig);
+      _currentAction = ok ? '云端已连接' : '云端连接失败';
+      _addMessage(ok ? 'MQTT 连接成功，等待小车上线' : 'MQTT 连接失败');
+      notifyListeners();
+      return ok;
+    }
 
     if (_autoReconnect) {
       _service.enableAutoReconnect();
@@ -274,7 +387,14 @@ class CarController extends ChangeNotifier {
 
   /// 断开连接
   Future<void> disconnect() async {
-    await _service.disconnect();
+    if (isCloudMode) {
+      if (_cloudService.isConnected && _cloudService.robotOnline) {
+        _cloudService.publishManualControl('stop', 0.0);
+      }
+      await _cloudService.disconnect();
+    } else {
+      await _service.disconnect();
+    }
     _currentAction = '待机';
     _currentDirection = '';
     // 清空实时状态（桥接节点数据不再推送）
@@ -299,15 +419,18 @@ class CarController extends ChangeNotifier {
 
   /// 发送方向指令
   bool sendCommand(String direction) {
-    if (!isConnected) {
-      _addMessage('未连接，无法发送指令');
+    if (!canSendCommands) {
+      _addMessage(isCloudMode && isConnected ? '小车云桥离线，无法发送指令' : '未连接，无法发送指令');
       notifyListeners();
       return false;
     }
 
-    // 与网页保持一致：JSON 中携带速度，车端会再次限幅。
     final cmd = CarCommands.fromDirection(direction);
-    final ok = _service.sendJson({'command': cmd, 'speed': _speed});
+    // 两种链路都使用心跳续租。云端指令还会经过 cloud_bridge 的
+    // 1 秒租约和 velocity_mux 的 0.4 秒源超时双重保护。
+    final ok = isCloudMode
+        ? _cloudService.publishManualControl(cmd, _speed)
+        : _service.sendJson({'command': cmd, 'speed': _speed});
 
     if (ok) {
       _currentDirection = direction == 'stop' ? '' : direction;
@@ -345,7 +468,7 @@ class CarController extends ChangeNotifier {
 
   /// 发送自动归位
   bool sendAutoReturn() {
-    if (!isConnected) return false;
+    if (!isConnected || isCloudMode) return false;
     // TODO: 确认是否有专用归位指令，当前发 stop
     final ok = _service.send(CarCommands.stop);
     if (ok) _addMessage('自动归位指令已发送');
@@ -354,7 +477,18 @@ class CarController extends ChangeNotifier {
   }
 
   /// 发送截图（单次）
-  bool sendScreenshot() {
+  bool sendScreenshot({bool annotated = false}) {
+    if (isCloudMode) {
+      if (!canSendCommands) {
+        _addMessage('小车云桥离线，无法请求远程截图');
+        notifyListeners();
+        return false;
+      }
+      final ok = _cloudService.publishSnapshotRequest(annotated: annotated);
+      _addMessage(ok ? '已请求远程${annotated ? "标注" : "原始"}截图' : '远程截图请求发送失败');
+      notifyListeners();
+      return ok;
+    }
     return sendCaptureCommand({'action': 'capture_once', 'tag': 'manual'});
   }
 
@@ -366,8 +500,8 @@ class CarController extends ChangeNotifier {
   ///   - `stop`: 停止定时截图
   ///   - `set_max_images` + `max_images`: 设置最大保存数
   bool sendCaptureCommand(Map<String, dynamic> command) {
-    if (!isConnected) {
-      _addMessage('未连接，无法发送截图命令');
+    if (!isConnected || isCloudMode) {
+      _addMessage(isCloudMode ? '远程模式暂不传输视频/截图' : '未连接，无法发送截图命令');
       notifyListeners();
       return false;
     }
@@ -381,7 +515,7 @@ class CarController extends ChangeNotifier {
 
   /// 发送录制
   bool sendRecord() {
-    if (!isConnected) return false;
+    if (!isConnected || isCloudMode) return false;
     // TODO: 确认录制指令
     final ok = _service.send('record');
     if (ok) _addMessage('录制指令已发送');
@@ -391,8 +525,8 @@ class CarController extends ChangeNotifier {
 
   /// 发送 LLM parse_task 请求（自然语言 → 结构化任务 JSON）
   bool sendParseTask(String inputText) {
-    if (!isConnected) {
-      _addMessage('未连接，无法发送 LLM 请求');
+    if (!isConnected || isCloudMode) {
+      _addMessage(isCloudMode ? '远程模式请使用 LLM 指挥入口' : '未连接，无法发送 LLM 请求');
       notifyListeners();
       return false;
     }
@@ -412,8 +546,8 @@ class CarController extends ChangeNotifier {
   /// 发送自然语言到 LLM 工具通道；结果会带相同 request_id 返回。
   String? sendLlmCommand(String inputText) {
     final text = inputText.trim();
-    if (!isConnected || text.isEmpty) {
-      _addMessage(!isConnected ? '未连接，无法发送 LLM 指挥' : 'LLM 指令不能为空');
+    if (!canSendCommands || text.isEmpty) {
+      _addMessage(!canSendCommands ? '小车不可达，无法发送 LLM 指挥' : 'LLM 指令不能为空');
       notifyListeners();
       return null;
     }
@@ -421,11 +555,13 @@ class CarController extends ChangeNotifier {
         'app_${DateTime.now().microsecondsSinceEpoch.toRadixString(16)}';
     _llmLoading = true;
     _addMessage('[LLM 指挥] $text');
-    final ok = _service.sendJson({
-      'action': 'llm_command',
-      'request_id': requestId,
-      'input_text': text,
-    });
+    final ok = isCloudMode
+        ? _cloudService.publishLlmCommand(text, requestId)
+        : _service.sendJson({
+            'action': 'llm_command',
+            'request_id': requestId,
+            'input_text': text,
+          });
     if (!ok) {
       _llmLoading = false;
       notifyListeners();
@@ -437,17 +573,16 @@ class CarController extends ChangeNotifier {
 
   /// 发送 LLM generate_report 请求（任务日志 → 巡检报告）
   bool sendGenerateReport(String taskId) {
-    if (!isConnected) {
-      _addMessage('未连接，无法生成报告');
+    if (!canSendCommands) {
+      _addMessage('小车不可达，无法生成报告');
       notifyListeners();
       return false;
     }
     _llmLoading = true;
     _addMessage('[LLM] 请求生成报告: task_id=$taskId');
-    final ok = _service.sendJson({
-      'action': 'generate_report',
-      'task_id': taskId,
-    });
+    final ok = isCloudMode
+        ? _cloudService.publishReportRequest(taskId)
+        : _service.sendJson({'action': 'generate_report', 'task_id': taskId});
     if (!ok) {
       _llmLoading = false;
     }
@@ -457,9 +592,26 @@ class CarController extends ChangeNotifier {
 
   /// 发送已解析的任务给 task_manager（/task/request）
   bool sendParsedTaskToManager(Map<String, dynamic> taskJson) {
-    if (!isConnected) return false;
+    if (!canSendCommands) return false;
     _addMessage('[LLM] 发送任务到 task_manager: ${taskJson['task_type']}');
-    final ok = _service.sendJson({'action': 'task_request', 'task': taskJson});
+    bool ok;
+    if (isCloudMode) {
+      final taskType = taskJson['task_type']?.toString() ?? '';
+      final rawRoute = taskJson['route'];
+      if (taskType != 'patrol' || rawRoute is! List || rawRoute.isEmpty) {
+        _addMessage('[云端] 目前只允许非空路线的 patrol 任务');
+        notifyListeners();
+        return false;
+      }
+      final route = rawRoute.map((point) => point.toString()).toList();
+      final rawParams = taskJson['params'];
+      final params = rawParams is Map
+          ? Map<String, dynamic>.from(rawParams)
+          : <String, dynamic>{'actions': taskJson['actions'] ?? []};
+      ok = _cloudService.publishPatrol(route: route, params: params);
+    } else {
+      ok = _service.sendJson({'action': 'task_request', 'task': taskJson});
+    }
     if (ok) {
       _currentAction = '任务下发中';
     }
@@ -473,8 +625,8 @@ class CarController extends ChangeNotifier {
 
   /// 发送导航目标点
   bool sendGoalPose(double x, double y, [double yaw = 0.0]) {
-    if (!isConnected) {
-      _addMessage('未连接，无法发送导航目标');
+    if (!isConnected || isCloudMode) {
+      _addMessage(isCloudMode ? '远程模式请通过巡检任务下发导航' : '未连接，无法发送导航目标');
       notifyListeners();
       return false;
     }
@@ -489,8 +641,8 @@ class CarController extends ChangeNotifier {
 
   /// 启动人员跟踪
   bool sendTrackingStart([List<String> targetClasses = const ['person']]) {
-    if (!isConnected) {
-      _addMessage('未连接，无法启动跟踪');
+    if (!isConnected || isCloudMode) {
+      _addMessage(isCloudMode ? '远程跟踪尚未开放' : '未连接，无法启动跟踪');
       notifyListeners();
       return false;
     }
@@ -508,8 +660,8 @@ class CarController extends ChangeNotifier {
 
   /// 停止人员跟踪
   bool sendTrackingStop() {
-    if (!isConnected) {
-      _addMessage('未连接，无法停止跟踪');
+    if (!isConnected || isCloudMode) {
+      _addMessage(isCloudMode ? '远程跟踪尚未开放' : '未连接，无法停止跟踪');
       notifyListeners();
       return false;
     }
@@ -539,7 +691,7 @@ class CarController extends ChangeNotifier {
     switch (state) {
       case CarConnectionState.connected:
         _currentAction = '已连接';
-        _addMessage('[状态] → 已连接 (ws://$_host:$_port)');
+        _addMessage('[状态] → 已连接 ($connectionLabel)');
         break;
       case CarConnectionState.disconnected:
         _currentAction = '已断开';
@@ -600,6 +752,11 @@ class CarController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void _forwardParseTaskResult(Map<String, dynamic> result) {
+    _onParseTaskResult(result);
+    _parseTaskEvents.add(result);
+  }
+
   void _onReportResult(Map<String, dynamic> result) {
     _llmLoading = false;
     final success = result['success'] == true;
@@ -612,6 +769,11 @@ class CarController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void _forwardReportResult(Map<String, dynamic> result) {
+    _onReportResult(result);
+    _reportEvents.add(result);
+  }
+
   void _onLlmCommandResult(Map<String, dynamic> result) {
     _llmLoading = false;
     _latestLlmCommandResult = result;
@@ -620,6 +782,24 @@ class CarController extends ChangeNotifier {
     _addMessage(
       success ? '[LLM 执行] ${reply ?? '完成'}' : '[LLM 失败] ${reply ?? '未知错误'}',
     );
+    notifyListeners();
+  }
+
+  void _forwardLlmCommandResult(Map<String, dynamic> result) {
+    _onLlmCommandResult(result);
+    _llmCommandEvents.add(result);
+  }
+
+  void _onCloudAck(Map<String, dynamic> ack) {
+    final accepted = ack['accepted'] == true;
+    final message = ack['message']?.toString() ?? '';
+    _addMessage('[云端确认] ${accepted ? '已接受' : '已拒绝'} $message');
+    notifyListeners();
+  }
+
+  void _onRobotOnline(bool online) {
+    _currentAction = online ? '小车云桥在线' : '小车云桥离线';
+    _addMessage(online ? '[云端] 小车已上线' : '[云端] 小车已离线');
     notifyListeners();
   }
 
@@ -694,6 +874,16 @@ class CarController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void _onRemoteSnapshot(CloudSnapshot snapshot) {
+    if (snapshot.ok) {
+      _imageFrameEvents.add(snapshot.imageBase64);
+      _addMessage('[远程截图] 已接收${snapshot.annotated ? "标注" : "原始"}画面');
+    } else {
+      _addMessage('[远程截图] 失败: ${snapshot.error}');
+    }
+    notifyListeners();
+  }
+
   void _addMessage(String msg) {
     final time = DateTime.now();
     final ts =
@@ -710,6 +900,11 @@ class CarController extends ChangeNotifier {
   @override
   void dispose() {
     _service.dispose();
+    unawaited(_cloudService.dispose());
+    unawaited(_parseTaskEvents.close());
+    unawaited(_reportEvents.close());
+    unawaited(_llmCommandEvents.close());
+    unawaited(_imageFrameEvents.close());
     super.dispose();
   }
 }

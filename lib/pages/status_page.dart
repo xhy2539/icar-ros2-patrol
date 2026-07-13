@@ -114,6 +114,7 @@ class _StatusPageState extends State<StatusPage> {
 
   Widget _buildStatusOverview() {
     final connected = _ctrl.isConnected;
+    final reachable = connected && _ctrl.robotOnline;
     final nav = _ctrl.latestNavStatus;
     final task = _ctrl.latestTaskStatus;
 
@@ -123,10 +124,16 @@ class _StatusPageState extends State<StatusPage> {
         children: [
           Expanded(
             child: _buildStatusItem(
-              icon: connected ? Icons.link : Icons.link_off,
+              icon: reachable ? Icons.link : Icons.link_off,
               label: '连接',
-              value: connected ? '已连接' : '未连接',
-              color: connected ? AppColors.successGreen : AppColors.errorRed,
+              value: reachable
+                  ? (_ctrl.isCloudMode ? '远程在线' : '已连接')
+                  : (_ctrl.isCloudMode && connected ? '小车离线' : '未连接'),
+              color: reachable
+                  ? AppColors.successGreen
+                  : (_ctrl.isCloudMode && connected
+                        ? AppColors.warningOrange
+                        : AppColors.errorRed),
             ),
           ),
           const SizedBox(width: 8),

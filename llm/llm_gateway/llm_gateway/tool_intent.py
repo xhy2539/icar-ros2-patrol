@@ -7,6 +7,8 @@ commands that must not wait for a cloud model, especially emergency stop.
 import re
 from typing import Dict, List, Optional
 
+from .complex_task import build_rule_plan
+
 
 _POINT_PATTERN = re.compile(r"(?<![A-Z])([A-F])(?![A-Z])", re.IGNORECASE)
 
@@ -64,6 +66,10 @@ def parse_tool_intent(
 
     if any(word in compact for word in stop_words):
         return {"tool_name": "stop_robot", "arguments": {"reason": text}}
+
+    complex_plan = build_rule_plan(text, default_route)
+    if complex_plan is not None:
+        return complex_plan
 
     if any(word in compact for word in ("巡检", "巡逻", "巡视")) or re.search(
         r"(?:去|前往|导航到)[A-Fa-f](?:点)?", compact

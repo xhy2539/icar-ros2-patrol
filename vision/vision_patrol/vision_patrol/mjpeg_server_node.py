@@ -119,7 +119,33 @@ class MjpegServerNode(Node):
                 if route == "/yolo_video_feed":
                     self._stream("annotated", fallback="raw")
                     return
+                if route == "/snapshot":
+                    self._send_snapshot("raw")
+                    return
+                if route == "/yolo_snapshot":
+                    self._send_snapshot("annotated", fallback="raw")
+                    return
                 self.send_error(404)
+
+            def _send_snapshot(self, kind, fallback=None):
+                frame, ready, _ = node._snapshot(kind)
+                if not ready and fallback:
+                    frame, ready, _ = node._snapshot(fallback)
+                if not ready:
+                    body = b'{"error":"camera frame unavailable"}'
+                    self.send_response(503)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Content-Length", str(len(frame)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(frame)
 
             def _stream(self, kind, fallback=None):
                 self.send_response(200)

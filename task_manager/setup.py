@@ -26,6 +26,7 @@ setup(
             'mock_sensor_node = task_manager.mock_sensor_node:main',
             'mock_vision_node = task_manager.mock_vision_node:main',
             'report_generator_node = task_manager.report_generator_node:main',
+            'obstacle_alarm_node = task_manager.obstacle_alarm_node:main',
         ],
     },
 )

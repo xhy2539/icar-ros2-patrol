@@ -22,6 +22,9 @@ object detection and road detection will be added on top of the same ROS2 input.
   `person`, and publishes follow-control velocity hints to `/vision/target_cmd_vel`.
   It does not publish directly to `/cmd_vel` by default. It stays idle until an
   App/task command is received on `/vision/target_tracking/command`.
+- `mjpeg_server`: loopback-only MJPEG and single-frame JPEG service. Use
+  `/snapshot` or `/yolo_snapshot` for bounded cloud snapshot forwarding; never
+  expose port 6502 directly to the internet.
 
 ## Class Table
 

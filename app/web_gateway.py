@@ -90,6 +90,7 @@ def index():
         service="icar-web-gateway",
         control="/ws/control",
         video="/video_feed",
+        snapshot="/snapshot",
         health="/health",
     )
 
@@ -121,6 +122,16 @@ def video_feed():
 @app.get("/yolo_video_feed")
 def yolo_video_feed():
     return _proxy_video("/yolo_video_feed")
+
+
+@app.get("/snapshot")
+def snapshot():
+    return _proxy_video("/snapshot")
+
+
+@app.get("/yolo_snapshot")
+def yolo_snapshot():
+    return _proxy_video("/yolo_snapshot")
 
 
 @app.get("/yolo_detailed_status")

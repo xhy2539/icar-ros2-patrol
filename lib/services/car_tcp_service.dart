@@ -85,6 +85,9 @@ class CarWebSocketService {
   /// 导航状态流 — /nav_status
   final _navStatusController = StreamController<NavStatus>.broadcast();
 
+  /// 小车位姿流 — /pose
+  final _poseController = StreamController<RobotPose>.broadcast();
+
   /// 任务状态流 — /task/status
   final _taskStatusController = StreamController<TaskStatus>.broadcast();
 
@@ -96,6 +99,9 @@ class CarWebSocketService {
 
   /// 传感器告警流 — /sensor/alert
   final _sensorAlertController = StreamController<SensorAlert>.broadcast();
+
+  /// 结构化安全告警流 — /safety/alarm
+  final _safetyAlarmController = StreamController<SafetyAlarm>.broadcast();
 
   /// 人员跟踪状态流 — /vision/target_tracking/status
   final _trackingController = StreamController<TrackingStatus>.broadcast();
@@ -130,6 +136,8 @@ class CarWebSocketService {
   /// 导航状态流
   Stream<NavStatus> get navStatusStream => _navStatusController.stream;
 
+  Stream<RobotPose> get poseStream => _poseController.stream;
+
   /// 任务状态流
   Stream<TaskStatus> get taskStatusStream => _taskStatusController.stream;
 
@@ -141,6 +149,8 @@ class CarWebSocketService {
 
   /// 传感器告警流
   Stream<SensorAlert> get sensorAlertStream => _sensorAlertController.stream;
+
+  Stream<SafetyAlarm> get safetyAlarmStream => _safetyAlarmController.stream;
 
   /// 人员跟踪状态流
   Stream<TrackingStatus> get trackingStream => _trackingController.stream;
@@ -322,6 +332,7 @@ class CarWebSocketService {
   void subscribeNavigationTopics() {
     subscribeTopic('obstacle_status');
     subscribeTopic('nav_status');
+    subscribeTopic('robot_pose');
     subscribeTopic('task_status');
     subscribeTopic('task_log');
   }
@@ -330,6 +341,7 @@ class CarWebSocketService {
   void subscribeSensorTopics() {
     subscribeTopic('sensor_env_data');
     subscribeTopic('sensor_alert');
+    subscribeTopic('safety_alarm');
   }
 
   /// 订阅人员跟踪 Topic
@@ -436,6 +448,10 @@ class CarWebSocketService {
       case '/nav_status':
         _navStatusController.add(NavStatus.fromJson(json));
         return true;
+      case 'robot_pose':
+      case '/pose':
+        _poseController.add(RobotPose.fromJson(json));
+        return true;
       case 'task_status':
       case '/task/status':
         _taskStatusController.add(TaskStatus.fromJson(json));
@@ -452,6 +468,10 @@ class CarWebSocketService {
       case '/sensor/alert':
         _sensorAlertController.add(SensorAlert.fromJson(json));
         onLog?.call('← [告警] ${json['sensor_type']}: ${json['current_value']}');
+        return true;
+      case 'safety_alarm':
+      case '/safety/alarm':
+        _safetyAlarmController.add(SafetyAlarm.fromJson(json));
         return true;
       case 'tracking_status':
       case '/vision/target_tracking/status':
@@ -544,10 +564,12 @@ class CarWebSocketService {
     await _llmCommandController.close();
     await _obstacleController.close();
     await _navStatusController.close();
+    await _poseController.close();
     await _taskStatusController.close();
     await _taskLogController.close();
     await _envDataController.close();
     await _sensorAlertController.close();
+    await _safetyAlarmController.close();
     await _trackingController.close();
   }
 }

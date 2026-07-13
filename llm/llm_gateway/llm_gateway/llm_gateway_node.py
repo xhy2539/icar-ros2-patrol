@@ -11,6 +11,7 @@ Subscriptions (缓存最新值):
   - /task/status          → 当前任务状态
   - /nav_status           → 导航进度
   - /obstacle_status      → 障碍物/安全
+  - /safety/alarm         → 障碍/积水告警
   - /vision/detections    → 视觉检测结果
 
 安全约束：不发布 /cmd_vel，不绕过 task_manager_node。
@@ -24,6 +25,7 @@ from collections import defaultdict
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
+from std_msgs.msg import String
 
 from icar_interfaces.msg import (
     TaskLog, TaskStatus, NavStatus, ObstacleStatus,
@@ -152,6 +154,7 @@ class LlmGatewayNode(Node):
         self._latest_task_status = None
         self._latest_nav_status = None
         self._latest_obstacle = None
+        self._latest_safety_alarm = None
         self._latest_detections = None
         self._plan_runner = ComplexTaskRunner()
         self._plan_lock = threading.RLock()
@@ -174,6 +177,9 @@ class LlmGatewayNode(Node):
         self.obstacle_sub = self.create_subscription(
             ObstacleStatus, "/obstacle_status", self._on_obstacle_status, reliable_qos)
 
+        self.safety_alarm_sub = self.create_subscription(
+            String, "/safety/alarm", self._on_safety_alarm, reliable_qos)
+
         self.vision_sub = self.create_subscription(
             DetectionArray, "/vision/detections", self._on_detections, best_effort_qos)
 
@@ -187,7 +193,6 @@ class LlmGatewayNode(Node):
         self._tool_sub = None
         self._response_pub = None
         if self._tool_mode:
-            from std_msgs.msg import String
             self._tool_sub = self.create_subscription(
                 String, "/llm/user_command", self._on_tool_command, reliable_qos)
             self._response_pub = self.create_publisher(
@@ -202,7 +207,7 @@ class LlmGatewayNode(Node):
             f"llm_gateway_node ready, provider={effective}, "
             f"api_available={self._api_ok}, "
             f"services=[/llm/parse_task, /llm/generate_report], "
-            f"subscriptions=5 topics"
+            f"subscriptions=6 topics"
             + (", tool_mode=on, /llm/user_command" if self._tool_mode else "")
         )
 
@@ -306,6 +311,15 @@ class LlmGatewayNode(Node):
             "action": msg.action,
         }
 
+    def _on_safety_alarm(self, msg: String):
+        try:
+            payload = json.loads(msg.data)
+            self._latest_safety_alarm = (
+                payload if isinstance(payload, dict) else {"data": payload}
+            )
+        except json.JSONDecodeError:
+            self._latest_safety_alarm = {"raw": msg.data}
+
     def _on_detections(self, msg: DetectionArray):
         dets = []
         for d in msg.detections:
@@ -406,6 +420,7 @@ class LlmGatewayNode(Node):
             "task_status": self._latest_task_status or {},
             "nav_status": self._latest_nav_status or {},
             "obstacle_status": self._latest_obstacle or {},
+            "safety_alarm": self._latest_safety_alarm or {},
             "detections": self._latest_detections or [],
         }
 
@@ -434,6 +449,18 @@ class LlmGatewayNode(Node):
                 parts.append("导航模块暂无数据")
 
         if query_type in ("safety", "all"):
+            alarm = context.get("safety_alarm", {})
+            if alarm.get("active") and alarm.get("hazard_type") == "water":
+                parts.append(
+                    f"⚠ 检测到积水，置信度 "
+                    f"{alarm.get('confidence', '?')}，已告警并请求重新规划"
+                )
+            if (alarm.get("active")
+                    and alarm.get("hazard_type") == "visual_obstacle"):
+                parts.append(
+                    f"⚠ 视觉检测到障碍物，置信度 "
+                    f"{alarm.get('confidence', '?')}，已告警并请求重新规划"
+                )
             obs = context.get("obstacle_status", {})
             if obs:
                 if obs.get("is_obstacle"):

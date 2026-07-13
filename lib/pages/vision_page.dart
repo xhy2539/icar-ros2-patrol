@@ -37,6 +37,7 @@ class _VisionPageState extends State<VisionPage> {
   bool _videoFirstFrameLogged = false;
   bool _videoErrorLogged = false;
   int _wsFrameCount = 0;
+  late bool _lastCloudMode;
 
   /// 自动截图状态
   bool _autoCapture = false;
@@ -48,6 +49,7 @@ class _VisionPageState extends State<VisionPage> {
   @override
   void initState() {
     super.initState();
+    _lastCloudMode = _ctrl.isCloudMode;
     _ctrl.addListener(_onCtrlChanged);
     _detSub = _ctrl.detectionStream.listen(_onDetections);
     _imgSub = _ctrl.imageFrameStream.listen(_onImageFrame);
@@ -64,7 +66,11 @@ class _VisionPageState extends State<VisionPage> {
 
   void _onCtrlChanged() {
     if (mounted) {
-      if (!_ctrl.isConnected) {
+      if (_lastCloudMode != _ctrl.isCloudMode) {
+        _lastCloudMode = _ctrl.isCloudMode;
+        _wsFrameBytes = null;
+      }
+      if (!_ctrl.hasLocalMedia) {
         _videoLoadLogged = false;
         _videoFirstFrameLogged = false;
         _videoErrorLogged = false;
@@ -91,7 +97,11 @@ class _VisionPageState extends State<VisionPage> {
         });
         _wsFrameCount++;
         if (_wsFrameCount == 1) {
-          _ctrl.addMessage('[视频] 收到 WS 帧 (${bytes.length} bytes)');
+          _ctrl.addMessage(
+            _ctrl.isCloudMode
+                ? '[远程截图] 已显示 (${bytes.length} bytes)'
+                : '[视频] 收到 WS 帧 (${bytes.length} bytes)',
+          );
         } else if (_wsFrameCount % 100 == 0) {
           _ctrl.addMessage('[视频] 已收到 $_wsFrameCount 帧');
         }
@@ -134,7 +144,7 @@ class _VisionPageState extends State<VisionPage> {
   // ═══════════════════════════════════════════
 
   Widget _buildCameraFeed() {
-    final isConnected = _ctrl.isConnected;
+    final isConnected = _ctrl.hasLocalMedia;
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -312,7 +322,7 @@ class _VisionPageState extends State<VisionPage> {
       );
     }
 
-    // 未连接占位符
+    // 未连接或云端尚未请求截图
     return _buildPlaceholder(isConnected);
   }
 
@@ -328,7 +338,11 @@ class _VisionPageState extends State<VisionPage> {
           ),
           const SizedBox(height: 6),
           Text(
-            isConnected ? '等待视频流...' : '连接小车后显示摄像头画面',
+            _ctrl.isCloudMode && _ctrl.canSendCommands
+                ? '点击“请求远程截图”获取当前画面'
+                : isConnected
+                ? '等待视频流...'
+                : '连接小车后显示摄像头画面',
             style: TextStyle(color: AppColors.blueGrayDark, fontSize: 12),
           ),
         ],
@@ -498,9 +512,9 @@ class _VisionPageState extends State<VisionPage> {
               Expanded(
                 child: _buildCaptureButton(
                   icon: Icons.camera_alt,
-                  label: '单次截图',
-                  onTap: _ctrl.isConnected
-                      ? () => _ctrl.sendScreenshot()
+                  label: _ctrl.isCloudMode ? '请求远程截图' : '单次截图',
+                  onTap: _ctrl.canSendCommands
+                      ? () => _ctrl.sendScreenshot(annotated: _showAnnotated)
                       : null,
                   color: AppColors.orange,
                 ),
@@ -510,7 +524,7 @@ class _VisionPageState extends State<VisionPage> {
                 child: _buildCaptureButton(
                   icon: Icons.stop_circle,
                   label: '停止自动截图',
-                  onTap: _ctrl.isConnected
+                  onTap: _ctrl.hasLocalMedia
                       ? () {
                           _ctrl.sendCaptureCommand({'action': 'stop'});
                           setState(() => _autoCapture = false);
@@ -575,7 +589,7 @@ class _VisionPageState extends State<VisionPage> {
               SizedBox(
                 height: 32,
                 child: ElevatedButton(
-                  onPressed: _ctrl.isConnected
+                  onPressed: _ctrl.hasLocalMedia
                       ? () {
                           final d = double.tryParse(_intervalCtrl.text) ?? 3.0;
                           _ctrl.sendCaptureCommand({
@@ -632,7 +646,7 @@ class _VisionPageState extends State<VisionPage> {
                   ),
                   onSubmitted: (v) {
                     final n = int.tryParse(v);
-                    if (n != null && n > 0 && _ctrl.isConnected) {
+                    if (n != null && n > 0 && _ctrl.hasLocalMedia) {
                       _ctrl.sendCaptureCommand({
                         'action': 'set_max_images',
                         'max_images': n,
@@ -645,7 +659,7 @@ class _VisionPageState extends State<VisionPage> {
               SizedBox(
                 height: 32,
                 child: ElevatedButton(
-                  onPressed: _ctrl.isConnected
+                  onPressed: _ctrl.hasLocalMedia
                       ? () {
                           // 触发 onSubmitted
                           FocusScope.of(context).unfocus();

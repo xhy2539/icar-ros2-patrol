@@ -10,6 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   web_socket_channel: ^3.0.0
+  mqtt_client: ^10.11.11
   shared_preferences: ^2.3.0
   speech_to_text: ^7.0.0
 

@@ -1205,7 +1205,7 @@ class _MissionPageState extends State<MissionPage> {
                   height: 42,
                   width: 42,
                   child: ElevatedButton(
-                    onPressed: _ctrl.isConnected ? _sendParseTask : null,
+                    onPressed: _ctrl.canSendCommands ? _sendParseTask : null,
                     style: ElevatedButton.styleFrom(
                       padding: EdgeInsets.zero,
                       shape: RoundedRectangleBorder(
@@ -1262,7 +1262,7 @@ class _MissionPageState extends State<MissionPage> {
                 SizedBox(
                   height: 34,
                   child: ElevatedButton(
-                    onPressed: _ctrl.isConnected ? _requestReport : null,
+                    onPressed: _ctrl.canSendCommands ? _requestReport : null,
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       textStyle: const TextStyle(fontSize: 12),

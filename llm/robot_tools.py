@@ -234,12 +234,19 @@ class RobotTools:
         return {"success": False, "message": "no navigation data available", "data": {}}
 
     def check_safety(self) -> dict:
-        """查询障碍物状态和安全风险。"""
-        if self.node and hasattr(self.node, '_latest_obstacle'):
-            data = self.node._latest_obstacle
-            if data:
-                return {"success": True, "message": "safety status", "data": data}
-        return {"success": False, "message": "no obstacle data available", "data": {}}
+        """查询障碍物和积水等最新安全风险。"""
+        if self.node:
+            obstacle = getattr(self.node, '_latest_obstacle', None)
+            alarm = getattr(self.node, '_latest_safety_alarm', None)
+            if obstacle or alarm:
+                data = dict(obstacle or {})
+                data["alarm"] = alarm or {}
+                return {
+                    "success": True,
+                    "message": "safety status",
+                    "data": data,
+                }
+        return {"success": False, "message": "no safety data available", "data": {}}
 
     # ── 音频播放 ──────────────────────────────────────────────
 

@@ -10,7 +10,10 @@ setup(
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
     ],
-    install_requires=["setuptools"],
+    # JetPack/Ubuntu images may still provide paho-mqtt 1.x.  The node keeps
+    # callback compatibility with both 1.x and 2.x until the robot image is
+    # upgraded as a whole.
+    install_requires=["setuptools", "paho-mqtt>=1.5,<3"],
     zip_safe=True,
     maintainer="熊浩宇",
     maintainer_email="xionghaoyu@icar.com",

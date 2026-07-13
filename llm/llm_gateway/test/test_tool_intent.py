@@ -12,6 +12,15 @@ def test_patrol_route_is_extracted_without_duplicates():
     assert result["arguments"]["route"] == ["A", "B", "C"]
 
 
+def test_compound_patrol_becomes_a_safe_plan():
+    result = parse_tool_intent("巡检 A、B 点，完成后播放完成提示音")
+    assert result["tool_name"] == "execute_plan"
+    assert [step["tool_name"] for step in result["arguments"]["steps"]] == [
+        "start_patrol",
+        "play_audio",
+    ]
+
+
 def test_tracking_start_and_stop_are_distinct():
     start = parse_tool_intent("跟踪前面的人")
     stop = parse_tool_intent("停止跟踪")

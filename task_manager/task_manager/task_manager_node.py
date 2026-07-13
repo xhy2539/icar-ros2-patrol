@@ -28,7 +28,7 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from builtin_interfaces.msg import Time as RosTime
 from geometry_msgs.msg import PoseStamped, Twist
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, String
 
 # 自定义消息接口
 from icar_interfaces.msg import (
@@ -46,6 +46,13 @@ from task_manager.navigation_goal_logic import (
     goal_to_pose_payload,
     load_navigation_checkpoints,
     resolve_route_goals,
+)
+from task_manager.hazard_response_logic import (
+    FALLEN_PERSON_CLASS_KEYS,
+    ObstacleDetourController,
+    VisualHazardController,
+    VISUAL_OBSTACLE_CLASS_KEYS,
+    WaterHazardController,
 )
 from icar_interfaces.srv import TaskControl
 from task_manager.task_control_logic import plan_task_control
@@ -89,10 +96,6 @@ EMERGENCY_THRESHOLDS = {
     "humidity": 20.0,       # %, <20 触发 WARN (低湿)
 }
 
-OBSTACLE_DANGER_DISTANCE = 0.3   # 米, ≤0.3 紧急停止
-OBSTACLE_WARN_DISTANCE = 0.5     # 米, ≤0.5 减速观察
-
-
 # ---------------------------------------------------------------------------
 # TaskManagerNode
 # ---------------------------------------------------------------------------
@@ -111,10 +114,64 @@ class TaskManagerNode(Node):
         self.checkpoint_data = {}      # 打卡数据缓存
         self.last_env_data = None      # 最新传感器数据
         self.last_detections = None    # 最新检测结果
+        self.current_pose = {"x": 0.0, "y": 0.0, "frame_id": "map"}
         self.emergency_stop_active = False
         self.checkpoints = load_navigation_checkpoints()
         self.route_goals = []
         self.goal_sent_for_index = None
+
+        self.declare_parameter("obstacle_clear_sec", 1.0)
+        self.declare_parameter("obstacle_max_block_sec", 20.0)
+        self.declare_parameter("obstacle_max_replans", 3)
+        self.declare_parameter("water_min_confidence", 0.7)
+        self.declare_parameter("water_confirm_frames", 2)
+        self.declare_parameter("water_clear_frames", 5)
+        self.declare_parameter("water_repeat_sec", 30.0)
+        self.declare_parameter("visual_obstacle_min_confidence", 0.7)
+        self.declare_parameter("visual_obstacle_confirm_frames", 2)
+        self.declare_parameter("visual_obstacle_clear_frames", 5)
+        self.declare_parameter("visual_obstacle_repeat_sec", 30.0)
+        self.declare_parameter("fall_min_confidence", 0.75)
+        self.declare_parameter("fall_confirm_frames", 3)
+        self.declare_parameter("fall_repeat_sec", 30.0)
+        self.obstacle_controller = ObstacleDetourController(
+            clear_sec=float(self.get_parameter("obstacle_clear_sec").value),
+            max_block_sec=float(
+                self.get_parameter("obstacle_max_block_sec").value
+            ),
+            max_replans=int(self.get_parameter("obstacle_max_replans").value),
+        )
+        self.water_controller = WaterHazardController(
+            min_confidence=float(
+                self.get_parameter("water_min_confidence").value
+            ),
+            confirm_frames=int(self.get_parameter("water_confirm_frames").value),
+            clear_frames=int(self.get_parameter("water_clear_frames").value),
+            repeat_sec=float(self.get_parameter("water_repeat_sec").value),
+        )
+        self.visual_obstacle_controller = VisualHazardController(
+            min_confidence=float(
+                self.get_parameter("visual_obstacle_min_confidence").value
+            ),
+            confirm_frames=int(
+                self.get_parameter("visual_obstacle_confirm_frames").value
+            ),
+            clear_frames=int(
+                self.get_parameter("visual_obstacle_clear_frames").value
+            ),
+            repeat_sec=float(
+                self.get_parameter("visual_obstacle_repeat_sec").value
+            ),
+            class_keys=VISUAL_OBSTACLE_CLASS_KEYS,
+        )
+        self.fall_controller = VisualHazardController(
+            min_confidence=float(self.get_parameter("fall_min_confidence").value),
+            confirm_frames=int(self.get_parameter("fall_confirm_frames").value),
+            clear_frames=1,
+            repeat_sec=float(self.get_parameter("fall_repeat_sec").value),
+            class_keys=FALLEN_PERSON_CLASS_KEYS,
+            latch_until_reset=True,
+        )
 
         # ---- QoS ----
         reliable_qos = QoSProfile(
@@ -144,6 +201,9 @@ class TaskManagerNode(Node):
         self.vision_sub = self.create_subscription(
             DetectionArray, '/vision/detections', self._on_detections, best_effort_qos)
 
+        self.pose_sub = self.create_subscription(
+            PoseStamped, '/pose', self._on_pose, reliable_qos)
+
         self.sensor_sub = self.create_subscription(
             EnvData, '/sensor/env_data', self._on_env_data, reliable_qos)
 
@@ -163,6 +223,9 @@ class TaskManagerNode(Node):
 
         self.safety_stop_pub = self.create_publisher(
             Bool, '/safety_stop', reliable_qos)
+
+        self.hazard_event_pub = self.create_publisher(
+            String, '/safety/hazard_event', reliable_qos)
 
         self.goal_pose_pub = self.create_publisher(
             PoseStamped, '/goal_pose', reliable_qos)
@@ -203,6 +266,8 @@ class TaskManagerNode(Node):
 
     def _status_message(self) -> str:
         """生成当前状态的可读描述"""
+        if self.obstacle_controller.hold and self.state == PatrolState.NAVIGATING:
+            return "前方障碍，Nav2 正在重新规划绕行"
         msgs = {
             PatrolState.PENDING: "等待任务下发",
             PatrolState.RUNNING: f"任务 {self.current_task_id} 启动",
@@ -252,8 +317,17 @@ class TaskManagerNode(Node):
         stop_msg.linear.x = 0.0
         stop_msg.angular.z = 0.0
         self.cmd_vel_pub.publish(stop_msg)
-        self.safety_stop_pub.publish(Bool(data=True))
         self.emergency_stop_active = True
+        self._publish_safety_stop_state()
+
+    def _publish_safety_stop_state(self):
+        """Publish one aggregate stop state for every safety reason."""
+        self.safety_stop_pub.publish(Bool(data=self.emergency_stop_active))
+
+    def _publish_hazard_event(self, payload: dict):
+        message = String()
+        message.data = json.dumps(payload, ensure_ascii=False)
+        self.hazard_event_pub.publish(message)
 
     def _check_safety(self) -> bool:
         """
@@ -275,10 +349,11 @@ class TaskManagerNode(Node):
 
     def _on_task_request(self, msg: TaskRequest):
         """接收 APP 下发的任务请求"""
-        if self.state != PatrolState.PENDING or self.emergency_stop_active:
+        safety_stop_active = self.emergency_stop_active
+        if self.state != PatrolState.PENDING or safety_stop_active:
             self.get_logger().warn(
                 f"当前状态 {self.state.value}, "
-                f"emergency_stop={self.emergency_stop_active}，无法接受新任务")
+                f"safety_stop={safety_stop_active}，无法接受新任务")
             return
 
         self.current_task_id = f"task_{uuid.uuid4().hex[:8]}"
@@ -286,6 +361,10 @@ class TaskManagerNode(Node):
         self.route_index = 0
         self.route_goals = []
         self.goal_sent_for_index = None
+        self.obstacle_controller.reset_for_goal()
+        self.water_controller.reset()
+        self.visual_obstacle_controller.reset()
+        self.fall_controller.reset()
 
         self._log_event("TASK_RECEIVED", {
             "task_type": msg.task_type,
@@ -300,8 +379,8 @@ class TaskManagerNode(Node):
         """导航状态更新"""
         if self.state != PatrolState.NAVIGATING:
             return
-
         if msg.status == "ARRIVED":
+            self.obstacle_controller.reset_for_goal()
             self._log_event("NAV_END", {
                 "checkpoint": self._current_checkpoint(),
                 "result": "ARRIVED",
@@ -318,29 +397,161 @@ class TaskManagerNode(Node):
             self._transition_to(PatrolState.FAILED)
 
     def _on_obstacle_status(self, msg: ObstacleStatus):
-        """障碍物检测回调 — 紧急情况直接停止"""
-        if msg.risk_level == "danger" and msg.min_distance <= OBSTACLE_DANGER_DISTANCE:
-            self._emergency_stop(
-                f"障碍物距离 {msg.min_distance:.2f}m, 方位 {msg.direction}")
+        """Stop on danger, then resend the goal so Nav2 can plan a detour."""
+        risk = str(msg.risk_level).lower()
+        action = str(msg.action).lower()
+        decision = self.obstacle_controller.update(
+            danger=risk == "danger" or action == "stop",
+            clear=risk == "safe" and action in ("", "none"),
+            now=time.monotonic(),
+        )
+
+        if decision.event == "blocked":
+            payload = {
+                "hazard_type": "obstacle",
+                "event": "blocked",
+                "active": True,
+                "distance": round(float(msg.min_distance), 3),
+                "direction": msg.direction,
+                "action": "replan_current_goal",
+                "retry_count": decision.retry_count,
+                "pose": self._pose_payload(),
+            }
             if self.state == PatrolState.NAVIGATING:
-                self._log_event("ANOMALY", {
-                    "type": "obstacle_danger",
-                    "distance": msg.min_distance,
-                    "direction": msg.direction,
-                }, severity="ERROR")
+                # Replan immediately. velocity_mux independently blocks only
+                # motion toward the obstacle, leaving rotate/reverse recovery
+                # commands available to Nav2.
+                self.goal_sent_for_index = None
+                self._log_event("OBSTACLE_REPLAN", payload, severity="WARN")
+            else:
+                self._log_event("ANOMALY", payload, severity="WARN")
+            self._publish_status()
+            return
+
+        if decision.event == "cleared":
+            payload = {
+                "hazard_type": "obstacle",
+                "event": "cleared",
+                "active": False,
+                "distance": round(float(msg.min_distance), 3),
+                "direction": msg.direction,
+                "retry_count": decision.retry_count,
+                "pose": self._pose_payload(),
+            }
+            self._log_event("OBSTACLE_CLEARED", payload, severity="INFO")
+            self._publish_status()
+            return
+
+        if decision.event == "failed":
+            payload = {
+                "hazard_type": "obstacle",
+                "event": "blocked_timeout",
+                "active": True,
+                "distance": round(float(msg.min_distance), 3),
+                "direction": msg.direction,
+                "blocked_sec": round(decision.blocked_sec, 1),
+                "retry_count": decision.retry_count,
+                "pose": self._pose_payload(),
+            }
+            self._log_event("ANOMALY", payload, severity="ERROR")
+            self._emergency_stop("障碍物持续阻塞，无法安全绕行")
+            if self.state in (
+                PatrolState.RUNNING,
+                PatrolState.NAVIGATING,
+                PatrolState.CHECKPOINT,
+                PatrolState.DETECTING,
+                PatrolState.COLLECTING,
+            ):
                 self._transition_to(PatrolState.FAILED)
 
-        elif msg.risk_level == "warning":
-            self._log_event("ANOMALY", {
-                "type": "obstacle_warning",
-                "distance": msg.min_distance,
-                "direction": msg.direction,
-                "action": msg.action,
-            }, severity="WARN")
-
     def _on_detections(self, msg: DetectionArray):
-        """视觉检测结果缓存"""
+        """Report water/obstacles and request non-estop Nav2 replanning."""
         self.last_detections = msg
+        now = time.monotonic()
+        decisions = (
+            ("water", self.water_controller.update(msg.detections, now=now)),
+            (
+                "visual_obstacle",
+                self.visual_obstacle_controller.update(msg.detections, now=now),
+            ),
+        )
+        for hazard_type, decision in decisions:
+            self._handle_visual_hazard(hazard_type, decision)
+        self._handle_fall_hazard(
+            self.fall_controller.update(msg.detections, now=now)
+        )
+
+    def _pose_payload(self):
+        return dict(self.current_pose)
+
+    def _handle_visual_hazard(self, hazard_type, decision):
+        if not decision.should_report:
+            return
+
+        detection = decision.detection or {}
+        should_replan = (
+            decision.active
+            and decision.event in ("started", "repeated")
+            and self.state == PatrolState.NAVIGATING
+        )
+        if should_replan:
+            # No /safety_stop is asserted. Nav2 receives the same destination
+            # again and can replace the active path while motion continues.
+            self.goal_sent_for_index = None
+        payload = {
+            "hazard_type": hazard_type,
+            "event": decision.event,
+            "active": bool(decision.active),
+            "action": "replan_current_goal" if should_replan else "report",
+            "confidence": round(float(detection.get("confidence", 0.0)), 3),
+            "class_name": detection.get("class_name", hazard_type),
+            "bbox": detection.get("bbox", [0, 0, 0, 0]),
+            "image_path": detection.get("image_path", ""),
+            "checkpoint": self._current_checkpoint(),
+            "pose": self._pose_payload(),
+        }
+        prefix = "WATER_HAZARD" if hazard_type == "water" else "VISUAL_OBSTACLE"
+        event_type = f"{prefix}_CLEARED" if decision.event == "cleared" else prefix
+        severity = "INFO" if decision.event == "cleared" else "WARN"
+        self._log_event(event_type, payload, severity=severity)
+        self._publish_hazard_event(payload)
+        self._publish_status()
+
+    def _handle_fall_hazard(self, decision):
+        if not decision.should_report:
+            return
+        detection = decision.detection or {}
+        self._emergency_stop("视觉确认人员摔倒")
+        payload = {
+            "hazard_type": "fallen_person",
+            "event": decision.event,
+            "active": True,
+            "action": "stop_and_report",
+            "confidence": round(float(detection.get("confidence", 0.0)), 3),
+            "class_name": detection.get("class_name", "fallen_person"),
+            "bbox": detection.get("bbox", [0, 0, 0, 0]),
+            "image_path": detection.get("image_path", ""),
+            "checkpoint": self._current_checkpoint(),
+            "pose": self._pose_payload(),
+        }
+        self._log_event("FALL_DETECTED", payload, severity="ERROR")
+        self._publish_hazard_event(payload)
+        self._publish_status()
+        if self.state in (
+            PatrolState.RUNNING,
+            PatrolState.NAVIGATING,
+            PatrolState.CHECKPOINT,
+            PatrolState.DETECTING,
+            PatrolState.COLLECTING,
+        ):
+            self._transition_to(PatrolState.FAILED)
+
+    def _on_pose(self, msg: PoseStamped):
+        self.current_pose = {
+            "x": round(float(msg.pose.position.x), 3),
+            "y": round(float(msg.pose.position.y), 3),
+            "frame_id": msg.header.frame_id or "map",
+        }
 
     def _on_env_data(self, msg: EnvData):
         """传感器数据缓存"""
@@ -395,9 +606,20 @@ class TaskManagerNode(Node):
             self._emergency_stop(f"LLM requested: {request.action}")
         if plan.success and plan.emergency_stop_active is not None:
             self.emergency_stop_active = plan.emergency_stop_active
-            self.safety_stop_pub.publish(
-                Bool(data=plan.emergency_stop_active)
-            )
+            if request.action.strip().lower() == "reset":
+                self.obstacle_controller.reset_for_goal()
+                self.water_controller.reset()
+                self.visual_obstacle_controller.reset()
+                self.fall_controller.reset()
+                for hazard_type in ("water", "visual_obstacle", "fallen_person"):
+                    self._publish_hazard_event({
+                        "hazard_type": hazard_type,
+                        "event": "cleared",
+                        "active": False,
+                        "action": "manual_reset",
+                        "pose": self._pose_payload(),
+                    })
+            self._publish_safety_stop_state()
         if plan.next_state:
             try:
                 next_s = PatrolState(plan.next_state)
@@ -475,6 +697,7 @@ class TaskManagerNode(Node):
         })
         self.route_index = 0
         self.goal_sent_for_index = None
+        self.obstacle_controller.reset_for_goal()
         self._transition_to(PatrolState.NAVIGATING)
 
     def _handle_navigating(self):
@@ -634,10 +857,6 @@ def main(args=None):
     finally:
         node.destroy_node()
         rclpy.shutdown()
-
-
-if __name__ == "__main__":
-    main()
 
 
 if __name__ == '__main__':
