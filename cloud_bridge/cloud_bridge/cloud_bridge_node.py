@@ -8,10 +8,13 @@ cloud_bridge_node.py — MQTT ↔ ROS2 桥接节点
 Topic 映射:
   手机→MQTT→ROS2:
     /icar/cmd → /task/request (TaskRequest)
+    /icar/llm/command → /llm/user_command (String)
+    /icar/llm/generate_report → /llm/generate_report (Service)
   小车→ROS2→MQTT→手机:
     /task/status  → /icar/status
     /sensor/alert → /icar/alert
     /task/log     → /icar/log
+    /llm/response → /icar/llm/response
 """
 
 import json
@@ -20,6 +23,7 @@ import threading
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
+from std_msgs.msg import String as ROSString
 
 from icar_interfaces.msg import TaskRequest, TaskStatus, TaskLog, SensorAlert
 
@@ -62,9 +66,11 @@ class CloudBridgeNode(Node):
         self.create_subscription(TaskStatus, "/task/status", self._on_status, qos)
         self.create_subscription(SensorAlert, "/sensor/alert", self._on_alert, qos)
         self.create_subscription(TaskLog, "/task/log", self._on_log, qos)
+        self.create_subscription(ROSString, "/llm/response", self._on_llm_response, qos)
 
         # ── ROS2 发布：云 → 车 ──
         self.task_pub = self.create_publisher(TaskRequest, "/task/request", qos)
+        self.llm_command_pub = self.create_publisher(ROSString, "/llm/user_command", qos)
 
         # ── MQTT ──
         self.mqtt = mqtt.Client(CallbackAPIVersion.VERSION2)
@@ -94,6 +100,8 @@ class CloudBridgeNode(Node):
         if rc == 0:
             self.get_logger().info("MQTT 已连接")
             client.subscribe("/icar/cmd")
+            client.subscribe("/icar/llm/command")
+            client.subscribe("/icar/llm/generate_report")
         else:
             self.get_logger().error(f"MQTT 连接错误: rc={rc}")
 
@@ -103,21 +111,70 @@ class CloudBridgeNode(Node):
         self.get_logger().info(f"[云→车] {msg.topic}: {payload}")
 
         try:
-            data = json.loads(payload)
-            action = data.get("action", "").lower()
-            route = data.get("route", ["A", "B", "C"])
-            params = data.get("params", "")
+            if msg.topic == "/icar/llm/command":
+                data = json.loads(payload)
+                text = data.get("text", "")
+                if text:
+                    cmd_msg = ROSString()
+                    cmd_msg.data = text
+                    self.llm_command_pub.publish(cmd_msg)
+                    self.get_logger().info(f"已转发LLM指令: {text[:30]}...")
+                else:
+                    self.get_logger().warn("LLM指令为空")
 
-            if action in ("start", "patrol", "巡检"):
-                req = TaskRequest()
-                req.task_type = "patrol"
-                req.route = route
-                req.params = json.dumps(params, ensure_ascii=False) if isinstance(params, dict) else str(params)
-                self.task_pub.publish(req)
-                self.get_logger().info(f"已转发巡检任务: route={route}")
+            elif msg.topic == "/icar/llm/generate_report":
+                self._generate_llm_report()
+
+            else:
+                data = json.loads(payload)
+                action = data.get("action", "").lower()
+                route = data.get("route", ["A", "B", "C"])
+                params = data.get("params", "")
+
+                if action in ("start", "patrol", "巡检"):
+                    req = TaskRequest()
+                    req.task_type = "patrol"
+                    req.route = route
+                    req.params = json.dumps(params, ensure_ascii=False) if isinstance(params, dict) else str(params)
+                    self.task_pub.publish(req)
+                    self.get_logger().info(f"已转发巡检任务: route={route}")
 
         except (json.JSONDecodeError, KeyError) as e:
             self.get_logger().warn(f"无法解析指令: {payload}, error={e}")
+
+    def _generate_llm_report(self):
+        try:
+            from icar_interfaces.srv import GenerateReport
+            import rclpy
+
+            client = self.create_client(GenerateReport, '/llm/generate_report')
+            if not client.wait_for_service(timeout_sec=2.0):
+                self.get_logger().warn("/llm/generate_report service not available")
+                return
+
+            req = GenerateReport.Request()
+            req.task_id = ""
+            req.logs_json = ""
+
+            future = client.call_async(req)
+            rclpy.spin_until_future_complete(self, future)
+
+            response = future.result()
+            if response.success:
+                self._publish_mqtt("/icar/llm/report", {
+                    "success": True,
+                    "report_text": response.report_text
+                })
+                self.get_logger().info("已生成并发送巡检报告")
+            else:
+                self._publish_mqtt("/icar/llm/report", {
+                    "success": False,
+                    "error_msg": response.error_msg
+                })
+                self.get_logger().warn(f"报告生成失败: {response.error_msg}")
+
+        except Exception as e:
+            self.get_logger().error(f"调用LLM报告生成服务失败: {e}")
 
     # ── 车 → 云：状态/告警/日志 ──
     def _on_status(self, msg: TaskStatus):
