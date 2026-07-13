@@ -7,7 +7,7 @@ LOG="/home/jetson/icar_startup.log"
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 REPO=$(cd "$SCRIPT_DIR/.." && pwd -P)
 DOMAIN=30
-ENABLE_NAV2="${ICAR_ENABLE_NAV2:-0}"
+ENABLE_NAV2="${ICAR_ENABLE_NAV2:-1}"
 NAV2_MAP="${ICAR_NAV2_MAP:-/root/yahboomcar_ros2_ws/yahboomcar_ws/src/yahboomcar_nav/maps/yahboomcar.yaml}"
 NAV2_PARAMS="${ICAR_NAV2_PARAMS:-/root/yahboomcar_ros2_ws/yahboomcar_ws/src/yahboomcar_nav/params/dwa_nav_params.yaml}"
 exec > >(tee -a "$LOG") 2>&1
