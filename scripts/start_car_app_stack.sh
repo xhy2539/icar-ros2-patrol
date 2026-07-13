@@ -41,8 +41,15 @@ docker exec "$CONTAINER" bash -lc \
      -r /cmd_vel:=/cmd_vel_joy </dev/null >/tmp/joy_ctrl.log 2>&1 &"
 
 pkill -f '^python3 app/web_gateway.py$' 2>/dev/null || true
-cd "$REPO_DIR"
-nohup python3 app/web_gateway.py </dev/null >/tmp/icar_web_gateway.log 2>&1 &
+rm -f /tmp/icar_web_gateway.log
+WEB_USER="${ICAR_WEB_USER:-$(stat -c '%U' "$REPO_DIR")}"
+if [ "$(id -u)" -eq 0 ] && [ "$WEB_USER" != root ]; then
+  runuser -u "$WEB_USER" -- bash -lc \
+    "cd '$REPO_DIR'; nohup python3 app/web_gateway.py </dev/null >/tmp/icar_web_gateway.log 2>&1 &"
+else
+  cd "$REPO_DIR"
+  nohup python3 app/web_gateway.py </dev/null >/tmp/icar_web_gateway.log 2>&1 &
+fi
 
 sleep 3
 curl --fail --silent --show-error --max-time 2 http://127.0.0.1:6500/health
