@@ -260,13 +260,22 @@ class RobotTools:
             if os.path.exists(target):
                 return target
 
-        # 2) 自动扫描 AUDIO_DIR 下的 name.* 文件
+        # 2) 自动扫描 AUDIO_DIR 下的 name.* 文件（精确匹配）
         if os.path.isdir(AUDIO_DIR):
             for ext in ('.wav', '.mp3', '.m4a', '.opus', '.ogg', '.flac',
                         '.WAV', '.MP3', '.M4A'):
                 target = os.path.join(AUDIO_DIR, name + ext)
                 if os.path.exists(target):
                     return target
+
+        # 3) 模糊匹配：name 是文件名的子串，或文件名是 name 的子串
+        if os.path.isdir(AUDIO_DIR):
+            for f in sorted(os.listdir(AUDIO_DIR)):
+                base, ext = os.path.splitext(f)
+                if ext.lower() in ('.wav', '.mp3', '.m4a', '.opus', '.ogg', '.flac'):
+                    # 双向子串匹配
+                    if name.lower() in base.lower() or base.lower() in name.lower():
+                        return os.path.join(AUDIO_DIR, f)
 
         return ""
 

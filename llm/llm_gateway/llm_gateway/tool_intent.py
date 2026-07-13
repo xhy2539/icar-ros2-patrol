@@ -97,8 +97,15 @@ def parse_tool_intent(
     if any(word in compact for word in ("播放", "放一段", "播报", "提示音")):
         name = next(
             (audio_name for word, audio_name in audio_map.items() if word in compact),
-            "beep",
+            "",
         )
+        if not name:
+            for prefix in ("播放", "放一段", "播报"):
+                if prefix in text:
+                    name = text.split(prefix, 1)[-1].strip()
+                    break
+        if not name:
+            name = "beep"
         return {"tool_name": "play_audio", "arguments": {"name": name}}
 
     return None
