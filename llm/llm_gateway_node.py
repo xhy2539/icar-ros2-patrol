@@ -121,6 +121,10 @@ class LLMGatewayNode:
             "stop_robot": self._execute_stop_robot,
             "cancel_task": self._execute_cancel_task,
             "reset_task": self._execute_reset_task,
+            "query_vision": self._execute_query_vision,
+            "query_navigation": self._execute_query_navigation,
+            "check_safety": self._execute_check_safety,
+            "play_audio": self._execute_play_audio,
             "send_command": self._execute_send_command,
         }
 
@@ -166,6 +170,20 @@ class LLMGatewayNode:
         if self.node is None:
             return {"success": False, "message": "工具调用需要ROS2环境，请使用 --ros2 参数启动"}
         return self.robot_tools.start_patrol(route, user_text)
+
+    def _execute_query_vision(self) -> dict:
+        return self.robot_tools.query_vision()
+
+    def _execute_query_navigation(self) -> dict:
+        return self.robot_tools.query_navigation()
+
+    def _execute_check_safety(self) -> dict:
+        return self.robot_tools.check_safety()
+
+    def _execute_play_audio(self, name: str = "beep", file_path: str = "",
+                            volume: float = 1.0) -> dict:
+        """播放音频（不依赖 ROS2，直接调用系统播放器）。"""
+        return self.robot_tools.play_audio(name=name, file_path=file_path, volume=volume)
 
     def _execute_send_command(self, type: str, payload: Dict[str, Any]) -> dict:
         cmd = TaskCommand(
