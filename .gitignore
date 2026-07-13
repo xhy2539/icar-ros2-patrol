@@ -38,7 +38,6 @@ models/
 # Flutter 构建产物
 .dart_tool/
 .flutter-plugins-dependencies
-android/
 web/
 datasets/
 runs/

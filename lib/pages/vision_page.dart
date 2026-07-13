@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import '../theme/app_theme.dart';
 import '../services/car_controller.dart';
 import '../services/vision_models.dart';
+import '../widgets/mjpeg_stream_view.dart';
 
 class VisionPage extends StatefulWidget {
   const VisionPage({super.key});
@@ -40,8 +41,9 @@ class _VisionPageState extends State<VisionPage> {
   /// 自动截图状态
   bool _autoCapture = false;
   double _captureInterval = 3.0;
-  final TextEditingController _intervalCtrl =
-      TextEditingController(text: '3.0');
+  final TextEditingController _intervalCtrl = TextEditingController(
+    text: '3.0',
+  );
 
   @override
   void initState() {
@@ -139,9 +141,7 @@ class _VisionPageState extends State<VisionPage> {
       decoration: BoxDecoration(
         color: AppColors.surfaceAlt,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: AppColors.blueGray.withValues(alpha: 0.3),
-        ),
+        border: Border.all(color: AppColors.blueGray.withValues(alpha: 0.3)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.04),
@@ -172,8 +172,10 @@ class _VisionPageState extends State<VisionPage> {
                   top: 8,
                   left: 8,
                   child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
                     decoration: BoxDecoration(
                       color: AppColors.orange,
                       borderRadius: BorderRadius.circular(4),
@@ -201,8 +203,10 @@ class _VisionPageState extends State<VisionPage> {
                   top: 8,
                   right: 8,
                   child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
                     decoration: BoxDecoration(
                       color: AppColors.bluePurple,
                       borderRadius: BorderRadius.circular(4),
@@ -241,11 +245,11 @@ class _VisionPageState extends State<VisionPage> {
     // MJPEG HTTP 流
     if (isConnected) {
       final url = _showAnnotated ? _ctrl.annotatedVideoUrl : _ctrl.videoUrl;
-      return Image.network(
-        url,
+      return MjpegStreamView(
+        key: ValueKey(url),
+        url: url,
         fit: BoxFit.cover,
-        gaplessPlayback: true,
-        errorBuilder: (context, error, stackTrace) {
+        errorBuilder: (error) {
           if (!_videoErrorLogged) {
             _videoErrorLogged = true;
             _ctrl.addMessage('[视频] MJPEG 流加载失败: $error');
@@ -254,15 +258,11 @@ class _VisionPageState extends State<VisionPage> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.wifi_off,
-                    color: AppColors.blueGray, size: 36),
+                const Icon(Icons.wifi_off, color: AppColors.blueGray, size: 36),
                 const SizedBox(height: 6),
                 Text(
                   '视频流加载失败',
-                  style: TextStyle(
-                    color: AppColors.blueGrayDark,
-                    fontSize: 12,
-                  ),
+                  style: TextStyle(color: AppColors.blueGrayDark, fontSize: 12),
                 ),
                 const SizedBox(height: 2),
                 Text(
@@ -276,38 +276,39 @@ class _VisionPageState extends State<VisionPage> {
             ),
           );
         },
-        loadingBuilder: (context, child, loadingProgress) {
-          if (loadingProgress == null) {
-            if (!_videoFirstFrameLogged) {
-              _videoFirstFrameLogged = true;
-              _ctrl.addMessage('[视频] MJPEG 流已接通');
-            }
-            return child;
+        onFirstFrame: () {
+          if (!_videoFirstFrameLogged) {
+            _videoFirstFrameLogged = true;
+            _ctrl.addMessage('[视频] MJPEG 流已接通');
           }
-          if (!_videoLoadLogged) {
-            _videoLoadLogged = true;
-            _ctrl.addMessage('[视频] 正在请求 MJPEG 流: $url');
-          }
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const CircularProgressIndicator(
-                  color: AppColors.orange,
-                  strokeWidth: 2,
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  '正在加载视频流...',
-                  style: TextStyle(
-                    color: AppColors.blueGrayDark,
-                    fontSize: 11,
-                  ),
-                ),
-              ],
-            ),
-          );
         },
+        placeholder: Builder(
+          builder: (context) {
+            if (!_videoLoadLogged) {
+              _videoLoadLogged = true;
+              _ctrl.addMessage('[视频] 正在请求 MJPEG 流: $url');
+            }
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const CircularProgressIndicator(
+                    color: AppColors.orange,
+                    strokeWidth: 2,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '正在加载视频流...',
+                    style: TextStyle(
+                      color: AppColors.blueGrayDark,
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
       );
     }
 
@@ -328,10 +329,7 @@ class _VisionPageState extends State<VisionPage> {
           const SizedBox(height: 6),
           Text(
             isConnected ? '等待视频流...' : '连接小车后显示摄像头画面',
-            style: TextStyle(
-              color: AppColors.blueGrayDark,
-              fontSize: 12,
-            ),
+            style: TextStyle(color: AppColors.blueGrayDark, fontSize: 12),
           ),
         ],
       ),
@@ -364,10 +362,7 @@ class _VisionPageState extends State<VisionPage> {
           const SizedBox(width: 16),
           Text(
             '分辨率: $_imgWidth x $_imgHeight',
-            style: const TextStyle(
-              color: AppColors.blueGray,
-              fontSize: 11,
-            ),
+            style: const TextStyle(color: AppColors.blueGray, fontSize: 11),
           ),
         ],
       ),
@@ -433,8 +428,8 @@ class _VisionPageState extends State<VisionPage> {
         color: isTracking
             ? AppColors.successGreen.withValues(alpha: 0.1)
             : tracking.isLost
-                ? AppColors.orange.withValues(alpha: 0.1)
-                : AppColors.surface,
+            ? AppColors.orange.withValues(alpha: 0.1)
+            : AppColors.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: isTracking
@@ -463,14 +458,13 @@ class _VisionPageState extends State<VisionPage> {
           ),
           const Spacer(),
           GestureDetector(
-            onTap:
-                isTracking ? _ctrl.sendTrackingStop : _ctrl.sendTrackingStart,
+            onTap: isTracking
+                ? _ctrl.sendTrackingStop
+                : _ctrl.sendTrackingStart,
             child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
-                color:
-                    isTracking ? AppColors.errorRed : AppColors.bluePurple,
+                color: isTracking ? AppColors.errorRed : AppColors.bluePurple,
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
@@ -533,14 +527,15 @@ class _VisionPageState extends State<VisionPage> {
           // 自动截图设置
           Row(
             children: [
-              const Icon(Icons.timelapse, color: AppColors.bluePurple, size: 18),
+              const Icon(
+                Icons.timelapse,
+                color: AppColors.bluePurple,
+                size: 18,
+              ),
               const SizedBox(width: 6),
               const Text(
                 '自动截图间隔',
-                style: TextStyle(
-                  color: AppColors.darkNavy,
-                  fontSize: 13,
-                ),
+                style: TextStyle(color: AppColors.darkNavy, fontSize: 13),
               ),
               const Spacer(),
               SizedBox(
@@ -582,8 +577,7 @@ class _VisionPageState extends State<VisionPage> {
                 child: ElevatedButton(
                   onPressed: _ctrl.isConnected
                       ? () {
-                          final d =
-                              double.tryParse(_intervalCtrl.text) ?? 3.0;
+                          final d = double.tryParse(_intervalCtrl.text) ?? 3.0;
                           _ctrl.sendCaptureCommand({
                             'action': 'set_interval',
                             'interval_sec': d,
@@ -607,15 +601,15 @@ class _VisionPageState extends State<VisionPage> {
           const SizedBox(height: 10),
           Row(
             children: [
-              const Icon(Icons.photo_library,
-                  color: AppColors.blueGray, size: 16),
+              const Icon(
+                Icons.photo_library,
+                color: AppColors.blueGray,
+                size: 16,
+              ),
               const SizedBox(width: 6),
               const Text(
                 '最多保存',
-                style: TextStyle(
-                  color: AppColors.blueGrayDark,
-                  fontSize: 12,
-                ),
+                style: TextStyle(color: AppColors.blueGrayDark, fontSize: 12),
               ),
               const Spacer(),
               SizedBox(
@@ -684,9 +678,7 @@ class _VisionPageState extends State<VisionPage> {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 12),
         decoration: BoxDecoration(
-          color: enabled
-              ? color.withValues(alpha: 0.12)
-              : AppColors.surfaceAlt,
+          color: enabled ? color.withValues(alpha: 0.12) : AppColors.surfaceAlt,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
             color: enabled
@@ -699,14 +691,18 @@ class _VisionPageState extends State<VisionPage> {
           children: [
             Icon(
               icon,
-              color: enabled ? color : AppColors.blueGray.withValues(alpha: 0.4),
+              color: enabled
+                  ? color
+                  : AppColors.blueGray.withValues(alpha: 0.4),
               size: 18,
             ),
             const SizedBox(width: 6),
             Text(
               label,
               style: TextStyle(
-                color: enabled ? color : AppColors.blueGray.withValues(alpha: 0.4),
+                color: enabled
+                    ? color
+                    : AppColors.blueGray.withValues(alpha: 0.4),
                 fontSize: 12,
                 fontWeight: FontWeight.w500,
               ),
@@ -740,8 +736,10 @@ class _VisionPageState extends State<VisionPage> {
               runSpacing: 4,
               children: counts.entries.map((e) {
                 return Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
                     color: _classColor(e.key).withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(6),
@@ -819,11 +817,7 @@ class _VisionPageState extends State<VisionPage> {
               color: color.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(6),
             ),
-            child: Icon(
-              _classIcon(d.className),
-              color: color,
-              size: 16,
-            ),
+            child: Icon(_classIcon(d.className), color: color, size: 16),
           ),
           const SizedBox(width: 8),
           // 类别名 + 置信度
@@ -887,9 +881,7 @@ class _VisionPageState extends State<VisionPage> {
               ),
               const SizedBox(width: 6),
               Text(
-                _autoCapture
-                    ? '自动截图中 (每 ${_captureInterval}s)'
-                    : '手动模式',
+                _autoCapture ? '自动截图中 (每 ${_captureInterval}s)' : '手动模式',
                 style: TextStyle(
                   color: _autoCapture ? AppColors.errorRed : AppColors.blueGray,
                   fontSize: 12,
@@ -908,13 +900,13 @@ class _VisionPageState extends State<VisionPage> {
                   status.isSuccess
                       ? Icons.check_circle
                       : status.isError
-                          ? Icons.error
-                          : Icons.info,
+                      ? Icons.error
+                      : Icons.info,
                   color: status.isSuccess
                       ? AppColors.successGreen
                       : status.isError
-                          ? AppColors.errorRed
-                          : AppColors.blueGray,
+                      ? AppColors.errorRed
+                      : AppColors.blueGray,
                   size: 16,
                 ),
                 const SizedBox(width: 6),
@@ -925,8 +917,8 @@ class _VisionPageState extends State<VisionPage> {
                       color: status.isSuccess
                           ? AppColors.successGreen
                           : status.isError
-                              ? AppColors.errorRed
-                              : AppColors.darkNavy,
+                          ? AppColors.errorRed
+                          : AppColors.darkNavy,
                       fontSize: 12,
                     ),
                   ),
@@ -938,8 +930,11 @@ class _VisionPageState extends State<VisionPage> {
                 padding: const EdgeInsets.only(top: 4),
                 child: Row(
                   children: [
-                    const Icon(Icons.photo_library,
-                        color: AppColors.blueGray, size: 14),
+                    const Icon(
+                      Icons.photo_library,
+                      color: AppColors.blueGray,
+                      size: 14,
+                    ),
                     const SizedBox(width: 6),
                     Text(
                       '已保存: ${status.savedCount} 张',
@@ -956,8 +951,11 @@ class _VisionPageState extends State<VisionPage> {
                 padding: const EdgeInsets.only(top: 4),
                 child: Row(
                   children: [
-                    const Icon(Icons.folder,
-                        color: AppColors.blueGray, size: 14),
+                    const Icon(
+                      Icons.folder,
+                      color: AppColors.blueGray,
+                      size: 14,
+                    ),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
@@ -1084,10 +1082,7 @@ class _VisionPageState extends State<VisionPage> {
                 icon: const Icon(Icons.copy, size: 18),
                 color: AppColors.bluePurple,
                 tooltip: '复制全部日志',
-                constraints: const BoxConstraints(
-                  minWidth: 36,
-                  minHeight: 36,
-                ),
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
                 padding: EdgeInsets.zero,
               ),
               const SizedBox(width: 4),
@@ -1096,10 +1091,7 @@ class _VisionPageState extends State<VisionPage> {
                 icon: const Icon(Icons.delete_outline, size: 18),
                 color: AppColors.blueGray,
                 tooltip: '清空日志',
-                constraints: const BoxConstraints(
-                  minWidth: 36,
-                  minHeight: 36,
-                ),
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
                 padding: EdgeInsets.zero,
               ),
             ],
@@ -1115,10 +1107,7 @@ class _VisionPageState extends State<VisionPage> {
                 ? const Center(
                     child: Text(
                       '暂无日志',
-                      style: TextStyle(
-                        color: AppColors.blueGray,
-                        fontSize: 12,
-                      ),
+                      style: TextStyle(color: AppColors.blueGray, fontSize: 12),
                     ),
                   )
                 : ListView.builder(
@@ -1134,10 +1123,10 @@ class _VisionPageState extends State<VisionPage> {
                             color: logs[index].contains('[错误]')
                                 ? AppColors.errorRed
                                 : logs[index].contains('[收到]')
-                                    ? AppColors.successGreen
-                                    : logs[index].contains('[调试]')
-                                        ? AppColors.blueGray
-                                        : AppColors.darkNavyLight,
+                                ? AppColors.successGreen
+                                : logs[index].contains('[调试]')
+                                ? AppColors.blueGray
+                                : AppColors.darkNavyLight,
                             fontSize: 11,
                             fontFamily: 'monospace',
                           ),
@@ -1231,7 +1220,8 @@ class _DetectionPainter extends CustomPainter {
       canvas.drawRect(rect, boxPaint);
 
       // 标签文字
-      final label = '${det.className} ${(det.confidence * 100).toStringAsFixed(0)}%';
+      final label =
+          '${det.className} ${(det.confidence * 100).toStringAsFixed(0)}%';
       final tp = TextPainter(
         text: TextSpan(
           text: label,
