@@ -77,7 +77,7 @@ if [[ ${ICAR_INSTALL_SYSTEMD:-1} == 1 ]]; then
 fi
 
 RESTART_COMMAND=${ICAR_RESTART_COMMAND:-systemctl restart icar_startup.service && systemctl restart icar_web_gateway.service}
-HEALTH_COMMAND=${ICAR_HEALTH_COMMAND:-systemctl is-active --quiet icar_startup.service icar_web_gateway.service && curl --fail --silent --show-error --max-time 5 http://127.0.0.1:6500/health}
+HEALTH_COMMAND=${ICAR_HEALTH_COMMAND:-systemctl is-active --quiet icar_startup.service icar_web_gateway.service && curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 1 --max-time 5 http://127.0.0.1:6500/health}
 
 if bash -lc "$RESTART_COMMAND" && bash -lc "$HEALTH_COMMAND"; then
   echo "版本已激活并通过健康检查: $VERSION"
