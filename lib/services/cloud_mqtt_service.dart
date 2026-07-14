@@ -180,6 +180,11 @@ class CloudMqttService {
     });
   }
 
+  bool publishAlertSound({required bool enabled}) {
+    if (!isConnected || !_robotOnline) return false;
+    return _publish(_topics.alarm, {'enabled': enabled});
+  }
+
   bool _publish(String topic, Map<String, dynamic> payload) {
     final client = _client;
     if (!isConnected || client == null) return false;

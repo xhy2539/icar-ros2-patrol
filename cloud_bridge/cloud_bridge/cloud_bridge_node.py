@@ -28,10 +28,11 @@ import time
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
-from std_msgs.msg import String as ROSString
+from std_msgs.msg import Bool as ROSBool, String as ROSString
 from geometry_msgs.msg import PoseStamped, Twist
 
 from icar_interfaces.msg import (
+    DetectionArray,
     EnvData,
     NavStatus,
     ObstacleStatus,
@@ -139,6 +140,15 @@ class CloudBridgeNode(Node):
             ObstacleStatus, "/obstacle_status", self._on_obstacle_status, qos
         )
         self.create_subscription(EnvData, "/sensor/env_data", self._on_env_data, qos)
+        self.create_subscription(
+            DetectionArray, "/vision/detections", self._on_detections, qos
+        )
+        self.create_subscription(
+            ROSString, "/vision/capture_status", self._on_capture_status, qos
+        )
+        self.create_subscription(
+            ROSString, "/vision/target_tracking/status", self._on_tracking_status, qos
+        )
 
         # ── ROS2 发布：云 → 车 ──
         self.task_pub = self.create_publisher(TaskRequest, "/task/request", qos)
@@ -146,8 +156,21 @@ class CloudBridgeNode(Node):
         self.cloud_cmd_vel_pub = self.create_publisher(
             Twist, self.get_parameter("cloud_cmd_vel_topic").value, qos
         )
+        self.alarm_sound_pub = self.create_publisher(ROSBool, "/safety/alarm_sound_enabled", qos)
         self.report_client = self.create_client(GenerateReport, "/llm/generate_report")
         self.create_timer(0.05, self._publish_cloud_motion)
+
+        # ── 视频帧转发 (MJPEG → MQTT) ──
+        self.declare_parameter("video_enabled", True)
+        self.declare_parameter("video_fps", 10)
+        self.declare_parameter("video_resize_width", 640)
+        self.declare_parameter("video_mjpeg_url", "http://127.0.0.1:6502/video_feed")
+        self._video_stop = threading.Event()
+        if self.get_parameter("video_enabled").value:
+            self._video_thread = threading.Thread(
+                target=self._video_grabber, daemon=True
+            )
+            self._video_thread.start()
 
         # ── MQTT ──
         self.mqtt = self._create_mqtt_client()
@@ -208,6 +231,7 @@ class CloudBridgeNode(Node):
             client.subscribe(self.topics.llm_command, qos=self.mqtt_qos)
             client.subscribe(self.topics.llm_generate_report, qos=self.mqtt_qos)
             client.subscribe(self.topics.snapshot_request, qos=self.mqtt_qos)
+            client.subscribe(self.topics.alarm, qos=self.mqtt_qos)
             client.publish(
                 self.topics.online,
                 json.dumps({"online": True}, ensure_ascii=False),
@@ -259,6 +283,12 @@ class CloudBridgeNode(Node):
             elif msg.topic == self.topics.snapshot_request:
                 snapshot_request = parse_snapshot_request(payload)
                 self._request_snapshot(snapshot_request)
+
+            elif msg.topic == self.topics.alarm:
+                data = json.loads(payload.decode("utf-8"))
+                enabled = bool(data.get("enabled", True)) if isinstance(data, dict) else True
+                self.alarm_sound_pub.publish(ROSBool(data=enabled))
+                self.get_logger().info(f"云→车 告警声音: {'开' if enabled else '关'}")
 
             elif msg.topic == self.topics.command:
                 command = parse_task_command(
@@ -470,6 +500,38 @@ class CloudBridgeNode(Node):
             "pressure": msg.pressure,
         }, retain=True)
 
+    def _on_detections(self, msg: DetectionArray):
+        dets = []
+        for d in msg.detections:
+            dets.append({
+                "class_name": d.class_name,
+                "confidence": round(float(d.confidence), 4),
+                "x_min": d.x_min,
+                "y_min": d.y_min,
+                "x_max": d.x_max,
+                "y_max": d.y_max,
+            })
+        self.get_logger().info(
+            f"云→车 检测: {len(dets)} 个目标", throttle_duration_sec=2.0
+        )
+        self._publish_mqtt(self.topics.detection, {
+            "detections": dets,
+        })
+
+    def _on_capture_status(self, msg: ROSString):
+        try:
+            payload = json.loads(msg.data)
+        except json.JSONDecodeError:
+            payload = {"raw": msg.data}
+        self._publish_mqtt(self.topics.capture, payload)
+
+    def _on_tracking_status(self, msg: ROSString):
+        try:
+            payload = json.loads(msg.data)
+        except json.JSONDecodeError:
+            payload = {"raw": msg.data}
+        self._publish_mqtt(self.topics.tracking, payload)
+
     def _on_alert(self, msg: SensorAlert):
         self._publish_mqtt(self.topics.alert, {
             "sensor_type": msg.sensor_type,
@@ -574,6 +636,93 @@ class CloudBridgeNode(Node):
         msg.linear.x, msg.linear.y, msg.angular.z = motion
         self.cloud_cmd_vel_pub.publish(msg)
 
+    def _video_grabber(self):
+        """Background thread: pull JPEG frames from MJPEG server → MQTT binary."""
+        import urllib.request
+
+        url = str(self.get_parameter("video_mjpeg_url").value)
+        fps = float(self.get_parameter("video_fps").value)
+        interval = 1.0 / max(fps, 1.0)
+        # Simple MJPEG multipart parser state
+        boundary = None
+        buf = b""
+        last_pub = 0.0
+
+        def _extract_jpeg(data, boundary_bytes):
+            """Extract the JPEG body from one multipart part."""
+            hdr_end = data.find(b"\r\n\r\n")
+            if hdr_end < 0:
+                return None
+            body = data[hdr_end + 4:]
+            # Strip trailing boundary marker
+            end = body.rfind(boundary_bytes)
+            if end >= 0:
+                body = body[:end]
+            return body.rstrip(b"\r\n-") if body else None
+
+        while not self._video_stop.is_set():
+            try:
+                self.get_logger().info(f"视频帧抓取: 连接 {url}")
+                req = urllib.request.Request(url)
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    content_type = resp.headers.get("Content-Type", "")
+                    # Parse boundary from Content-Type header
+                    for part in content_type.split(";"):
+                        part = part.strip()
+                        if part.startswith("boundary="):
+                            boundary = part[len("boundary="):].strip(' "')
+                            break
+                    if not boundary:
+                        self.get_logger().error("MJPEG 流缺少 boundary")
+                        break
+                    boundary_bytes = ("--" + boundary).encode()
+                    self.get_logger().info(
+                        f"视频帧抓取已连接, boundary={boundary}, fps={fps}"
+                    )
+                    while not self._video_stop.is_set():
+                        chunk = resp.read(8192)
+                        if not chunk:
+                            break
+                        buf += chunk
+                        # Extract complete parts
+                        while True:
+                            idx = buf.find(boundary_bytes)
+                            if idx < 0:
+                                break
+                            if idx > 0:
+                                part = buf[:idx]
+                                jpeg = _extract_jpeg(part, boundary_bytes)
+                                if jpeg and len(jpeg) > 500:
+                                    now = time.monotonic()
+                                    if now - last_pub >= interval:
+                                        self._publish_mqtt_binary(
+                                            self.topics.video_frame, jpeg
+                                        )
+                                        last_pub = now
+                            # Skip past this boundary
+                            next_start = idx + len(boundary_bytes)
+                            if buf[next_start:next_start + 2] == b"--":
+                                # End of stream marker
+                                buf = b""
+                                break
+                            buf = buf[next_start + 2:]  # skip \r\n after boundary
+            except Exception as e:
+                self.get_logger().warn(f"视频帧抓取异常: {e}")
+            if not self._video_stop.is_set():
+                self.get_logger().info("视频帧抓取 5s 后重连…")
+                self._video_stop.wait(5)
+
+    def _publish_mqtt_binary(self, topic, data: bytes):
+        """Publish binary payload (JPEG frame) to MQTT."""
+        try:
+            info = self.mqtt.publish(topic, data, qos=0)
+            if getattr(info, "rc", 0) != 0:
+                self.get_logger().warn(
+                    f"MQTT 视频帧发送排队失败: topic={topic}, rc={info.rc}"
+                )
+        except Exception as e:
+            self.get_logger().warn(f"MQTT 视频帧发送失败: {e}")
+
     def _telemetry_due(self, key, force=False):
         now = time.monotonic()
         interval = float(self.get_parameter("telemetry_interval_sec").value)
@@ -596,6 +745,8 @@ class CloudBridgeNode(Node):
             self.get_logger().warn(f"MQTT 发送失败: {e}")
 
     def destroy_node(self):
+        if hasattr(self, "_video_stop"):
+            self._video_stop.set()
         if hasattr(self, "cloud_cmd_vel_pub"):
             self._stop_cloud_motion("节点关闭")
         if hasattr(self, "mqtt"):

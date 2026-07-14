@@ -78,13 +78,13 @@
   <main class="shell">
     <header>
       <div class="brand"><div class="logo">iC</div><div><h1>iCar 控制台</h1><p>智能巡检小车 · 浏览器模拟器</p></div></div>
-      <div class="mode" aria-label="连接模式"><button id="mockMode" class="active">安全模拟</button><button id="realMode">真实小车</button></div>
+      <div class="mode" aria-label="连接模式"><button id="mockMode" class="active">安全模拟</button><button id="realMode">真实小车</button><button id="cloudMode">☁️ 云端</button></div>
     </header>
     <section class="grid">
       <div>
         <article class="card">
           <div class="card-title"><div><div class="eyebrow">Connection</div><h2>连接状态</h2></div><span id="stateText">未连接</span></div>
-          <div class="connection"><i id="stateDot" class="dot"></i><input id="host" class="host" value="192.168.137.117" aria-label="小车 IP"><button id="connect" class="connect-btn">连接</button></div>
+          <div class="connection"><i id="stateDot" class="dot"></i><input id="host" class="host" value="10.247.5.83" aria-label="小车 IP"><button id="connect" class="connect-btn">连接</button></div>
           <div id="safeNote" class="safe-note">当前为安全模拟模式：不会向真车发送任何指令。</div>
         </article>
         <article class="card">
@@ -194,6 +194,8 @@
   <div id="toast" class="toast"></div>
   <script>
     const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+    const localPreview=['127.0.0.1','localhost'].includes(location.hostname);
+    if(localPreview){$('#host').readOnly=true;$('#host').title='本机代理已自动连接小车';}
     let mode='mock', connected=false, ws=null, active='', pulse=null, beat=0, overlayEnabled=false, detections=[], imageWidth=640, imageHeight=480, visionFallbackAttempted=false;
     let alertSoundEnabled=localStorage.getItem('icar.alertSoundEnabled')!=='false', obstacleAvoidanceEnabled=localStorage.getItem('icar.obstacleAvoidanceEnabled')!=='false', alertSoundLastAt=0, audioContext=null, activeAlertOscillators=[], autoCaptureInterval=null;
     /* Mission state */
@@ -208,15 +210,62 @@
     function playAlertSound(){if(!alertSoundEnabled||Date.now()-alertSoundLastAt<1800)return;alertSoundLastAt=Date.now();try{audioContext??=new (window.AudioContext||window.webkitAudioContext)();audioContext.resume();const oscillator=audioContext.createOscillator(),gain=audioContext.createGain();oscillator.type='square';oscillator.frequency.value=880;gain.gain.setValueAtTime(.08,audioContext.currentTime);gain.gain.exponentialRampToValueAtTime(.001,audioContext.currentTime+.25);oscillator.connect(gain).connect(audioContext.destination);activeAlertOscillators.push(oscillator);oscillator.onended=()=>activeAlertOscillators=activeAlertOscillators.filter(item=>item!==oscillator);oscillator.start();oscillator.stop(audioContext.currentTime+.25)}catch(_){}}
     function setConnected(value){connected=value;$('#stateDot').className='dot'+(value?' on':'');$('#stateText').textContent=value?'已连接':'未连接';$('#connect').textContent=value?'断开':'连接';$('#connect').classList.toggle('on',value);$('#action').textContent=value?'待机':'等待连接';$('#missionStatus').textContent=value?(mode==='real'?'LLM 就绪':'模拟模式'):'等待连接';$$('[data-command],#stop').forEach(b=>b.disabled=!value);if(value&&mode==='real')startVision();else stopVision()}
     function payload(cmd){return JSON.stringify({command:cmd,speed:+$('#speed').value/100})}
-    function send(cmd,quiet=false){if(!connected)return;if(mode==='real'&&(!ws||ws.readyState!==1)){log('真实连接不可用，指令未发送','');return}const data=payload(cmd);if(mode==='real')ws.send(data);if(!quiet)log(`发送 ${data}`,'tx');if(mode==='mock'&&!quiet)setTimeout(()=>log(`模拟确认 command=${cmd} accepted=true`,'rx'),90)}
+    function send(cmd,quiet=false){if(!connected)return;
+      if(mode==='cloud'){
+        const p=Number($('#speed').value)/100;
+        cloudAction('control',{command:cmd,speed:p,lease_ms:1000,issued_at_ms:Date.now()});
+        if(!quiet)log(`云端发送 control: ${cmd} speed=${p.toFixed(2)}`,'tx');
+        return;
+      }
+      if(mode==='real'&&(!ws||ws.readyState!==1)){log('真实连接不可用，指令未发送','');return}const data=payload(cmd);if(mode==='real')ws.send(data);if(!quiet)log(`发送 ${data}`,'tx');if(mode==='mock'&&!quiet)setTimeout(()=>log(`模拟确认 command=${cmd} accepted=true`,'rx'),90)}
     function motion(cmd){const v=.45*(+$('#speed').value/100),a=1.2*(+$('#speed').value/100);let x=0,y=0,z=0;if(cmd==='forward')x=v;if(cmd==='backward')x=-v;if(cmd==='left')y=v;if(cmd==='right')y=-v;if(cmd==='turn_left')z=a;if(cmd==='turn_right')z=-a;$('#vx').textContent=`vx ${x.toFixed(2)}`;$('#vy').textContent=`vy ${y.toFixed(2)}`;$('#wz').textContent=`wz ${z.toFixed(2)}`;$('#motionBar').style.width=cmd==='stop'?'0':`${$('#speed').value}%`}
     function press(button){if(!connected)return;release(false);active=button.dataset.command;button.classList.add('pressed');$('#action').textContent=names[active];beat=0;send(active);motion(active);pulse=setInterval(()=>{beat++;send(active,true);$('#heartbeat').textContent=`看门狗续租：${beat} · 100 ms`},100)}
     function release(withLog=true){if(pulse)clearInterval(pulse);pulse=null;$$('.pressed').forEach(b=>b.classList.remove('pressed'));if(active&&connected)send('stop',!withLog);active='';motion('stop');$('#heartbeat').textContent='看门狗：未激活';if(connected)$('#action').textContent='已停止'}
-    function visionBase(){return ['127.0.0.1','localhost'].includes(location.hostname)?'http://127.0.0.1:8766':`http://${$('#host').value.trim()}:6500`}
-    function startVision(){const base=visionBase();visionFallbackAttempted=false;$('#visionOverall').textContent='正在连接摄像头';$('#visionOverall').style.color='var(--muted)';$('#streamStatus').textContent='加载中';$('#visionPlaceholder').textContent='正在加载实时画面…';fetch(`${base}/health`).then(r=>r.json()).then(data=>{const camera=data.camera||{},useAnnotated=camera.annotated_ready&&!camera.raw_ready;const feed=useAnnotated?'yolo_video_feed':'video_feed';visionFallbackAttempted=useAnnotated;$('#visionFeed').src=`${base}/${feed}?t=${Date.now()}`;if(useAnnotated)$('#streamStatus').textContent='标注画面加载中';else if(camera.raw_ready)$('#streamStatus').textContent='原始画面加载中'}).catch(()=>{$('#visionFeed').src=`${base}/video_feed?t=${Date.now()}`});fetch(`${base}/yolo_detailed_status`).then(r=>r.json()).then(data=>{$('#detectorStatus').textContent=data.enabled?(data.status||'已启用'):'未启用 · 等待检测节点'}).catch(()=>{$('#detectorStatus').textContent='状态查询失败'})}
-    function stopVision(){$('#visionFeed').removeAttribute('src');$('#visionFeed').style.display='none';$('#visionPlaceholder').style.display='block';$('#visionPlaceholder').innerHTML='连接真实小车后<br>显示摄像头画面';$('#visionOverall').textContent='等待真车连接';$('#visionOverall').style.color='var(--muted)';$('#streamStatus').textContent='未连接';detections=[];renderDetections();drawOverlay()}
+    function visionBase(){return `http://${$('#host').value.trim()}:6500`}
+    let _visionTimer=null;
+    function startVision(){
+      const base=visionBase();
+      visionFallbackAttempted=false;
+      $('#visionOverall').textContent='正在连接摄像头';
+      $('#visionOverall').style.color='var(--muted)';
+      $('#streamStatus').textContent='加载中';
+      fetch(`${base}/health`).then(r=>r.json()).then(data=>{
+        const c=data.camera||{};
+        $('#streamStatus').textContent=c.raw_ready?'视频在线':'等待摄像头';
+      }).catch(()=>{});
+      fetch(`${base}/yolo_detailed_status`).then(r=>r.json()).then(data=>{
+        $('#detectorStatus').textContent=data.enabled?(data.status||'已启用'):'未启用';
+      }).catch(()=>{});
+      // Poll snapshot every 200ms for Safari compat
+      function tick(){
+        if(!connected||mode!=='real'){_visionTimer=null;return}
+        $('#visionFeed').src=base+'/snapshot?t='+Date.now();
+        _visionTimer=setTimeout(tick,200);
+      }
+      $('#visionFeed').onload=()=>{
+        $('#visionFeed').style.display='block';
+        $('#visionPlaceholder').style.display='none';
+        $('#visionOverall').textContent='● 实时画面';
+        $('#visionOverall').style.color='var(--green)';
+      };
+      $('#visionFeed').onerror=()=>{
+        // ignore transient errors between snapshots
+      };
+      tick();
+    }
+    function stopVision(){
+      if(_visionTimer){clearTimeout(_visionTimer);_visionTimer=null}
+      $('#visionFeed').removeAttribute('src');
+      $('#visionFeed').style.display='none';
+      $('#visionPlaceholder').style.display='block';
+      $('#visionPlaceholder').innerHTML='连接真实小车后<br>显示摄像头画面';
+      $('#visionOverall').textContent='等待真车连接';
+      $('#visionOverall').style.color='var(--muted)';
+      $('#streamStatus').textContent='未连接';
+      detections=[];renderDetections();drawOverlay();
+    }
     function subscribeVision(){['detections','capture_status','tracking_status','obstacle_status','safety_alarm','task_status','nav_status','task_log','llm_response','sensor_env_data','sensor_alert'].forEach(topic=>ws.send(JSON.stringify({subscribe:topic})))}
-    function handleMessage(event){let data;try{data=JSON.parse(event.data)}catch(_){log(`收到 ${event.data}`,'rx');return}const topic=data.topic||'';if(topic==='detections'){detections=Array.isArray(data.detections)?data.detections:[];imageWidth=Number(data.image_width)||640;imageHeight=Number(data.image_height)||480;$('#visionResolution').textContent=`${imageWidth} × ${imageHeight}`;renderDetections();drawOverlay();return}if(topic==='capture_status'){$('#captureStatus').textContent=data.error?`错误：${data.error}`:(data.event==='image_saved'?'截图已保存':(data.event||'已更新'));return}if(topic==='tracking_status'){$('#trackingStatus').textContent=data.state||data.status||data.event||'已更新';return}if(topic==='obstacle_status'){const danger=data.risk_level==='danger'||data.action==='stop';const warning=data.risk_level==='warning';if(danger||warning)playAlertSound();$('#obstacleStatus').textContent=danger?`危险 ${Number(data.min_distance||0).toFixed(2)}m`:(warning?'警告':'安全');$('#obstacleStatus').className=danger?'':(warning?'':'good');return}if(topic==='safety_alarm'){const active=Boolean(data.active),water=data.hazard_type==='water',visual=data.hazard_type==='visual_obstacle',confidence=Math.round(Number(data.confidence||0)*100);if(active)playAlertSound();$('#obstacleStatus').textContent=active?(water?`积水告警 ${confidence}%`:(visual?`视觉障碍 ${confidence}%`:`报警 ${Number(data.distance||0).toFixed(2)}m`)):'安全';$('#obstacleStatus').className=active?'':'good';log(active?(water?'检测到积水：已告警并请求重规划':(visual?'检测到视觉障碍：已告警并请求重规划':'避障报警已触发')):(water?'积水告警已解除':(visual?'视觉障碍告警已解除':'避障报警已解除')),active?'':'rx');return}if(topic==='task_status'){$('#taskStatus').textContent=data.status||'待机';renderTimeline();return}if(topic==='sensor_env_data'){if(data.temperature!==undefined)$('#temp').textContent=Number(data.temperature).toFixed(1)+'°C';if(data.humidity!==undefined)$('#humidity').textContent=Math.round(Number(data.humidity))+'%';if(data.pm25!==undefined)$('#pm').textContent=Math.round(Number(data.pm25));if(data.smoke!==undefined)$('#smoke').textContent=Math.round(Number(data.smoke))+' ppm';if(data.light!==undefined)$('#light').textContent=Math.round(Number(data.light))+' lux';if(data.pressure!==undefined)$('#pressure').textContent=Math.round(Number(data.pressure))+' hPa';return}if(topic==='sensor_alert'){playAlertSound();log('传感器告警: '+data.sensor_type+' '+Number(data.current_value)+' > '+Number(data.threshold),'rx');return}if(topic==='nav_status'){updateNavStatus(data);return}if(topic==='task_log'){addTaskLog({cat:categorizeLog(data.event_type||''),summary:data.event_type||(''+(data.data_json||'')),time:data.timestamp||'',severity:data.severity||''});return}if(topic==='llm_response'){handleLlmResponse(data);return}if(topic==='parse_task_result'){missionHistory=missionHistory.filter(m=>m.type!=='pending');if(data.success)addChatEntry('system','任务解析成功，可下发至 task_manager');else addChatEntry('error','解析失败: '+(data.error_msg||'未知错误'));renderChat();return}if(topic==='generate_report_result'){missionHistory=missionHistory.filter(m=>m.type!=='pending');if(data.success)addChatEntry('report',data.report_text||'');else addChatEntry('error','报告生成失败: '+(data.error_msg||'未知错误'));renderChat();return}if(topic!=='subscription')log(`收到 ${event.data}`,'rx')}
+    function handleMessage(event){let data;try{data=JSON.parse(event.data)}catch(_){log(`收到 ${event.data}`,'rx');return}const topic=data.topic||'';if(topic==='detections'){detections=Array.isArray(data.detections)?data.detections:[];imageWidth=Number(data.image_width)||640;imageHeight=Number(data.image_height)||480;$('#visionResolution').textContent=`${imageWidth} × ${imageHeight}`;renderDetections();drawOverlay();return}if(topic==='capture_status'){$('#captureStatus').textContent=data.error?`错误：${data.error}`:(data.event==='image_saved'?'截图已保存':(data.event||'已更新'));return}if(topic==='tracking_status'){$('#trackingStatus').textContent=data.state||data.status||data.event||'已更新';return}if(topic==='obstacle_status'){const danger=data.risk_level==='danger'||data.action==='stop';const warning=data.risk_level==='warning';if(danger||warning)playAlertSound();$('#obstacleStatus').textContent=danger?`危险 ${Number(data.min_distance||0).toFixed(2)}m`:(warning?'警告':'安全');$('#obstacleStatus').className=danger?'':(warning?'':'good');return}if(topic==='safety_alarm'){const active=Boolean(data.active),water=data.hazard_type==='water',visual=data.hazard_type==='visual_obstacle',confidence=Math.round(Number(data.confidence||0)*100);if(active)playAlertSound();$('#obstacleStatus').textContent=active?(water?`积水告警 ${confidence}%`:(visual?`视觉障碍 ${confidence}%`:`报警 ${Number(data.distance||0).toFixed(2)}m`)):'安全';$('#obstacleStatus').className=active?'':'good';log(active?(water?'检测到积水：已告警并请求重规划':(visual?'检测到视觉障碍：已告警并请求重规划':'避障报警已触发')):(water?'积水告警已解除':(visual?'视觉障碍告警已解除':'避障报警已解除')),active?'':'rx');return}if(topic==='detections'){detections=Array.isArray(data.detections)?data.detections:[];imageWidth=Number(data.image_width)||640;imageHeight=Number(data.image_height)||480;$('#visionResolution').textContent=imageWidth+' × '+imageHeight;renderDetections();drawOverlay();return}if(topic==='capture_status'){$('#captureStatus').textContent=data.error?('错误：'+data.error):((data.event||'')==='image_saved'?'截图已保存':(data.event||'已更新'));return}if(topic==='tracking_status'){$('#trackingStatus').textContent=data.state||data.status||data.event||'已更新';return}if(topic==='robot_online'){const online=data.online!==false||data===true;$('#missionStatus').textContent=online?'🤖 小车在线':'⏳ 小车离线';log(online?'云端：小车已上线':'云端：小车已离线',online?'rx':'');return}if(topic==='task_status'){$('#taskStatus').textContent=data.status||'待机';renderTimeline();return}if(topic==='sensor_env_data'){if(data.temperature!==undefined)$('#temp').textContent=Number(data.temperature).toFixed(1)+'°C';if(data.humidity!==undefined)$('#humidity').textContent=Math.round(Number(data.humidity))+'%';if(data.pm25!==undefined)$('#pm').textContent=Math.round(Number(data.pm25));if(data.smoke!==undefined)$('#smoke').textContent=Math.round(Number(data.smoke))+' ppm';if(data.light!==undefined)$('#light').textContent=Math.round(Number(data.light))+' lux';if(data.pressure!==undefined)$('#pressure').textContent=Math.round(Number(data.pressure))+' hPa';return}if(topic==='sensor_alert'){playAlertSound();log('传感器告警: '+data.sensor_type+' '+Number(data.current_value)+' > '+Number(data.threshold),'rx');return}if(topic==='nav_status'){updateNavStatus(data);return}if(topic==='task_log'){addTaskLog({cat:categorizeLog(data.event_type||''),summary:data.event_type||(''+(data.data_json||'')),time:data.timestamp||'',severity:data.severity||''});return}if(topic==='llm_response'){handleLlmResponse(data);return}if(topic==='parse_task_result'){missionHistory=missionHistory.filter(m=>m.type!=='pending');if(data.success)addChatEntry('system','任务解析成功，可下发至 task_manager');else addChatEntry('error','解析失败: '+(data.error_msg||'未知错误'));renderChat();return}if(topic==='generate_report_result'){missionHistory=missionHistory.filter(m=>m.type!=='pending');if(data.success)addChatEntry('report',data.report_text||'');else addChatEntry('error','报告生成失败: '+(data.error_msg||'未知错误'));renderChat();return}if(topic==='video_frame'){const b64=data.data||data.image||'';if(b64){$('#visionFeed').src='data:image/jpeg;base64,'+b64;$('#visionFeed').style.display='block';$('#visionPlaceholder').style.display='none';$('#streamStatus').textContent='云端视频 '+Math.round(b64.length*3/4/1024)+'KB';$('#visionOverall').textContent='● 云端实时';$('#visionOverall').style.color='var(--green)'}return}if(topic!=='subscription')log(`收到 ${event.data}`,'rx')}
     function renderDetections(){const list=$('#detectionList');$('#targetBadge').textContent=`${detections.length} 目标`;$('#detectionUpdated').textContent=detections.length?now():'尚无数据';if(!detections.length){list.innerHTML='<div class="empty-detection">当前没有检测结果；请确认车端视觉节点已启动</div>';return}list.innerHTML=detections.slice(0,12).map(item=>`<div class="detection-item"><span>${escapeHtml(item.class_name||'unknown')}</span><small>${(100*(Number(item.confidence)||0)).toFixed(1)}%</small></div>`).join('')}
     function escapeHtml(value){const span=document.createElement('span');span.textContent=String(value);return span.innerHTML}
     function drawOverlay(){const canvas=$('#visionOverlay'),frame=$('#cameraFrame'),rect=frame.getBoundingClientRect(),ratio=window.devicePixelRatio||1;canvas.width=Math.max(1,Math.round(rect.width*ratio));canvas.height=Math.max(1,Math.round(rect.height*ratio));const ctx=canvas.getContext('2d');ctx.scale(ratio,ratio);ctx.clearRect(0,0,rect.width,rect.height);if(!overlayEnabled)return;ctx.lineWidth=2;ctx.font='12px sans-serif';detections.forEach((item,index)=>{const x=(Number(item.x_min)||0)/imageWidth*rect.width,y=(Number(item.y_min)||0)/imageHeight*rect.height,w=((Number(item.x_max)||0)-(Number(item.x_min)||0))/imageWidth*rect.width,h=((Number(item.y_max)||0)-(Number(item.y_min)||0))/imageHeight*rect.height,color=index%2?'#ff9b51':'#7e8de0';ctx.strokeStyle=color;ctx.fillStyle=color;ctx.strokeRect(x,y,w,h);const label=`${item.class_name||'unknown'} ${(100*(Number(item.confidence)||0)).toFixed(0)}%`;const tw=ctx.measureText(label).width+10;ctx.fillRect(x,Math.max(0,y-20),tw,20);ctx.fillStyle='#fff';ctx.fillText(label,x+5,Math.max(14,y-6))})}
@@ -227,9 +276,15 @@
     function sendMissionCommand(text){if(!text.trim())return;addChatEntry('user',text);addChatEntry('pending','正在理解并执行…');$('#missionInput').value='';
       if(mode==='mock'){setTimeout(()=>{missionHistory.pop();addChatEntry('system','[模拟] 安全规则已接收指令: "${text}"。在真实模式下会通过 LLM 工具通道执行。')},600);return}
       if(!ws||ws.readyState!==1){missionHistory.pop();addChatEntry('error','未连接小车，无法发送指令');return}
+      if(mode==='cloud'){
+        const id='web_'+Date.now().toString(36);
+        cloudAction('llm/command',{text:text.trim(),request_id:id});
+        log('云端 LLM 指挥发送: '+text,'tx');
+        return;
+      }
       const id='web_'+Date.now().toString(36);ws.send(JSON.stringify({action:'llm_command',request_id:id,input_text:text}));log(`LLM 指挥发送: ${text}`,'tx')}
-    function sendQuickPatrol(){if(!selectedRoute.size||!connected||mode==='mock')return;const route=[...selectedRoute].sort();ws.send(JSON.stringify({action:'task_request',task:{task_type:'patrol',route,actions:['navigate','detect','collect']}}));addChatEntry('user',`一键巡检: ${route.join(' → ')}`);addChatEntry('tool','任务已下发至 task_manager，路线: '+route.join(' → '));log(`一键巡检已下发: ${route.join(',')}`,'tx');renderChat()}
-    function sendGenerateReport(){const id=$('#reportTaskId').value.trim();if(!id||!connected||mode==='mock')return;ws.send(JSON.stringify({action:'generate_report',task_id:id}));addChatEntry('user','请求报告: '+id);addChatEntry('pending','正在生成报告…');log(`请求生成报告 task_id=${id}`,'tx')}
+    function sendQuickPatrol(){if(!selectedRoute.size||!connected||mode==='mock')return;const route=[...selectedRoute].sort();if(mode==='cloud'){cloudAction('cmd',{action:'patrol',route,params:{actions:['navigate','detect','collect']},command_id:'web_'+Date.now().toString(36),issued_at:Math.floor(Date.now()/1000),expires_at:Math.floor(Date.now()/1000)+30});addChatEntry('user','一键巡检: '+route.join(' → '));addChatEntry('tool','[云端] 任务已下发，路线: '+route.join(' → '));log('云端巡检已下发: '+route.join(','),'tx');renderChat();return}addChatEntry('user',`一键巡检: ${route.join(' → ')}`);addChatEntry('tool','任务已下发至 task_manager，路线: '+route.join(' → '));log(`一键巡检已下发: ${route.join(',')}`,'tx');renderChat()}
+    function sendGenerateReport(){const id=$('#reportTaskId').value.trim();if(!id||!connected||mode==='mock')return;if(mode==='cloud'){cloudAction('llm/generate_report',{task_id:id});addChatEntry('user','请求报告: '+id);addChatEntry('pending','正在生成报告…');log('云端请求报告 task_id='+id,'tx');return}ws.send(JSON.stringify({action:'generate_report',task_id:id}));addChatEntry('user','请求报告: '+id);addChatEntry('pending','正在生成报告…');log(`请求生成报告 task_id=${id}`,'tx')}
     function handleLlmResponse(data){const success=data.success!==false,reply=data.reply||data.message||data.error_msg||(success?'执行完成':'执行失败'),tool=data.tool_name||'';missionHistory=missionHistory.filter(m=>m.type!=='pending');if(tool)addChatEntry('tool',`[${tool}] ${reply}`);else if(data.report_text)addChatEntry('report',data.report_text);else addChatEntry(success?'system':'error',reply);renderChat()}
     /* Task log timeline */
     function addTaskLog(log){taskLogs.push(log);if(taskLogs.length>500)taskLogs.shift();renderTimeline()}
@@ -238,20 +293,62 @@
     tl.innerHTML=[...filtered].reverse().slice(0,60).map(l=>`<div class="tl-item"><div class="tl-dot ${l.cat||'system'}">${icons[l.cat]||'⚙️'}</div><div class="tl-body"><div class="tl-title">${titles[l.cat]||l.cat||'系统'}</div><div class="tl-text">${escapeHtml(l.summary||'')}</div><div class="tl-time">${l.time||''}</div></div></div>`).join('')}
     function categorizeLog(eventType){if(/nav|pose|goal|arrive/i.test(eventType))return'nav';if(/detect|vision|track|camera/i.test(eventType))return'detection';if(/sensor|env|temp|humid/i.test(eventType))return'sensor';return'system'}
     /* Tracking + Screenshot */
-    function toggleTracking(){if(!connected||mode==='mock')return toast('仅真实模式可用');trackingActive=!trackingActive;$('#trackingBtn').textContent=trackingActive?'🎯 停止跟踪':'🎯 跟踪';$('#trackingBtn').classList.toggle('active',trackingActive);ws.send(JSON.stringify({action:'tracking',command:trackingActive?'start':'stop',target_classes:['person']}));log(trackingActive?'启动人员跟踪':'停止人员跟踪','tx')}
-    function sendScreenshot(){if(!connected||mode==='mock')return toast('仅真实模式可用');ws.send(JSON.stringify({action:'capture_once',tag:'web'}));log('截图指令已发送','tx');toast('截图指令已发送')}
-    function toggleAutoCapture(){if(!connected||mode==='mock')return toast('仅真实模式可用');const btn=$('#autoCaptureBtn');if(autoCaptureInterval){clearInterval(autoCaptureInterval);autoCaptureInterval=null;btn.classList.remove('active');btn.textContent='⏱ 自动';log('自动截图已停止');return}autoCaptureInterval=setInterval(()=>ws.send(JSON.stringify({action:'capture_once',tag:'auto'})),5000);btn.classList.add('active');btn.textContent='⏱ 自动(5s)';log('自动截图已启动(5s间隔)')}
+    function toggleTracking(){if(!connected||mode==='mock'||mode==='cloud')return toast(mode==='cloud'?'云端暂不支持跟踪':'仅真实模式可用');trackingActive=!trackingActive;$('#trackingBtn').textContent=trackingActive?'🎯 停止跟踪':'🎯 跟踪';$('#trackingBtn').classList.toggle('active',trackingActive);ws.send(JSON.stringify({action:'tracking',command:trackingActive?'start':'stop',target_classes:['person']}));log(trackingActive?'启动人员跟踪':'停止人员跟踪','tx')}
+    function sendScreenshot(){if(!connected||mode==='mock')return toast('仅真实/云端模式可用');if(mode==='cloud'){cloudAction('snapshot/request',{request_id:'snap_'+Date.now().toString(36),annotated:false,issued_at:Math.floor(Date.now()/1000),expires_at:Math.floor(Date.now()/1000)+10});log('云端截图请求已发送','tx');toast('云端截图请求已发送');return}ws.send(JSON.stringify({action:'capture_once',tag:'web'}));log('截图指令已发送','tx');toast('截图指令已发送')}
+    function toggleAutoCapture(){if(!connected||mode==='mock')return toast('仅真实/云端模式可用');if(mode==='cloud')return toast('云端暂不支持自动截图');const btn=$('#autoCaptureBtn');if(autoCaptureInterval){clearInterval(autoCaptureInterval);autoCaptureInterval=null;btn.classList.remove('active');btn.textContent='⏱ 自动';log('自动截图已停止');return}autoCaptureInterval=setInterval(()=>ws.send(JSON.stringify({action:'capture_once',tag:'auto'})),5000);btn.classList.add('active');btn.textContent='⏱ 自动(5s)';log('自动截图已启动(5s间隔)')}
     /* Nav status */
     function updateNavStatus(data){navStatus={status:data.status||'',progress:Number(data.progress||0),distance_remain:Number(data.distance_remain||0)};$('#navBar').style.width=navStatus.progress+'%';$('#navStatusLabel').textContent=navStatus.status||'--';$('#navRemain').textContent='剩余 '+(navStatus.distance_remain?navStatus.distance_remain.toFixed(2)+'m':'--');$('#navStep').textContent=navStatus.progress?Math.round(navStatus.progress)+'%':''}
 
+
+    /* ════════════════════════════════════════ Cloud MQTT mode ════════════════════════════════════════ */
+    function connectCloud(){
+      if(ws){try{ws.close()}catch(_){}ws=null}
+      const bridgeUrl='ws://127.0.0.1:9002';
+      $('#stateDot').className='dot busy';$('#stateText').textContent='云端连接中';
+      log('正在连接 MQTT 桥接 '+bridgeUrl);
+      ws=new WebSocket(bridgeUrl);
+      ws.onopen=()=>{
+        setConnected(true);
+        cloudSubscribe();
+        log('云端 MQTT Broker 已连接','rx');
+        $('#missionStatus').textContent='云端 LLM 就绪';
+      };
+      ws.onmessage=handleCloudMessage;
+      ws.onerror=()=>{log('云端桥接错误，请确认 ws_mqtt_bridge.py 已启动');toast('云端连接失败，请运行 python3 scripts/ws_mqtt_bridge.py')};
+      ws.onclose=()=>{setConnected(false);log('云端连接已关闭')};
+    }
+    function handleCloudMessage(event){
+      try{
+        const msg=JSON.parse(event.data);
+        if(msg.type==='connected'){log('MQTT Broker 就绪','rx');return}
+        if(msg.type==='message'){
+          const p=msg.payload||{};
+          p.topic=msg.topic||'';
+          handleMessage({data:JSON.stringify(p)});
+          return;
+        }
+      }catch(_){}
+    }
+    function cloudSubscribe(){
+      ws.send(JSON.stringify({type:'subscribe',topics:[
+        'status','nav','pose','obstacle','env','alert','alarm','log',
+        'llm/response','llm/report','ack','online','video_frame','detection','capture','tracking'
+      ]}));
+    }
+    function cloudAction(suffix,payload){
+      if(!connected||mode!=='cloud')return false;
+      ws.send(JSON.stringify({type:'publish',suffix,payload}));
+      return true;
+    }
+    
     function disconnect(){release();if(autoCaptureInterval)clearInterval(autoCaptureInterval);autoCaptureInterval=null;trackingActive=false;$("#trackingBtn").textContent="🎯 跟踪";$("#trackingBtn").classList.remove("active");if(ws){ws.onclose=null;ws.close();ws=null}setConnected(false);log('连接已断开')}
-    $('#connect').onclick=()=>{if(connected){disconnect();return}if(mode==='mock'){setConnected(true);log('模拟 WebSocket 连接成功','rx');return}$('#stateDot').className='dot busy';$('#stateText').textContent='连接中';try{const localPreview=['127.0.0.1','localhost'].includes(location.hostname);const target=localPreview?'ws://127.0.0.1:8765':`ws://${$('#host').value.trim()}:6500/ws/control`;if(localPreview)log(`通过本机安全代理连接 ${$('#host').value.trim()}`);ws=new WebSocket(target);ws.onopen=()=>{setConnected(true);subscribeVision();syncAlertSound();syncObstacleAvoidance();log('真实 WebSocket 连接成功','rx')};ws.onmessage=handleMessage;ws.onerror=()=>{log('WebSocket 连接错误');toast('连接失败，请检查小车网络')};ws.onclose=()=>{setConnected(false);log('WebSocket 已关闭')}}catch(e){setConnected(false);log(`连接失败 ${e.message}`)}};
-    $('#mockMode').onclick=()=>{if(connected)disconnect();mode='mock';$('#mockMode').classList.add('active');$('#realMode').classList.remove('active');$('#modeText').textContent='模拟';$('#safeNote').textContent='当前为安全模拟模式：不会向真车发送任何指令。';$('#safeNote').style.background='#fff6ed';log('已切换到安全模拟模式')};
-    $('#realMode').onclick=()=>{if(connected)disconnect();if(!confirm('真实模式会向小车发送运动指令。请确认车轮架空或周围安全。'))return;mode='real';$('#realMode').classList.add('active');$('#mockMode').classList.remove('active');$('#modeText').textContent='真实';$('#safeNote').textContent='真实控制已启用：长按运动、松手即停，断线由车端看门狗停车。';$('#safeNote').style.background='#ffeaea';log('已切换到真实小车模式')};
+    $('#connect').onclick=()=>{if(connected){disconnect();return}if(mode==='cloud'){connectCloud();return}if(mode==='mock'){setConnected(true);log('模拟 WebSocket 连接成功','rx');return}$('#stateDot').className='dot busy';$('#stateText').textContent='连接中';try{const isLocal=['127.0.0.1','localhost'].includes(location.hostname);const target=isLocal?'ws://127.0.0.1:8765':`ws://${$('#host').value.trim()}:6500/ws/control`;log(`正在连接 ${target}`);ws=new WebSocket(target);const timeout=setTimeout(()=>{if(ws.readyState!==WebSocket.OPEN){ws.close();log('连接超时(5s)');toast('连接超时，请检查IP和网络');setConnected(false)}},5000);ws.onopen=()=>{clearTimeout(timeout);setConnected(true);subscribeVision();syncAlertSound();syncObstacleAvoidance();log('真实 WebSocket 连接成功','rx')};ws.onmessage=handleMessage;ws.onerror=()=>{clearTimeout(timeout);log('WebSocket 连接错误');toast('连接失败，请检查小车网络')};ws.onclose=()=>{clearTimeout(timeout);setConnected(false);log('WebSocket 已关闭')}}catch(e){setConnected(false);log(`连接失败 ${e.message}`)}};
+    $('#mockMode').onclick=()=>{if(connected)disconnect();mode='mock';$('#mockMode').classList.add('active');$('#realMode').classList.remove('active');$('#cloudMode').classList.remove('active');$('#modeText').textContent='模拟';$('#safeNote').textContent='当前为安全模拟模式：不会向真车发送任何指令。';$('#safeNote').style.background='#fff6ed';log('已切换到安全模拟模式')};
+    $('#realMode').onclick=()=>{if(connected)disconnect();if(!confirm('真实模式会向小车发送运动指令。请确认车轮架空或周围安全。'))return;mode='real';$('#realMode').classList.add('active');$('#mockMode').classList.remove('active');$('#cloudMode').classList.remove('active');$('#modeText').textContent='真实';$('#safeNote').textContent='真实控制已启用：长按运动、松手即停，断线由车端看门狗停车。';$('#safeNote').style.background='#ffeaea';log('已切换到真实小车模式')};$('#cloudMode').onclick=()=>{if(connected)disconnect();mode='cloud';$('#cloudMode').classList.add('active');$('#mockMode').classList.remove('active');$('#realMode').classList.remove('active');$('#modeText').textContent='云端';$('#safeNote').textContent='云端控制已启用：MQTT 远程操控 + 视频帧。需要先启动 python3 scripts/ws_mqtt_bridge.py';$('#safeNote').style.background='#eaf0ff';log('已切换到云端模式（需启动 ws_mqtt_bridge.py）')};
     $$('[data-command]').forEach(b=>{b.disabled=true;b.addEventListener('pointerdown',e=>{e.preventDefault();b.setPointerCapture(e.pointerId);press(b)});b.addEventListener('pointerup',()=>release());b.addEventListener('pointercancel',()=>release());b.addEventListener('lostpointercapture',()=>release())});
     $('#stop').disabled=true;$('#stop').onclick=()=>release();
     $('#speed').oninput=()=>{const p=+$('#speed').value;$('#speedValue').textContent=p;$('.speed-unit').textContent=`% · ${(.45*p/100).toFixed(2)} m/s`;if(active){send(active);motion(active)}};
-    function syncAlertSound(){if(mode==='real'&&ws?.readyState===WebSocket.OPEN)ws.send(JSON.stringify({action:'set_alert_sound',enabled:alertSoundEnabled}))}
+    function syncAlertSound(){if(mode==='cloud'&&ws?.readyState===WebSocket.OPEN)cloudAction('alarm',{enabled:alertSoundEnabled});else if(mode==='real'&&ws?.readyState===WebSocket.OPEN)ws.send(JSON.stringify({action:'set_alert_sound',enabled:alertSoundEnabled}))}
     function syncObstacleAvoidance(){if(mode==='real'&&ws?.readyState===WebSocket.OPEN)ws.send(JSON.stringify({action:'set_obstacle_avoidance',enabled:obstacleAvoidanceEnabled}))}
     $('#alertSound').onclick=()=>{alertSoundEnabled=!alertSoundEnabled;localStorage.setItem('icar.alertSoundEnabled',String(alertSoundEnabled));if(!alertSoundEnabled)stopAlertSound();syncAlertSound();updateAlertSoundButton();toast(alertSoundEnabled?'告警声音已开启':'告警声音已关闭')};updateAlertSoundButton();
     $('#obstacleAvoidance').onclick=()=>{obstacleAvoidanceEnabled=!obstacleAvoidanceEnabled;localStorage.setItem('icar.obstacleAvoidanceEnabled',String(obstacleAvoidanceEnabled));syncObstacleAvoidance();updateObstacleAvoidanceButton();toast(obstacleAvoidanceEnabled?'避障拦截已开启':'避障拦截已关闭，请确认周边安全')};updateObstacleAvoidanceButton();
@@ -259,7 +356,7 @@
     function keyboardCommand(event){if(event.target instanceof HTMLInputElement||event.target instanceof HTMLTextAreaElement||event.target?.isContentEditable)return null;return keyboardCommands[event.key]||keyboardCommands[event.key.toLowerCase()]||null}
     document.addEventListener('keydown',event=>{const command=keyboardCommand(event);if(!command)return;event.preventDefault();if(event.repeat||active)return;const button=$(`[data-command="${command}"]`);if(button&&!button.disabled)press(button)});
     document.addEventListener('keyup',event=>{const command=keyboardCommand(event);if(!command)return;event.preventDefault();if(active===command)release()});
-    $('#visionFeed').onload=()=>{$('#visionFeed').style.display='block';$('#visionPlaceholder').style.display='none';$('#streamStatus').textContent='视频在线';$('#visionOverall').textContent='● 实时画面';$('#visionOverall').style.color='var(--green)';drawOverlay()};$('#visionFeed').onerror=()=>{if(!visionFallbackAttempted){visionFallbackAttempted=true;$('#streamStatus').textContent='原始流不可用，切换标注画面…';$('#visionFeed').src=`${visionBase()}/yolo_video_feed?t=${Date.now()}`;return}$('#visionFeed').style.display='none';$('#visionPlaceholder').style.display='block';$('#visionPlaceholder').textContent='视频流不可用，请检查摄像头服务';$('#streamStatus').textContent='加载失败';$('#visionOverall').textContent='摄像头不可用';$('#visionOverall').style.color='var(--red)'};
+    
     $('#rawFeed').onclick=()=>{overlayEnabled=false;$('#rawFeed').classList.add('active');$('#overlayFeed').classList.remove('active');drawOverlay()};$('#overlayFeed').onclick=()=>{overlayEnabled=true;$('#overlayFeed').classList.add('active');$('#rawFeed').classList.remove('active');drawOverlay()};window.addEventListener('resize',drawOverlay);
     $('#clearLog').onclick=()=>{$('#logs').innerHTML='';log('日志已清空')};$('#copyLog').onclick=async()=>{await navigator.clipboard.writeText($('#logs').innerText);toast('日志已复制')};
     document.addEventListener('visibilitychange',()=>{if(document.hidden)release()});window.addEventListener('blur',()=>release());window.addEventListener('beforeunload',()=>{if(connected)send('stop',true)});

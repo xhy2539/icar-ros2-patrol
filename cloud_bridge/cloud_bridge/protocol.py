@@ -38,6 +38,11 @@ class CloudTopics:
     llm_report: str
     snapshot_request: str
     snapshot: str
+    alarm: str
+    video_frame: str
+    detection: str
+    capture: str
+    tracking: str
 
     @classmethod
     def build(cls, prefix: str = "/icar", device_id: str = "") -> "CloudTopics":
@@ -72,6 +77,11 @@ class CloudTopics:
             llm_report=f"{base}/llm/report",
             snapshot_request=f"{base}/snapshot/request",
             snapshot=f"{base}/snapshot",
+            alarm=f"{base}/alarm",
+            video_frame=f"{base}/video_frame",
+            detection=f"{base}/detection",
+            capture=f"{base}/capture",
+            tracking=f"{base}/tracking",
         )
 
 

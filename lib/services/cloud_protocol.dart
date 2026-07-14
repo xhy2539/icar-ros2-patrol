@@ -61,6 +61,7 @@ class CloudMqttTopics {
   final String llmReport;
   final String snapshotRequest;
   final String snapshot;
+  final String alarm;
 
   const CloudMqttTopics._({
     required this.command,
@@ -80,6 +81,7 @@ class CloudMqttTopics {
     required this.llmReport,
     required this.snapshotRequest,
     required this.snapshot,
+    required this.alarm,
   });
 
   factory CloudMqttTopics.build({
@@ -116,6 +118,7 @@ class CloudMqttTopics {
       llmReport: '$base/llm/report',
       snapshotRequest: '$base/snapshot/request',
       snapshot: '$base/snapshot',
+      alarm: '$base/alarm',
     );
   }
 
