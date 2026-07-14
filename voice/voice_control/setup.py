@@ -25,6 +25,7 @@ setup(
             "duplex_audio_node = voice_control.duplex_audio_node:main",
             "voice_command_router_node = voice_control.voice_command_router_node:main",
             "doubao_voice_node = voice_control.doubao_voice_node:main",
+            "web_voice_gateway_node = voice_control.web_voice_gateway_node:main",
         ],
     },
 )

@@ -40,7 +40,7 @@
     .chat-input-row{display:flex;gap:8px;margin-top:10px}
     .chat-input{flex:1;border:1px solid var(--line);background:#f6f8f9;padding:10px 12px;border-radius:12px;font-size:12px;outline:none}
     .chat-input:focus{border-color:var(--orange)}
-    .chat-send{border:0;border-radius:12px;background:var(--purple);color:white;padding:10px 14px;font-weight:750;font-size:12px;cursor:pointer}
+    .chat-send{border:0;border-radius:12px;background:var(--purple);color:white;padding:10px 14px;font-weight:750;font-size:12px;cursor:pointer}.voice-mic{border:1px solid var(--line);border-radius:12px;background:#f5f7f8;color:var(--purple);padding:8px 11px;font-weight:800;cursor:pointer}.voice-mic.listening{background:#fff0f0;border-color:#ffb5b5;color:var(--red);animation:pulse 1s infinite}
     .quick-chips{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px}
     .chip{border:1px solid var(--line);background:white;border-radius:20px;padding:5px 10px;font-size:10px;color:var(--purple);cursor:pointer;transition:.12s}
     .chip:hover{background:#eef0f8;border-color:var(--purple)}
@@ -170,6 +170,7 @@
         </div>
         <div class="chat-input-row">
           <input id="missionInput" class="chat-input" placeholder="输入指令，如'巡检ABC''跟踪前面的人''立即停下'">
+          <button id="voiceMic" class="voice-mic" type="button" aria-pressed="false" title="豆包实时语音">🎙 语音</button>
           <button id="missionSend" class="chat-send">发送</button>
         </div>
       </div>
@@ -198,6 +199,7 @@
     let alertSoundEnabled=localStorage.getItem('icar.alertSoundEnabled')!=='false', obstacleAvoidanceEnabled=localStorage.getItem('icar.obstacleAvoidanceEnabled')!=='false', alertSoundLastAt=0, audioContext=null, activeAlertOscillators=[], autoCaptureInterval=null;
     /* Mission state */
     let missionHistory=[], selectedRoute=new Set(), missionLogView=false, navStatus={status:'',progress:0,distance_remain:''}, taskLogs=[], tlFilter='all', trackingActive=false;
+    let voiceSocket=null, voiceStream=null, voiceAudioContext=null, voiceProcessor=null, voiceSource=null, voiceListening=false;
     const names={forward:'前进中',backward:'后退中',left:'左移中',right:'右移中',turn_left:'左转中',turn_right:'右转中',stop:'已停止'};
     function now(){return new Date().toLocaleTimeString('zh-CN',{hour12:false})}
     function log(text,type=''){const d=document.createElement('div');d.className='logline '+type;d.innerHTML=`<span class="time">${now()}</span>　${text}`;$('#logs').append(d);$('#logs').scrollTop=$('#logs').scrollHeight}
@@ -228,6 +230,11 @@
       if(mode==='mock'){setTimeout(()=>{missionHistory.pop();addChatEntry('system','[模拟] 安全规则已接收指令: "${text}"。在真实模式下会通过 LLM 工具通道执行。')},600);return}
       if(!ws||ws.readyState!==1){missionHistory.pop();addChatEntry('error','未连接小车，无法发送指令');return}
       const id='web_'+Date.now().toString(36);ws.send(JSON.stringify({action:'llm_command',request_id:id,input_text:text}));log(`LLM 指挥发送: ${text}`,'tx')}
+    function voiceSocketUrl(){return ['127.0.0.1','localhost'].includes(location.hostname)?'ws://127.0.0.1:8765/ws/voice':`ws://${$('#host').value.trim()}:8767/ws/voice`}
+    function pcm16k(samples,sourceRate){const ratio=sourceRate/16000,count=Math.floor(samples.length/ratio),out=new Int16Array(count);for(let i=0;i<count;i++){const start=Math.floor(i*ratio),end=Math.min(samples.length,Math.floor((i+1)*ratio));let sum=0;for(let j=start;j<end;j++)sum+=samples[j];const sample=Math.max(-1,Math.min(1,sum/Math.max(1,end-start)));out[i]=sample<0?sample*0x8000:sample*0x7fff}return out.buffer}
+    function setVoiceListening(value){voiceListening=value;const button=$('#voiceMic');button.classList.toggle('listening',value);button.setAttribute('aria-pressed',String(value));button.textContent=value?'■ 停止':'🎙 语音'}
+    async function startVoice(){if(mode!=='real'){addChatEntry('error','请先切换到真实小车模式，再使用豆包语音。');return}if(!navigator.mediaDevices?.getUserMedia){addChatEntry('error','当前浏览器不支持麦克风采集，请使用 Chrome 或 Edge。');return}try{voiceStream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true}});voiceSocket=new WebSocket(voiceSocketUrl());voiceSocket.binaryType='arraybuffer';voiceSocket.onopen=()=>{voiceSocket.send(JSON.stringify({type:'start',sample_rate:16000,channels:1,format:'pcm_s16le'}));voiceAudioContext=new (window.AudioContext||window.webkitAudioContext)();voiceSource=voiceAudioContext.createMediaStreamSource(voiceStream);voiceProcessor=voiceAudioContext.createScriptProcessor(4096,1,1);voiceProcessor.onaudioprocess=e=>{if(voiceSocket?.readyState===WebSocket.OPEN)voiceSocket.send(pcm16k(e.inputBuffer.getChannelData(0),voiceAudioContext.sampleRate))};voiceSource.connect(voiceProcessor);voiceProcessor.connect(voiceAudioContext.destination);setVoiceListening(true);addChatEntry('pending','正在聆听，请说话…')};voiceSocket.onmessage=e=>{try{const data=JSON.parse(e.data);if(data.type==='error')addChatEntry('error','语音网关错误：'+data.code)}catch(_){}};voiceSocket.onerror=()=>{addChatEntry('error','无法连接语音网关，请检查本机代理和小车语音服务。');stopVoice()};voiceSocket.onclose=()=>{if(voiceListening)stopVoice()}}catch(error){addChatEntry('error',error?.name==='NotAllowedError'?'麦克风权限被拒绝。':'无法打开麦克风：'+error.message);stopVoice()}}
+    function stopVoice(){if(voiceSocket?.readyState===WebSocket.OPEN)voiceSocket.send(JSON.stringify({type:'end'}));voiceSocket?.close();voiceSocket=null;voiceProcessor?.disconnect();voiceSource?.disconnect();voiceAudioContext?.close();voiceProcessor=null;voiceSource=null;voiceAudioContext=null;voiceStream?.getTracks().forEach(track=>track.stop());voiceStream=null;if(voiceListening){missionHistory=missionHistory.filter(m=>m.type!=='pending');addChatEntry('system','已结束录音，正在等待豆包识别与回复。')}setVoiceListening(false)}
     function sendQuickPatrol(){if(!selectedRoute.size||!connected||mode==='mock')return;const route=[...selectedRoute].sort();ws.send(JSON.stringify({action:'task_request',task:{task_type:'patrol',route,actions:['navigate','detect','collect']}}));addChatEntry('user',`一键巡检: ${route.join(' → ')}`);addChatEntry('tool','任务已下发至 task_manager，路线: '+route.join(' → '));log(`一键巡检已下发: ${route.join(',')}`,'tx');renderChat()}
     function sendGenerateReport(){const id=$('#reportTaskId').value.trim();if(!id||!connected||mode==='mock')return;ws.send(JSON.stringify({action:'generate_report',task_id:id}));addChatEntry('user','请求报告: '+id);addChatEntry('pending','正在生成报告…');log(`请求生成报告 task_id=${id}`,'tx')}
     function handleLlmResponse(data){const success=data.success!==false,reply=data.reply||data.message||data.error_msg||(success?'执行完成':'执行失败'),tool=data.tool_name||'';missionHistory=missionHistory.filter(m=>m.type!=='pending');if(tool)addChatEntry('tool',`[${tool}] ${reply}`);else if(data.report_text)addChatEntry('report',data.report_text);else addChatEntry(success?'system':'error',reply);renderChat()}
@@ -268,6 +275,7 @@
     $('#missionChatTab').onclick=()=>{missionLogView=false;$('#missionChatTab').classList.add('active');$('#missionLogTab').classList.remove('active');$('#missionChatView').style.display='block';$('#missionLogView').style.display='none'};
     $('#missionLogTab').onclick=()=>{missionLogView=true;$('#missionLogTab').classList.add('active');$('#missionChatTab').classList.remove('active');$('#missionChatView').style.display='none';$('#missionLogView').style.display='block';renderTimeline()};
     $('#missionSend').onclick=()=>sendMissionCommand($('#missionInput').value);
+    $('#voiceMic').onclick=()=>voiceListening?stopVoice():startVoice();
     $('#missionInput').addEventListener('keydown',e=>{if(e.key==='Enter')sendMissionCommand($('#missionInput').value)});
     $$('#quickChips .chip').forEach(c=>c.onclick=()=>{const t=c.dataset.text;$('#missionInput').value=t;sendMissionCommand(t)});
     $$('.route-chip').forEach(c=>c.onclick=()=>{const r=c.dataset.route;if(selectedRoute.has(r))selectedRoute.delete(r);else selectedRoute.add(r);c.classList.toggle('sel',selectedRoute.has(r));$('#quickPatrol').disabled=!selectedRoute.size});

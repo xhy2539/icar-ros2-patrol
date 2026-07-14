@@ -141,9 +141,9 @@ ICAR_BUILD_REQUIRED=0
 if [ "$SOURCE_REVISION" != "$(docker exec icar_ros2 cat $ICAR_WS/.icar_source_revision 2>/dev/null || true)" ]; then
   ICAR_BUILD_REQUIRED=1
 fi
-tar --exclude='._*' -C "$REPO" -cf - task_manager llm navigation cloud_bridge vision icar_interfaces audio | \
+tar --exclude='._*' -C "$REPO" -cf - task_manager llm navigation cloud_bridge vision voice icar_interfaces audio | \
   docker exec -i icar_ros2 bash -c \
-    "mkdir -p $ICAR_WS/src; cd $ICAR_WS/src; rm -rf task_manager llm navigation cloud_bridge vision icar_interfaces audio; tar xf -"
+    "mkdir -p $ICAR_WS/src; cd $ICAR_WS/src; rm -rf task_manager llm navigation cloud_bridge vision voice icar_interfaces audio; tar xf -"
 # Model weights are deliberately kept outside the ROS package source tree.
 # Copy the configured water detector alongside the generic YOLO model so a
 # restart cannot silently disable puddle detection.
@@ -154,7 +154,7 @@ if [ -f "$REPO/models/water_seg_v1.pt" ]; then
 fi
 if [ "$ICAR_BUILD_REQUIRED" -eq 1 ]; then
   docker exec icar_ros2 bash -lc \
-    "source /opt/ros/foxy/setup.bash; cd $ICAR_WS; colcon build --symlink-install --packages-select icar_interfaces task_manager llm_gateway navigation cloud_bridge vision_patrol"
+    "source /opt/ros/foxy/setup.bash; cd $ICAR_WS; colcon build --symlink-install --packages-select icar_interfaces task_manager llm_gateway navigation cloud_bridge vision_patrol voice_control"
   docker exec icar_ros2 sh -c "printf '%s\\n' '$SOURCE_REVISION' > $ICAR_WS/.icar_source_revision"
 fi
 
@@ -185,9 +185,17 @@ fi
 
 echo "[10/14] Starting task_manager + LLM gateway + obstacle_avoid + alarm + cloud_bridge"
 export DEEPSEEK_API_KEY="${DEEPSEEK_API_KEY:-}"
+export DOUBAO_APP_ID="${DOUBAO_APP_ID:-}"
+export DOUBAO_ACCESS_KEY="${DOUBAO_ACCESS_KEY:-}"
 ICAR_DOCKER_CMD="docker exec icar_ros2 bash -lc 'source /opt/ros/foxy/setup.bash; source $ICAR_WS/install/setup.bash; export ROS_DOMAIN_ID=30"
 if [ -n "$DEEPSEEK_API_KEY" ]; then
   ICAR_DOCKER_CMD="$ICAR_DOCKER_CMD; export DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY"
+fi
+if [ -n "$DOUBAO_APP_ID" ]; then
+  ICAR_DOCKER_CMD="$ICAR_DOCKER_CMD; export DOUBAO_APP_ID=$DOUBAO_APP_ID"
+fi
+if [ -n "$DOUBAO_ACCESS_KEY" ]; then
+  ICAR_DOCKER_CMD="$ICAR_DOCKER_CMD; export DOUBAO_ACCESS_KEY=$DOUBAO_ACCESS_KEY"
 fi
 # Restart these nodes from the freshly built install tree. Merely checking for
 # an old process leaves the previous Python code loaded after a deployment.
@@ -196,6 +204,8 @@ docker exec icar_ros2 pkill -f '/task_manager/lib/task_manager/obstacle_alarm_no
 docker exec icar_ros2 pkill -f '/navigation/lib/navigation/obstacle_avoid_node' 2>/dev/null || true
 docker exec icar_ros2 pkill -f '/llm_gateway/lib/llm_gateway/llm_gateway_node' 2>/dev/null || true
 docker exec icar_ros2 pkill -f '/cloud_bridge/lib/cloud_bridge/cloud_bridge_node' 2>/dev/null || true
+docker exec icar_ros2 pkill -f '/voice_control/lib/voice_control/web_voice_gateway_node' 2>/dev/null || true
+docker exec icar_ros2 pkill -f '/voice_control/lib/voice_control/doubao_voice_node' 2>/dev/null || true
 sleep 1
 eval "$ICAR_DOCKER_CMD; nohup ros2 run task_manager task_manager_node </dev/null >/tmp/task_manager.log 2>&1 &'"
 sleep 2
@@ -205,6 +215,13 @@ eval "$ICAR_DOCKER_CMD; nohup ros2 run navigation obstacle_avoid_node --mode rea
 sleep 1
 eval "$ICAR_DOCKER_CMD; export ICAR_AUDIO_DIR=/root/icar_ros2_ws/icar_ws/src/audio; nohup ros2 run llm_gateway llm_gateway_node --ros-args -p tool_mode:=true </dev/null >/tmp/llm_gateway.log 2>&1 &'"
 sleep 2
+if [ -n "$DOUBAO_APP_ID" ] && [ -n "$DOUBAO_ACCESS_KEY" ]; then
+  eval "$ICAR_DOCKER_CMD; nohup ros2 run voice_control web_voice_gateway_node </dev/null >/tmp/web_voice_gateway.log 2>&1 &'"
+  sleep 1
+  eval "$ICAR_DOCKER_CMD; nohup ros2 run voice_control doubao_voice_node </dev/null >/tmp/doubao_voice.log 2>&1 &'"
+else
+  echo "豆包语音未启动：请设置 DOUBAO_APP_ID 和 DOUBAO_ACCESS_KEY"
+fi
 
 # Forward only explicitly supplied cloud settings. Otherwise cloud_bridge uses
 # its own defaults or ROS parameters. Array arguments avoid shell re-parsing.
