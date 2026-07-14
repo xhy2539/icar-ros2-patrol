@@ -94,11 +94,20 @@ if [ -s "$REPO/.icar_deploy_revision" ]; then
 else
   SOURCE_REVISION=$(git -c safe.directory="$REPO" -C "$REPO" rev-parse HEAD)
 fi
+APP_BUILD_REQUIRED=0
 if [ "$SOURCE_REVISION" != "$(docker exec autodrive_ros2 cat /root/icar_app_ws/.icar_source_revision 2>/dev/null || true)" ] || \
    ! docker exec autodrive_ros2 test -x /root/icar_app_ws/install/app_control/lib/app_control/app_bridge_node; then
-  tar --exclude='._*' -C "$REPO" -cf - app_control icar_interfaces | \
-    docker exec -i autodrive_ros2 bash -c \
-      'mkdir -p /root/icar_app_ws/src; cd /root/icar_app_ws/src; rm -rf app_control icar_interfaces; tar xf -'
+  APP_BUILD_REQUIRED=1
+fi
+# Always restore the container sources from the selected Git checkout. This is
+# cheap and prevents an old manual workspace copy from surviving merely because
+# its revision marker was updated.
+tar --exclude='._*' -C "$REPO" -cf - app_control icar_interfaces | \
+  docker exec -i autodrive_ros2 bash -c \
+    'mkdir -p /root/icar_app_ws/src; cd /root/icar_app_ws/src; rm -rf app_control icar_interfaces; tar xf -'
+docker exec autodrive_ros2 bash -lc \
+  'python3 -m py_compile /root/icar_app_ws/src/app_control/app_control/*.py'
+if [ "$APP_BUILD_REQUIRED" -eq 1 ]; then
   docker exec autodrive_ros2 bash -lc \
     'source /opt/ros/foxy/setup.bash; source /root/yahboomcar_ros2_ws/yahboomcar_ws/install/setup.bash; cd /root/icar_app_ws; colcon build --packages-select icar_interfaces app_control --symlink-install'
   docker exec autodrive_ros2 sh -c "printf '%s\\n' '$SOURCE_REVISION' > /root/icar_app_ws/.icar_source_revision"
@@ -108,10 +117,14 @@ echo "[7/14] Syncing and building task_manager + LLM + navigation + cloud + visi
 ICAR_WS="/root/icar_ros2_ws/icar_ws"
 docker exec icar_ros2 bash -lc \
   "python3 -c 'import paho.mqtt.client' 2>/dev/null || python3 -m pip install 'paho-mqtt>=1.5,<3'"
+ICAR_BUILD_REQUIRED=0
 if [ "$SOURCE_REVISION" != "$(docker exec icar_ros2 cat $ICAR_WS/.icar_source_revision 2>/dev/null || true)" ]; then
-  tar --exclude='._*' -C "$REPO" -cf - task_manager llm navigation cloud_bridge vision icar_interfaces audio | \
-    docker exec -i icar_ros2 bash -c \
-      "mkdir -p $ICAR_WS/src; cd $ICAR_WS/src; rm -rf task_manager llm navigation cloud_bridge vision icar_interfaces audio; tar xf -"
+  ICAR_BUILD_REQUIRED=1
+fi
+tar --exclude='._*' -C "$REPO" -cf - task_manager llm navigation cloud_bridge vision icar_interfaces audio | \
+  docker exec -i icar_ros2 bash -c \
+    "mkdir -p $ICAR_WS/src; cd $ICAR_WS/src; rm -rf task_manager llm navigation cloud_bridge vision icar_interfaces audio; tar xf -"
+if [ "$ICAR_BUILD_REQUIRED" -eq 1 ]; then
   docker exec icar_ros2 bash -lc \
     "source /opt/ros/foxy/setup.bash; cd $ICAR_WS; colcon build --symlink-install --packages-select icar_interfaces task_manager llm_gateway navigation cloud_bridge vision_patrol"
   docker exec icar_ros2 sh -c "printf '%s\\n' '$SOURCE_REVISION' > $ICAR_WS/.icar_source_revision"
@@ -216,6 +229,9 @@ echo "$DRIVER_INFO" | grep -q '^    /cmd_vel: geometry_msgs/msg/Twist$'
 # Keep the service in one startup attempt while those endpoints expire instead
 # of failing immediately and letting systemd launch another overlapping stack.
 REQUIRED_UNIQUE_NODES=(
+  /velocity_mux
+  /app_bridge
+  /driver_node
   /task_manager_node
   /obstacle_alarm_node
   /llm_gateway_node
