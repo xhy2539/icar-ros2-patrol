@@ -162,7 +162,7 @@ class CloudBridgeNode(Node):
 
         # ── 视频帧转发 (MJPEG → MQTT) ──
         self.declare_parameter("video_enabled", True)
-        self.declare_parameter("video_fps", 10)
+        self.declare_parameter("video_fps", 5)
         self.declare_parameter("video_resize_width", 640)
         self.declare_parameter("video_mjpeg_url", "http://127.0.0.1:6502/video_feed")
         self._video_stop = threading.Event()

@@ -249,7 +249,8 @@ class RobotTools:
         if float(distance_m) > 0.0:
             duration = max(0.2, min(float(distance_m) / velocity, 10.0))
         else:
-            duration = max(0.2, min(float(duration_sec), 5.0))
+            # DeepSeek may pass stale defaults; ensure meaningful motion
+            duration = max(1.5, min(float(duration_sec or 2.0), 5.0))
         self._cancel_motion()
         cancelled = threading.Event()
         with self._motion_lock:
