@@ -44,8 +44,11 @@ run_node /tmp/icar_vision.log \
     -p water_device:=cpu \
     -p water_confidence:=0.15 \
     -p water_imgsz:=320 \
+    -p water_max_area_ratio:=0.85 \
+    -p water_max_mask_area_ratio:=0.75 \
+    -p water_refine_reflection_enabled:=true \
     -p water_class_name:=water \
-    -p target_classes:='[person,obstacle]' \
+    -p target_classes:='[person,obstacle,water]' \
     -p publish_annotated:=true \
     -p annotated_topic:=/vision/annotated_image
 

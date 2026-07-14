@@ -71,6 +71,68 @@ def image_qos(depth=5):
     )
 
 
+def tensor_to_numpy(value):
+    if value is None:
+        return None
+    if hasattr(value, "cpu"):
+        value = value.cpu()
+    if hasattr(value, "numpy"):
+        return value.numpy()
+    return value
+
+
+def border_touches(bbox, width, height):
+    x1, y1, x2, y2 = bbox
+    margin = max(4, int(min(width, height) * 0.015))
+    touches = 0
+    if x1 <= margin:
+        touches += 1
+    if y1 <= margin:
+        touches += 1
+    if x2 >= width - 1 - margin:
+        touches += 1
+    if y2 >= height - 1 - margin:
+        touches += 1
+    return touches
+
+
+def boxes_are_near(first, second, proximity):
+    ax1, ay1, ax2, ay2 = first
+    bx1, by1, bx2, by2 = second
+    return not (
+        ax2 + proximity < bx1
+        or bx2 + proximity < ax1
+        or ay2 + proximity < by1
+        or by2 + proximity < ay1
+    )
+
+
+def merge_component_clusters(components, proximity):
+    parent = list(range(len(components)))
+
+    def find(index):
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def union(left, right):
+        left_root = find(left)
+        right_root = find(right)
+        if left_root != right_root:
+            parent[right_root] = left_root
+
+    for left in range(len(components)):
+        for right in range(left + 1, len(components)):
+            if boxes_are_near(components[left]["bbox"], components[right]["bbox"], proximity):
+                union(left, right)
+
+    clusters = {}
+    for index, component in enumerate(components):
+        clusters.setdefault(find(index), []).append(component)
+    return list(clusters.values())
+
+
 class VisionNode(Node):
     """Camera-driven vision pipeline placeholder for detection and road work."""
 
@@ -92,7 +154,6 @@ class VisionNode(Node):
         self.declare_parameter("yolo_confidence", 0.35)
         self.declare_parameter("yolo_iou", 0.5)
         self.declare_parameter("yolo_imgsz", 640)
-        self.declare_parameter("inference_frame_stride", 1)
         self.declare_parameter("target_classes", [""])
         self.declare_parameter("obstacle_alias_enabled", True)
         self.declare_parameter("obstacle_classes", DEFAULT_OBSTACLE_CLASSES)
@@ -105,6 +166,21 @@ class VisionNode(Node):
         self.declare_parameter("water_imgsz", 640)
         self.declare_parameter("water_device", "")
         self.declare_parameter("water_min_area_ratio", 0.002)
+        self.declare_parameter("water_max_area_ratio", 0.85)
+        self.declare_parameter("water_max_mask_area_ratio", 0.75)
+        self.declare_parameter("water_reject_full_border", True)
+        self.declare_parameter("water_full_border_min_area_ratio", 0.5)
+        self.declare_parameter("water_refine_reflection_enabled", True)
+        self.declare_parameter("water_refine_local_contrast", 12.0)
+        self.declare_parameter("water_refine_tophat", 16.0)
+        self.declare_parameter("water_refine_min_value", 120.0)
+        self.declare_parameter("water_refine_max_saturation", 90.0)
+        self.declare_parameter("water_refine_dilation", 9)
+        self.declare_parameter("water_refine_cluster_proximity_ratio", 0.055)
+        self.declare_parameter("water_refine_min_area_ratio", 0.008)
+        self.declare_parameter("water_refine_max_area_ratio", 0.28)
+        self.declare_parameter("water_refine_max_component_area_ratio", 0.12)
+        self.declare_parameter("water_refine_max_candidates", 1)
         self.declare_parameter("water_class_name", "water")
         self.declare_parameter("fall_detection_enabled", True)
         self.declare_parameter("fall_aspect_ratio", 1.15)
@@ -163,6 +239,51 @@ class VisionNode(Node):
         self.water_device = str(self.get_parameter("water_device").value).strip()
         self.water_min_area_ratio = float(
             self.get_parameter("water_min_area_ratio").value
+        )
+        self.water_max_area_ratio = float(
+            self.get_parameter("water_max_area_ratio").value
+        )
+        self.water_max_mask_area_ratio = float(
+            self.get_parameter("water_max_mask_area_ratio").value
+        )
+        self.water_reject_full_border = bool(
+            self.get_parameter("water_reject_full_border").value
+        )
+        self.water_full_border_min_area_ratio = float(
+            self.get_parameter("water_full_border_min_area_ratio").value
+        )
+        self.water_refine_reflection_enabled = bool(
+            self.get_parameter("water_refine_reflection_enabled").value
+        )
+        self.water_refine_local_contrast = float(
+            self.get_parameter("water_refine_local_contrast").value
+        )
+        self.water_refine_tophat = float(
+            self.get_parameter("water_refine_tophat").value
+        )
+        self.water_refine_min_value = float(
+            self.get_parameter("water_refine_min_value").value
+        )
+        self.water_refine_max_saturation = float(
+            self.get_parameter("water_refine_max_saturation").value
+        )
+        self.water_refine_dilation = int(
+            self.get_parameter("water_refine_dilation").value
+        )
+        self.water_refine_cluster_proximity_ratio = float(
+            self.get_parameter("water_refine_cluster_proximity_ratio").value
+        )
+        self.water_refine_min_area_ratio = float(
+            self.get_parameter("water_refine_min_area_ratio").value
+        )
+        self.water_refine_max_area_ratio = float(
+            self.get_parameter("water_refine_max_area_ratio").value
+        )
+        self.water_refine_max_component_area_ratio = float(
+            self.get_parameter("water_refine_max_component_area_ratio").value
+        )
+        self.water_refine_max_candidates = max(
+            0, int(self.get_parameter("water_refine_max_candidates").value)
         )
         self.water_class_name = (
             str(self.get_parameter("water_class_name").value).strip() or "water"
@@ -526,6 +647,122 @@ class VisionNode(Node):
             detections.append(det)
         return detections
 
+    def water_rejection_reason(self, det):
+        if (
+            self.water_max_area_ratio < 1.0
+            and det["bbox_area_ratio"] > self.water_max_area_ratio
+        ):
+            return "bbox_too_large"
+        if (
+            self.water_max_mask_area_ratio < 1.0
+            and det["mask_area_ratio"] > self.water_max_mask_area_ratio
+        ):
+            return "mask_too_large"
+        if (
+            self.water_reject_full_border
+            and det["border_touches"] >= 4
+            and det["bbox_area_ratio"] > self.water_full_border_min_area_ratio
+        ):
+            return "touches_all_borders"
+        return ""
+
+    def reflective_water_candidates(self, frame, base_confidence, raw_class_name):
+        if cv2 is None or np is None:
+            return []
+        height, width = frame.shape[:2]
+        frame_area = float(max(1, width * height))
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        saturation = hsv[:, :, 1]
+        value = hsv[:, :, 2]
+
+        blur = cv2.GaussianBlur(gray, (0, 0), 9)
+        local_bright = cv2.subtract(gray, blur)
+        top_hat = cv2.morphologyEx(
+            gray,
+            cv2.MORPH_TOPHAT,
+            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (21, 21)),
+        )
+        mask = (
+            (
+                (local_bright > self.water_refine_local_contrast)
+                | (top_hat > self.water_refine_tophat)
+            )
+            & (value > self.water_refine_min_value)
+            & (saturation < self.water_refine_max_saturation)
+        ).astype("uint8") * 255
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
+        dilation = max(3, int(self.water_refine_dilation))
+        if dilation % 2 == 0:
+            dilation += 1
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (dilation, dilation))
+        mask = cv2.dilate(mask, kernel, iterations=1)
+        close_kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE, (dilation * 2 + 1, dilation + 2)
+        )
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, close_kernel)
+
+        count, _labels, stats, _centroids = cv2.connectedComponentsWithStats(mask)
+        components = []
+        min_component_area = max(80, int(frame_area * 0.00025))
+        for index in range(1, count):
+            x, y, component_width, component_height, area = [
+                int(value) for value in stats[index]
+            ]
+            if area < min_component_area or component_width < 8 or component_height < 8:
+                continue
+            bbox = [x, y, x + component_width, y + component_height]
+            bbox_area_ratio = component_width * component_height / frame_area
+            if bbox_area_ratio > self.water_refine_max_component_area_ratio:
+                continue
+            if border_touches(bbox, width, height) > 0:
+                continue
+            components.append({"bbox": bbox, "area": area})
+
+        proximity = max(
+            18, int(min(width, height) * self.water_refine_cluster_proximity_ratio)
+        )
+        clusters = merge_component_clusters(components, proximity)
+        candidates = []
+        for cluster in clusters:
+            x1 = min(item["bbox"][0] for item in cluster)
+            y1 = min(item["bbox"][1] for item in cluster)
+            x2 = max(item["bbox"][2] for item in cluster)
+            y2 = max(item["bbox"][3] for item in cluster)
+            bbox_width = x2 - x1
+            bbox_height = y2 - y1
+            bbox_area_ratio = bbox_width * bbox_height / frame_area
+            if bbox_area_ratio < self.water_refine_min_area_ratio:
+                continue
+            if bbox_area_ratio > self.water_refine_max_area_ratio:
+                continue
+            if bbox_width < width * 0.06 or bbox_height < height * 0.035:
+                continue
+            if border_touches([x1, y1, x2, y2], width, height) >= 2:
+                continue
+            component_area = sum(item["area"] for item in cluster)
+            score = component_area * (1.0 + min(0.3, bbox_area_ratio))
+            candidates.append(
+                {
+                    "class_name": self.water_class_name,
+                    "confidence": round(
+                        max(0.01, min(0.72, float(base_confidence) * 0.75)), 3
+                    ),
+                    "bbox": [int(x1), int(y1), int(x2), int(y2)],
+                    "source": "reflection_refine_water",
+                    "model": self.water_model_path,
+                    "raw_class_name": raw_class_name,
+                    "bbox_area_ratio": round(bbox_area_ratio, 6),
+                    "mask_area_ratio": round(component_area / frame_area, 6),
+                    "border_touches": border_touches([x1, y1, x2, y2], width, height),
+                    "refined": True,
+                    "refine_score": round(float(score), 2),
+                }
+            )
+
+        candidates.sort(key=lambda item: item["refine_score"], reverse=True)
+        return candidates[: self.water_refine_max_candidates]
+
     def run_water_detection(self, frame):
         kwargs = {
             "imgsz": self.water_imgsz,
@@ -547,39 +784,77 @@ class VisionNode(Node):
         result = results[0]
         names = getattr(result, "names", {}) or {}
         boxes = getattr(result, "boxes", None)
+        masks = getattr(result, "masks", None)
+        mask_data = (
+            tensor_to_numpy(getattr(masks, "data", None))
+            if masks is not None
+            else None
+        )
         if boxes is None:
             return []
 
         height, width = frame.shape[:2]
         frame_area = float(max(1, width * height))
         detections = []
-        for box in boxes:
+        broad_rejections = []
+        for index, box in enumerate(boxes):
             cls_id = int(box.cls[0].item())
             confidence = float(box.conf[0].item())
             x1, y1, x2, y2 = [int(round(v)) for v in box.xyxy[0].tolist()]
+            x1 = max(0, min(width - 1, x1))
+            y1 = max(0, min(height - 1, y1))
+            x2 = max(0, min(width - 1, x2))
+            y2 = max(0, min(height - 1, y2))
             bbox_area = max(0.0, float(x2 - x1)) * max(0.0, float(y2 - y1))
+            bbox_area_ratio = bbox_area / frame_area
+            mask_area_ratio = 0.0
+            if mask_data is not None and index < len(mask_data):
+                mask = mask_data[index]
+                mask_area_ratio = float((mask > 0.5).sum()) / float(max(1, mask.size))
             if (
                 self.water_min_area_ratio > 0
-                and bbox_area / frame_area < self.water_min_area_ratio
+                and bbox_area_ratio < self.water_min_area_ratio
+                and mask_area_ratio < self.water_min_area_ratio
             ):
                 continue
             raw_class_name = str(names.get(cls_id, cls_id))
             if not self.keep_detection_class(raw_class_name, self.water_class_name):
                 continue
-            detections.append(
-                {
-                    "class_name": self.water_class_name,
-                    "confidence": round(confidence, 3),
-                    "bbox": [x1, y1, x2, y2],
-                    "source": (
-                        "yolo_world_water"
-                        if self.water_uses_world_prompts
-                        else "yolo_water"
-                    ),
-                    "model": self.water_model_path,
-                    "raw_class_name": raw_class_name,
-                }
+            det = {
+                "class_name": self.water_class_name,
+                "confidence": round(confidence, 3),
+                "bbox": [x1, y1, x2, y2],
+                "source": (
+                    "yolo_world_water"
+                    if self.water_uses_world_prompts
+                    else "yolo_water"
+                ),
+                "model": self.water_model_path,
+                "raw_class_name": raw_class_name,
+                "bbox_area_ratio": round(bbox_area_ratio, 6),
+                "mask_area_ratio": round(mask_area_ratio, 6),
+                "border_touches": border_touches([x1, y1, x2, y2], width, height),
+            }
+            reject_reason = self.water_rejection_reason(det)
+            if reject_reason:
+                broad_rejections.append(
+                    dict(det, rejected=True, reject_reason=reject_reason)
+                )
+                continue
+            detections.append(det)
+
+        if self.water_refine_reflection_enabled and broad_rejections:
+            best_rejected = max(broad_rejections, key=lambda item: item["confidence"])
+            refined = self.reflective_water_candidates(
+                frame,
+                best_rejected["confidence"],
+                best_rejected.get("raw_class_name", self.water_class_name),
             )
+            for item in refined:
+                item["refined_from_reject_reason"] = best_rejected.get(
+                    "reject_reason", ""
+                )
+            detections.extend(refined)
         return detections
 
     def map_yolo_class(self, raw_class_name, bbox, width, height):

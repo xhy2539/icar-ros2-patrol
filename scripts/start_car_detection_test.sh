@@ -87,6 +87,9 @@ exec ros2 run vision_patrol vision_node --ros-args \\
   -p water_device:=cpu \\
   -p water_imgsz:=$WATER_IMGSZ \\
   -p water_confidence:=$WATER_CONFIDENCE \\
+  -p water_max_area_ratio:=0.85 \\
+  -p water_max_mask_area_ratio:=0.75 \\
+  -p water_refine_reflection_enabled:=true \\
   -p water_class_name:=water \\
   -p target_classes:='[$TARGET_CLASSES]' \\
   -p fall_detection_enabled:=true \\
