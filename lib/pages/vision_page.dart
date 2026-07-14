@@ -121,6 +121,8 @@ class _VisionPageState extends State<VisionPage> {
             children: [
               _buildCameraFeed(),
               const SizedBox(height: 8),
+              _buildInferenceStatus(),
+              const SizedBox(height: 8),
               _buildFeedToggle(),
               const SizedBox(height: 8),
               _buildTrackingBar(),
@@ -379,6 +381,41 @@ class _VisionPageState extends State<VisionPage> {
             style: const TextStyle(color: AppColors.blueGray, fontSize: 11),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildInferenceStatus() {
+    final ready = _detections.isNotEmpty;
+    final message = _showAnnotated
+        ? (ready ? '标注画面：检测结果已收到' : '标注画面：等待车端推理结果，当前可能回退为原始画面')
+        : (ready ? '原始画面：本地检测框叠加已启用' : '原始画面：等待车端推理结果');
+    final color = ready ? AppColors.successGreen : AppColors.warningOrange;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.09),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              ready ? Icons.verified : Icons.hourglass_top,
+              color: color,
+              size: 17,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                message,
+                style: TextStyle(color: color, fontSize: 12),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
