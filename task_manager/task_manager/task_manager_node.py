@@ -91,6 +91,15 @@ EMERGENCY_THRESHOLDS = {
 OBSTACLE_DANGER_DISTANCE = 0.3   # 米, ≤0.3 紧急停止
 OBSTACLE_WARN_DISTANCE = 0.5     # 米, ≤0.5 减速观察
 
+# 视觉积水检测阈值（当前阶段：检测到近距离积水 → 停止前进）
+# TODO: 地图+Nav2 接入后，改为标记 costmap 绕行，而非直接停止
+WATER_CONFIDENCE_MIN = 0.3       # 积水检测最低置信度
+WATER_BBOX_AREA_RATIO_MIN = 0.15  # bbox 面积占画面比 > 15% 视为近处威胁
+WATER_BBOX_BOTTOM_RATIO = 0.55    # bbox 下边缘在画面 55% 以下（靠近车头）
+WATER_CAMERA_WIDTH = 640          # Astra 相机默认分辨率
+WATER_CAMERA_HEIGHT = 480
+WATER_DEBOUNCE_SEC = 3.0          # 同一次积水告警冷却时间（避免重复触发）
+
 
 # ---------------------------------------------------------------------------
 # TaskManagerNode
@@ -111,6 +120,7 @@ class TaskManagerNode(Node):
         self.last_env_data = None      # 最新传感器数据
         self.last_detections = None    # 最新检测结果
         self.emergency_stop_active = False
+        self.water_danger_last_triggered = 0.0  # 积水告警冷却时间戳
         self.checkpoints = load_navigation_checkpoints()
         self.route_goals = []
         self.goal_sent_for_index = None
@@ -330,8 +340,61 @@ class TaskManagerNode(Node):
             }, severity="WARN")
 
     def _on_detections(self, msg: DetectionArray):
-        """视觉检测结果缓存"""
+        """视觉检测结果缓存 + 积水危险检查"""
         self.last_detections = msg
+        self._check_water_danger(msg)
+
+    def _check_water_danger(self, msg: DetectionArray):
+        """
+        检查视觉检测结果中是否存在近距离积水。
+        当前阶段：检测到则紧急停止。
+        TODO: 地图+Nav2 接入后，改为将积水坐标写入 local_costmap 绕行。
+        """
+        now = time.monotonic()
+        if now - self.water_danger_last_triggered < WATER_DEBOUNCE_SEC:
+            return  # 冷却期内，避免同一片积水重复触发
+
+        for det in msg.detections:
+            if det.class_name != "water":
+                continue
+            if det.confidence < WATER_CONFIDENCE_MIN:
+                continue
+
+            # 计算 bbox 面积占画面比
+            bbox_w = max(0, det.x_max - det.x_min)
+            bbox_h = max(0, det.y_max - det.y_min)
+            bbox_area = bbox_w * bbox_h
+            frame_area = WATER_CAMERA_WIDTH * WATER_CAMERA_HEIGHT
+            area_ratio = bbox_area / frame_area if frame_area > 0 else 0.0
+
+            # bbox 下边缘在画面中的位置比例（越大越靠近车头）
+            bottom_ratio = det.y_max / WATER_CAMERA_HEIGHT if WATER_CAMERA_HEIGHT > 0 else 0.0
+
+            if area_ratio < WATER_BBOX_AREA_RATIO_MIN:
+                continue  # 太小，远处或误检
+            if bottom_ratio < WATER_BBOX_BOTTOM_RATIO:
+                continue  # 在画面上方，不是地面
+
+            # 满足条件 → 积水威胁
+            self.water_danger_last_triggered = now
+            self._log_event("ANOMALY", {
+                "type": "water_detected",
+                "confidence": round(det.confidence, 3),
+                "bbox": [det.x_min, det.y_min, det.x_max, det.y_max],
+                "area_ratio": round(area_ratio, 3),
+                "bottom_ratio": round(bottom_ratio, 3),
+                "action": "emergency_stop",
+                "note": "前方检测到积水，紧急停止",
+            }, severity="ERROR")
+
+            self._emergency_stop(
+                f"视觉检测到前方积水 (置信度={det.confidence:.2f}, "
+                f"面积占比={area_ratio:.1%})")
+
+            if self.state in (PatrolState.NAVIGATING, PatrolState.CHECKPOINT,
+                              PatrolState.DETECTING, PatrolState.COLLECTING):
+                self._transition_to(PatrolState.FAILED)
+            return  # 一次只处理一个积水告警
 
     def _on_env_data(self, msg: EnvData):
         """传感器数据缓存"""
