@@ -297,6 +297,7 @@ class DoubaoVoiceNode(Node):
                     "system_role": self._system_role,
                     "extra": {
                         "strict_audit": False,
+                        "input_mod": "keep_alive",
                         "model": self._model,
                     },
                 },
@@ -358,9 +359,9 @@ class DoubaoVoiceNode(Node):
                 break
 
     async def _keepalive_loop(self):
-        """每30秒发送静音保活，防止会话超时断开。"""
+        """每15秒发送静音保活，防止会话超时断开。"""
         while self._running and self._connected:
-            await asyncio.sleep(30)
+            await asyncio.sleep(15)
             try:
                 if self._ws and self._connected:
                     await self._ws.send(
