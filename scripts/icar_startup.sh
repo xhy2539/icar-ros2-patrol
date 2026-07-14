@@ -52,12 +52,17 @@ echo "[4/14] Removing legacy control and camera processes"
 pkill -f 'Rosmaster-App/rosmaster/app.py' 2>/dev/null || true
 pkill -f '^python3 app.py$' 2>/dev/null || true
 docker exec autodrive_ros2 pkill -f '^python3 /tmp/fast_bridge.py$' 2>/dev/null || true
-# The vendor DWA launch publishes directly to /cmd_vel and bypasses the
-# application mux. Navigation is started separately only after localization.
+# The vendor desktop app can leave several interactive docker exec sessions
+# launching overlapping bringup, lidar, RViz and Nav2 stacks. Stop every launch
+# owner here so this script becomes the single runtime owner.
+docker exec autodrive_ros2 pkill -f '[y]ahboomcar_bringup_X3_launch.py' 2>/dev/null || true
+docker exec autodrive_ros2 pkill -f '[l]aser_bringup_launch.py' 2>/dev/null || true
+docker exec autodrive_ros2 pkill -f '[d]isplay_nav_launch.py' 2>/dev/null || true
 docker exec autodrive_ros2 pkill -f '[n]avigation_dwa_launch.py' 2>/dev/null || true
 docker exec autodrive_ros2 pkill -f '[n]avigation_mux.launch.py' 2>/dev/null || true
 docker exec autodrive_ros2 pkill -f \
   '[/]navigation/lib/navigation/obstacle_avoid_node' 2>/dev/null || true
+sleep 3
 
 echo "[5/14] Starting chassis bringup and lidar"
 # A container restart can restore a launch process a few seconds after Docker is
