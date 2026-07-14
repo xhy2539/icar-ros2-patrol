@@ -120,7 +120,7 @@
             <div id="visionPlaceholder" class="vision-placeholder">连接真实小车后<br>显示摄像头画面</div>
             <span class="live-badge">● LIVE</span><span id="targetBadge" class="target-badge">0 目标</span>
           </div>
-          <div class="vision-toolbar"><button id="rawFeed" class="active">原始画面</button><button id="overlayFeed">检测框叠加</button><button id="screenshotBtn" title="截图">📸</button><button id="trackingBtn" title="启动跟踪">🎯 跟踪</button><button id="autoCaptureBtn" title="自动截图">⏱ 自动</button><span id="visionResolution" class="resolution">640 × 480</span></div>
+          <div class="vision-toolbar"><button id="rawFeed" class="active">原始画面</button><button id="overlayFeed">检测框叠加</button><button id="screenshotBtn" title="截图">📸</button><button id="trackingBtn" title="启动跟踪">🎯 跟踪</button><button id="autoCaptureBtn" title="自动截图">⏱ 自动</button><button id="waterToggle" title="积水检测">💧 积水关</button><span id="visionResolution" class="resolution">640 × 480</span></div>
         </div>
         <div>
           <div class="vision-stats">
@@ -198,7 +198,7 @@
     const localPreview=['127.0.0.1','localhost'].includes(location.hostname);
     if(localPreview){$('#host').readOnly=true;$('#host').title='本机代理已自动连接小车';}
     let mode='mock', connected=false, ws=null, active='', pulse=null, beat=0, overlayEnabled=false, detections=[], imageWidth=640, imageHeight=480, visionFallbackAttempted=false;
-    let alertSoundEnabled=localStorage.getItem('icar.alertSoundEnabled')!=='false', obstacleAvoidanceEnabled=localStorage.getItem('icar.obstacleAvoidanceEnabled')!=='false', alertSoundLastAt=0, audioContext=null, activeAlertOscillators=[], autoCaptureInterval=null;
+    let alertSoundEnabled=localStorage.getItem('icar.alertSoundEnabled')!=='false', obstacleAvoidanceEnabled=localStorage.getItem('icar.obstacleAvoidanceEnabled')!=='false', alertSoundLastAt=0, audioContext=null, activeAlertOscillators=[], autoCaptureInterval=null, waterEnabled=false;
     /* Mission state */
     let missionHistory=[], selectedRoute=new Set(), missionLogView=false, navStatus={status:'',progress:0,distance_remain:''}, taskLogs=[], tlFilter='all', trackingActive=false;
     let voiceSocket=null, voiceStream=null, voiceAudioContext=null, voiceProcessor=null, voiceSource=null, voiceListening=false;
@@ -300,7 +300,7 @@
     tl.innerHTML=[...filtered].reverse().slice(0,60).map(l=>`<div class="tl-item"><div class="tl-dot ${l.cat||'system'}">${icons[l.cat]||'⚙️'}</div><div class="tl-body"><div class="tl-title">${titles[l.cat]||l.cat||'系统'}</div><div class="tl-text">${escapeHtml(l.summary||'')}</div><div class="tl-time">${l.time||''}</div></div></div>`).join('')}
     function categorizeLog(eventType){if(/nav|pose|goal|arrive/i.test(eventType))return'nav';if(/detect|vision|track|camera/i.test(eventType))return'detection';if(/sensor|env|temp|humid/i.test(eventType))return'sensor';return'system'}
     /* Tracking + Screenshot */
-    function toggleTracking(){if(!connected||mode==='mock'||mode==='cloud')return toast(mode==='cloud'?'云端暂不支持跟踪':'仅真实模式可用');trackingActive=!trackingActive;$('#trackingBtn').textContent=trackingActive?'🎯 停止跟踪':'🎯 跟踪';$('#trackingBtn').classList.toggle('active',trackingActive);ws.send(JSON.stringify({action:'tracking',command:trackingActive?'start':'stop',target_classes:['person']}));log(trackingActive?'启动人员跟踪':'停止人员跟踪','tx')}
+    function toggleTracking(){if(!connected||mode==='mock')return toast('仅真实/云端模式可用');trackingActive=!trackingActive;$('#trackingBtn').textContent=trackingActive?'🎯 停止跟踪':'🎯 跟踪';$('#trackingBtn').classList.toggle('active',trackingActive);if(mode==='cloud'){const cmd=trackingActive?'start':'stop';cloudAction('llm/command',{text:cmd==='start'?'启动跟踪，跟踪前面的人':'停止跟踪',tool:'tracking',command_id:'web_'+Date.now().toString(36)});log(trackingActive?'[云端] 发送跟踪指令':'[云端] 发送停止跟踪','tx')}else{ws.send(JSON.stringify({action:'tracking',command:trackingActive?'start':'stop',target_classes:['person']}));log(trackingActive?'启动人员跟踪':'停止人员跟踪','tx')}}
     function sendScreenshot(){if(!connected||mode==='mock')return toast('仅真实/云端模式可用');if(mode==='cloud'){cloudAction('snapshot/request',{request_id:'snap_'+Date.now().toString(36),annotated:false,issued_at:Math.floor(Date.now()/1000),expires_at:Math.floor(Date.now()/1000)+10});log('云端截图请求已发送','tx');toast('云端截图请求已发送');return}ws.send(JSON.stringify({action:'capture_once',tag:'web'}));log('截图指令已发送','tx');toast('截图指令已发送')}
     function toggleAutoCapture(){if(!connected||mode==='mock')return toast('仅真实/云端模式可用');if(mode==='cloud')return toast('云端暂不支持自动截图');const btn=$('#autoCaptureBtn');if(autoCaptureInterval){clearInterval(autoCaptureInterval);autoCaptureInterval=null;btn.classList.remove('active');btn.textContent='⏱ 自动';log('自动截图已停止');return}autoCaptureInterval=setInterval(()=>ws.send(JSON.stringify({action:'capture_once',tag:'auto'})),5000);btn.classList.add('active');btn.textContent='⏱ 自动(5s)';log('自动截图已启动(5s间隔)')}
     /* Nav status */
@@ -383,6 +383,7 @@
     $('#screenshotBtn').onclick=sendScreenshot;
     $('#trackingBtn').onclick=toggleTracking;
     $('#autoCaptureBtn').onclick=toggleAutoCapture;
+    $('#waterToggle').onclick=()=>{waterEnabled=!waterEnabled;$('#waterToggle').textContent=waterEnabled?'💧 积水开':'💧 积水关';$('#waterToggle').classList.toggle('active',waterEnabled);if(connected&&mode==='cloud'){cloudAction('water_toggle',{enabled:waterEnabled});log(waterEnabled?'云端→车 积水模型启动中':'云端→车 积水模型停止');toast(waterEnabled?'积水模型启动中':'积水模型已停止')}else{toast('仅云端模式可用')}};
     log('控制模拟器已就绪');log('当前为安全模拟模式，不会连接真车');
   </script>
 </body>
