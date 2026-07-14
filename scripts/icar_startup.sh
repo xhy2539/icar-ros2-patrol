@@ -144,6 +144,14 @@ fi
 tar --exclude='._*' -C "$REPO" -cf - task_manager llm navigation cloud_bridge vision icar_interfaces audio | \
   docker exec -i icar_ros2 bash -c \
     "mkdir -p $ICAR_WS/src; cd $ICAR_WS/src; rm -rf task_manager llm navigation cloud_bridge vision icar_interfaces audio; tar xf -"
+# Model weights are deliberately kept outside the ROS package source tree.
+# Copy the configured water detector alongside the generic YOLO model so a
+# restart cannot silently disable puddle detection.
+if [ -f "$REPO/models/water_seg_v1.pt" ]; then
+  docker exec icar_ros2 mkdir -p "$ICAR_WS/models"
+  docker cp "$REPO/models/water_seg_v1.pt" \
+    "icar_ros2:$ICAR_WS/models/water_seg_v1.pt"
+fi
 if [ "$ICAR_BUILD_REQUIRED" -eq 1 ]; then
   docker exec icar_ros2 bash -lc \
     "source /opt/ros/foxy/setup.bash; cd $ICAR_WS; colcon build --symlink-install --packages-select icar_interfaces task_manager llm_gateway navigation cloud_bridge vision_patrol"

@@ -39,7 +39,12 @@ run_node /tmp/icar_vision.log \
     -p yolo_device:=cpu \
     -p yolo_imgsz:=320 \
     -p yolo_confidence:=0.20 \
-    -p water_detector_backend:=none \
+    -p water_detector_backend:=yolo \
+    -p water_model:=$VISION_WS/models/water_seg_v1.pt \
+    -p water_device:=cpu \
+    -p water_confidence:=0.20 \
+    -p water_imgsz:=640 \
+    -p water_class_name:=water \
     -p target_classes:='[person,obstacle]' \
     -p publish_annotated:=true \
     -p annotated_topic:=/vision/annotated_image
