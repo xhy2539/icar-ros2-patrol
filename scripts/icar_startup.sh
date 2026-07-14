@@ -238,19 +238,36 @@ if [ -n "$DOUBAO_ACCESS_KEY" ]; then
 fi
 # Restart these nodes from the freshly built install tree. Merely checking for
 # an old process leaves the previous Python code loaded after a deployment.
+# First kill any lingering docker exec sessions on the host that own these nodes.
+# Then use SIGKILL (-9) inside the container so even hung processes are terminated
+# immediately, and kill both the ros2 run wrapper and the actual binary to prevent
+# double-counting in the verification step.  Retry up to 3× and confirm the
+# process is gone.
 pkill -f '[d]ocker exec icar_ros2 .*llm_gateway' 2>/dev/null || true
 pkill -f '[d]ocker exec icar_ros2 .*cloud_bridge' 2>/dev/null || true
-docker exec icar_ros2 pkill -f '/task_manager/lib/task_manager/task_manager_node' 2>/dev/null || true
-docker exec icar_ros2 pkill -f '/task_manager/lib/task_manager/obstacle_alarm_node' 2>/dev/null || true
-docker exec icar_ros2 pkill -f '/navigation/lib/navigation/obstacle_avoid_node' 2>/dev/null || true
-docker exec icar_ros2 pkill -f '/navigation/lib/navigation/nav2_bridge_node' 2>/dev/null || true
-docker exec icar_ros2 pkill -f '/llm_gateway/lib/llm_gateway/llm_gateway_node' 2>/dev/null || true
-docker exec icar_ros2 pkill -f '[r]os2 run llm_gateway llm_gateway_node' 2>/dev/null || true
-docker exec icar_ros2 pkill -f '/cloud_bridge/lib/cloud_bridge/cloud_bridge_node' 2>/dev/null || true
-docker exec icar_ros2 pkill -f '[r]os2 run cloud_bridge cloud_bridge_node' 2>/dev/null || true
-docker exec icar_ros2 pkill -f '/voice_control/lib/voice_control/web_voice_gateway_node' 2>/dev/null || true
-docker exec icar_ros2 pkill -f '/voice_control/lib/voice_control/doubao_voice_node' 2>/dev/null || true
-docker exec icar_ros2 pkill -f '/voice_control/lib/voice_control/voice_command_router_node' 2>/dev/null || true
+_icar_safe_kill() {
+  local container="$1" pattern="$2"
+  for _ in $(seq 1 3); do
+    docker exec "$container" pkill -9 -f "$pattern" 2>/dev/null || true
+    sleep 0.5
+  done
+  local remaining
+  remaining=$(docker exec "$container" bash -lc \
+    "ps -eo args= | grep -v grep | grep -v 'ros2 run' | grep -c '$pattern'" 2>/dev/null || echo 0)
+  remaining=$(echo "$remaining" | tr -cd '0-9')
+  if [ "${remaining:-0}" -gt 0 ]; then
+    echo "WARNING: $remaining process(es) matching '$pattern' still alive after kill"
+  fi
+}
+_icar_safe_kill icar_ros2 '/task_manager/lib/task_manager/task_manager_node'
+_icar_safe_kill icar_ros2 '/task_manager/lib/task_manager/obstacle_alarm_node'
+_icar_safe_kill icar_ros2 '/navigation/lib/navigation/obstacle_avoid_node'
+_icar_safe_kill icar_ros2 '/navigation/lib/navigation/nav2_bridge_node'
+_icar_safe_kill icar_ros2 'llm_gateway_node'
+_icar_safe_kill icar_ros2 'cloud_bridge_node'
+_icar_safe_kill icar_ros2 '/voice_control/lib/voice_control/web_voice_gateway_node'
+_icar_safe_kill icar_ros2 '/voice_control/lib/voice_control/doubao_voice_node'
+_icar_safe_kill icar_ros2 '/voice_control/lib/voice_control/voice_command_router_node'
 sleep 1
 eval "$ICAR_DOCKER_CMD; nohup ros2 run task_manager task_manager_node </dev/null >/tmp/task_manager.log 2>&1 &'"
 sleep 2
