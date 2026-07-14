@@ -13,7 +13,6 @@ class VelocityMuxNode(Node):
     """Small, explicit priority mux for the control sources used by this project."""
 
     SOURCES = (
-        ("safety", "/cmd_vel_safety", 1.0),
         ("app", "/cmd_vel_app", 0.4),
         ("cloud", "/cmd_vel_cloud", 0.4),
         ("tracking", "/vision/target_cmd_vel", 0.3),
@@ -26,6 +25,7 @@ class VelocityMuxNode(Node):
         self._messages = {}
         self._timestamps = {}
         self._estop = False
+        self._obstacle_avoidance_enabled = True
         self._obstacle_risk = "safe"
         self._obstacle_action = "none"
         self._obstacle_direction = "front"
@@ -40,6 +40,12 @@ class VelocityMuxNode(Node):
             )
         self.create_subscription(Bool, "/safety_stop", self._set_estop, 10)
         self.create_subscription(
+            Bool,
+            "/safety/obstacle_avoidance_enabled",
+            self._set_obstacle_avoidance_enabled,
+            10,
+        )
+        self.create_subscription(
             ObstacleStatus, "/obstacle_status", self._set_obstacle, 10
         )
         self.create_timer(0.05, self._tick)
@@ -52,12 +58,19 @@ class VelocityMuxNode(Node):
         self._estop = bool(message.data)
         self.get_logger().warning(f"safety stop {'ACTIVE' if self._estop else 'cleared'}")
 
+    def _set_obstacle_avoidance_enabled(self, message: Bool) -> None:
+        self._obstacle_avoidance_enabled = bool(message.data)
+        state = "enabled" if self._obstacle_avoidance_enabled else "DISABLED"
+        self.get_logger().warning(f"obstacle velocity limiting {state}")
+
     def _set_obstacle(self, message: ObstacleStatus) -> None:
         self._obstacle_risk = message.risk_level
         self._obstacle_action = message.action
         self._obstacle_direction = message.direction
 
     def _safe_command(self, message: Twist) -> Twist:
+        if not self._obstacle_avoidance_enabled:
+            return message
         safe = constrain_for_obstacle(
             message.linear.x,
             message.linear.y,

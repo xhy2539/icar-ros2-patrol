@@ -68,6 +68,12 @@ class AppBridgeNode(Node):
         self._safety_stop_publisher = self.create_publisher(
             Bool, "/safety_stop", 10
         )
+        self._alarm_sound_publisher = self.create_publisher(
+            Bool, "/safety/alarm_sound_enabled", 10
+        )
+        self._obstacle_avoidance_publisher = self.create_publisher(
+            Bool, "/safety/obstacle_avoidance_enabled", 10
+        )
         self._parse_task_client = self.create_client(ParseTask, "/llm/parse_task")
         self._report_client = self.create_client(
             GenerateReport, "/llm/generate_report"
@@ -229,6 +235,12 @@ class AppBridgeNode(Node):
             if action == "llm_command":
                 self._publish_llm_command(client, data)
                 return
+            if action == "set_alert_sound":
+                self._set_alert_sound(client, data)
+                return
+            if action == "set_obstacle_avoidance":
+                self._set_obstacle_avoidance(client, data)
+                return
             if action and "command" not in data and "direction" not in data:
                 self._send(
                     client,
@@ -237,6 +249,44 @@ class AppBridgeNode(Node):
                 return
 
         self._apply_motion(client, raw)
+
+    def _set_alert_sound(self, client: socket.socket, data: dict) -> None:
+        enabled = data.get("enabled")
+        if not isinstance(enabled, bool):
+            self._send(
+                client,
+                {"topic": "error", "error": "set_alert_sound requires boolean enabled"},
+            )
+            return
+        self._alarm_sound_publisher.publish(Bool(data=enabled))
+        self._send(
+            client,
+            {
+                "topic": "command_ack",
+                "action": "set_alert_sound",
+                "enabled": enabled,
+                "ok": True,
+            },
+        )
+
+    def _set_obstacle_avoidance(self, client: socket.socket, data: dict) -> None:
+        enabled = data.get("enabled")
+        if not isinstance(enabled, bool):
+            self._send(
+                client,
+                {"topic": "error", "error": "set_obstacle_avoidance requires boolean enabled"},
+            )
+            return
+        self._obstacle_avoidance_publisher.publish(Bool(data=enabled))
+        self._send(
+            client,
+            {
+                "topic": "command_ack",
+                "action": "set_obstacle_avoidance",
+                "enabled": enabled,
+                "ok": True,
+            },
+        )
 
     def _apply_motion(self, client: socket.socket, raw: str) -> None:
         try:
