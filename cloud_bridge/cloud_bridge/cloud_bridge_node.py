@@ -168,11 +168,14 @@ class CloudBridgeNode(Node):
         self._video_stop = threading.Event()
         self._water_proc = None
         self._water_proc_lock = threading.Lock()
+        self._video_pub_failures = 0
         if self.get_parameter("video_enabled").value:
             # Separate MQTT client for video — never blocks control
             self._video_mqtt = self._create_mqtt_client()
             if user:
                 self._video_mqtt.username_pw_set(user, pw)
+            self._video_mqtt.max_queued_messages_set(50)
+            self._video_mqtt.reconnect_delay_set(min_delay=1, max_delay=30)
             self._video_mqtt.connect_async(host, port, keepalive=30)
             self._video_mqtt.loop_start()
             self._video_thread = threading.Thread(
@@ -735,10 +738,21 @@ class CloudBridgeNode(Node):
         client = getattr(self, "_video_mqtt", None) or self.mqtt
         try:
             info = client.publish(topic, data, qos=0)
-            if getattr(info, "rc", 0) != 0:
-                pass  # silently drop frames when queue full
-        except Exception:
-            pass
+            rc = getattr(info, "rc", 0)
+            if rc != 0:
+                self._video_pub_failures += 1
+                if self._video_pub_failures <= 1 or self._video_pub_failures % 30 == 0:
+                    self.get_logger().warn(
+                        f"视频帧发送失败 (rc={rc}, 累计{self._video_pub_failures}次)"
+                    )
+            else:
+                self._video_pub_failures = 0
+        except Exception as e:
+            self._video_pub_failures += 1
+            if self._video_pub_failures <= 1 or self._video_pub_failures % 30 == 0:
+                self.get_logger().warn(
+                    f"视频帧发送异常: {e} (累计{self._video_pub_failures}次)"
+                )
 
     def _telemetry_due(self, key, force=False):
         now = time.monotonic()
