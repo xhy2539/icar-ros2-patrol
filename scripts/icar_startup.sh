@@ -80,23 +80,23 @@ docker exec autodrive_ros2 pkill -f \
 sleep 3
 
 echo "[5/14] Starting chassis bringup and lidar"
-# A container restart can restore a launch process a few seconds after Docker is
-# reported as running. Wait before deciding that standalone bringup is needed;
-# otherwise both launch files can race and open the chassis serial twice.
-for _ in $(seq 1 10); do
-  docker exec autodrive_ros2 pgrep -f 'Mcnamu_driver_X3 --ros-args' >/dev/null && break
-  sleep 1
-done
-if ! docker exec autodrive_ros2 pgrep -f 'Mcnamu_driver_X3 --ros-args' >/dev/null; then
-  docker exec autodrive_ros2 bash -lc \
-    'source /opt/ros/foxy/setup.bash
-     source /root/yahboomcar_ros2_ws/software/library_ws/install/setup.bash
-     source /root/yahboomcar_ros2_ws/yahboomcar_ws/install/setup.bash
-     export ROS_DOMAIN_ID=30
-     nohup ros2 launch yahboomcar_bringup yahboomcar_bringup_X3_launch.py \
-       </dev/null >/tmp/yahboomcar_bringup.log 2>&1 &'
-  sleep 10
-fi
+# Detached vendor nodes can survive after their launch owner is killed.  Always
+# remove their direct executables before starting one controlled bringup; merely
+# checking that one driver exists permits a second process to keep the serial
+# port and publish duplicate /joint_states.
+docker exec autodrive_ros2 pkill -f \
+  '/yahboomcar_bringup/lib/yahboomcar_bringup/Mcnamu_driver_X3' 2>/dev/null || true
+docker exec autodrive_ros2 pkill -f \
+  '/joint_state_publisher/joint_state_publisher' 2>/dev/null || true
+sleep 3
+docker exec autodrive_ros2 bash -lc \
+  'source /opt/ros/foxy/setup.bash
+   source /root/yahboomcar_ros2_ws/software/library_ws/install/setup.bash
+   source /root/yahboomcar_ros2_ws/yahboomcar_ws/install/setup.bash
+   export ROS_DOMAIN_ID=30
+   nohup ros2 launch yahboomcar_bringup yahboomcar_bringup_X3_launch.py \
+     </dev/null >/tmp/yahboomcar_bringup.log 2>&1 &'
+sleep 10
 if ! docker exec autodrive_ros2 pgrep -f \
   '/sllidar_ros2/lib/sllidar_ros2/sllidar_node --ros-args' >/dev/null; then
   docker exec autodrive_ros2 bash -lc \
