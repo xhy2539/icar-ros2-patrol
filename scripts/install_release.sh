@@ -97,5 +97,9 @@ if [[ -n "$OLD_TARGET" ]]; then
 else
   rm -f "$CURRENT_LINK"
   echo "没有上一版本可恢复，已移除 current 链接" >&2
+  # On the first versioned install there is no previous release link.  The
+  # startup unit can still fall back to the preserved git checkout, so restart
+  # it after removing current instead of leaving the car stack stopped.
+  bash -lc "$RESTART_COMMAND" || true
 fi
 exit 1

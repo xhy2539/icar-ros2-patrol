@@ -1,6 +1,6 @@
 [Unit]
 Description=iCar Web Control Gateway
-After=network-online.target docker.service icar_startup.service
+After=network-online.target docker.service
 Wants=network-online.target
 
 [Service]
