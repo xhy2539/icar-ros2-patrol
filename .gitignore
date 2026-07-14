@@ -41,6 +41,8 @@ models/
 .dart_tool/
 .flutter-plugins-dependencies
 web/
+!web/
+!web/control_simulator.html
 datasets/
 runs/
 

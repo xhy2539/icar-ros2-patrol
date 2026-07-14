@@ -51,6 +51,7 @@ void main() async {
     speed: prefs.getDouble('default_speed'),
     autoReconnect: prefs.getBool('auto_reconnect'),
     hapticEnabled: prefs.getBool('haptic_feedback'),
+    alertSoundEnabled: prefs.getBool('alert_sound_enabled'),
   );
   runApp(const ICarApp());
 }

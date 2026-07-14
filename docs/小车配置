@@ -1,5 +1,5 @@
 # 小车 #1（旧）
-ssh jetson@1192.168.137.117
+ssh jetson@192.168.137.117
 密码：yahboom
 
 Docker: slam_test / boring_keldysh (yahboomtechnology/ros-foxy:5.0.1)

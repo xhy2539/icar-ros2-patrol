@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'car_tcp_service.dart';
 import 'car_commands.dart';
 import 'cloud_mqtt_service.dart';
@@ -40,6 +41,7 @@ class CarController extends ChangeNotifier {
     _service.taskLogStream.listen(_onTaskLog);
     _service.envDataStream.listen(_onEnvData);
     _service.sensorAlertStream.listen(_onSensorAlert);
+    _service.safetyAlarmStream.listen(_onSafetyAlarm);
     _service.trackingStream.listen(_onTrackingStatus);
     _service.imageFrameStream.listen(_imageFrameEvents.add);
 
@@ -55,6 +57,7 @@ class CarController extends ChangeNotifier {
     _cloudService.obstacleStream.listen(_onObstacleStatus);
     _cloudService.envDataStream.listen(_onEnvData);
     _cloudService.sensorAlertStream.listen(_onSensorAlert);
+    _cloudService.safetyAlarmStream.listen(_onSafetyAlarm);
     _cloudService.taskLogStream.listen(_onTaskLog);
     _cloudService.llmCommandStream.listen(_forwardLlmCommandResult);
     _cloudService.reportStream.listen(_forwardReportResult);
@@ -148,6 +151,24 @@ class CarController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 告警提示音开关。仅影响本机 App 的提示音，不影响车端避障或急停。
+  bool _alertSoundEnabled = true;
+  bool get alertSoundEnabled => _alertSoundEnabled;
+
+  DateTime? _lastAlertSoundAt;
+
+  void _playAlertSound() {
+    if (!_alertSoundEnabled) return;
+    final now = DateTime.now();
+    // 避障和传感器状态可能高频发布；限制频率以免持续刺耳响铃。
+    if (_lastAlertSoundAt != null &&
+        now.difference(_lastAlertSoundAt!) < const Duration(seconds: 2)) {
+      return;
+    }
+    _lastAlertSoundAt = now;
+    SystemSound.play(SystemSoundType.alert);
+  }
+
   /// 从设置页批量更新配置
   ///
   /// 如果当前未连接，只保存配置；如果已连接且 IP/端口变化，会断开旧连接并用新地址重连。
@@ -165,6 +186,7 @@ class CarController extends ChangeNotifier {
     double? speed,
     bool? autoReconnect,
     bool? hapticEnabled,
+    bool? alertSoundEnabled,
   }) async {
     final oldMode = _connectionMode;
     final wasConnected = isConnected;
@@ -217,6 +239,9 @@ class CarController extends ChangeNotifier {
     }
     if (hapticEnabled != null) {
       _hapticEnabled = hapticEnabled;
+    }
+    if (alertSoundEnabled != null) {
+      _alertSoundEnabled = alertSoundEnabled;
     }
 
     if (wasConnected && needReconnect) {
@@ -810,10 +835,12 @@ class CarController extends ChangeNotifier {
   void _onObstacleStatus(ObstacleStatus obs) {
     _latestObstacle = obs;
     if (obs.isDanger) {
+      _playAlertSound();
       _addMessage(
         '[避障] ${obs.directionZh} ${obs.minDistance.toStringAsFixed(1)}m — 危险',
       );
     } else if (obs.isWarning) {
+      _playAlertSound();
       _addMessage(
         '[避障] ${obs.directionZh} ${obs.minDistance.toStringAsFixed(1)}m — 警告',
       );
@@ -856,8 +883,18 @@ class CarController extends ChangeNotifier {
 
   void _onSensorAlert(SensorAlert alert) {
     _latestSensorAlert = alert;
+    _playAlertSound();
     _addMessage(
       '[告警] ${alert.sensorTypeZh}: ${alert.currentValue} > ${alert.threshold}',
+    );
+    notifyListeners();
+  }
+
+  void _onSafetyAlarm(SafetyAlarm alarm) {
+    if (!alarm.active) return;
+    _playAlertSound();
+    _addMessage(
+      '[安全告警] ${alarm.typeZh}${alarm.message.isEmpty ? '' : ': ${alarm.message}'}',
     );
     notifyListeners();
   }

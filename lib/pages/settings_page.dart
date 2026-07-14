@@ -28,6 +28,7 @@ class _SettingsPageState extends State<SettingsPage> {
   late bool _autoReconnect;
   late bool _hapticFeedback;
   bool _vibrateOnAlert = true;
+  bool _alertSoundEnabled = true;
 
   bool _dirty = false; // 是否有未保存的更改
   bool _saving = false;
@@ -103,6 +104,8 @@ class _SettingsPageState extends State<SettingsPage> {
       _autoReconnect = prefs.getBool('auto_reconnect') ?? _ctrl.autoReconnect;
       _hapticFeedback = prefs.getBool('haptic_feedback') ?? _ctrl.hapticEnabled;
       _vibrateOnAlert = prefs.getBool('vibrate_on_alert') ?? true;
+      _alertSoundEnabled =
+          prefs.getBool('alert_sound_enabled') ?? _ctrl.alertSoundEnabled;
 
       _ipCtrl.text = _carIp;
       _portCtrl.text = _wsPort.toString();
@@ -138,6 +141,7 @@ class _SettingsPageState extends State<SettingsPage> {
     await prefs.setBool('auto_reconnect', _autoReconnect);
     await prefs.setBool('haptic_feedback', _hapticFeedback);
     await prefs.setBool('vibrate_on_alert', _vibrateOnAlert);
+    await prefs.setBool('alert_sound_enabled', _alertSoundEnabled);
 
     // 应用到 CarController
     await _ctrl.updateSettings(
@@ -154,6 +158,7 @@ class _SettingsPageState extends State<SettingsPage> {
       speed: _defaultSpeed,
       autoReconnect: _autoReconnect,
       hapticEnabled: _hapticFeedback,
+      alertSoundEnabled: _alertSoundEnabled,
     );
 
     setState(() {
@@ -477,12 +482,12 @@ class _SettingsPageState extends State<SettingsPage> {
       title: '告警设置',
       icon: Icons.notifications,
       child: _buildSwitchRow(
-        icon: Icons.warning_amber,
-        label: '超标震动提醒',
-        subtitle: '传感器数据超标时震动提醒',
-        value: _vibrateOnAlert,
+        icon: Icons.volume_up_outlined,
+        label: '告警声音',
+        subtitle: '避障和传感器告警时播放提示音；关闭不影响安全拦截',
+        value: _alertSoundEnabled,
         onChanged: (value) {
-          setState(() => _vibrateOnAlert = value);
+          setState(() => _alertSoundEnabled = value);
           _markDirty();
         },
       ),

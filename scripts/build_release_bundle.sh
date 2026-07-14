@@ -28,6 +28,7 @@ INCLUDED=(
   task_manager
   vision
   voice
+  web
   pubspec.yaml
   pubspec.lock
 )
