@@ -52,6 +52,7 @@ void main() async {
     autoReconnect: prefs.getBool('auto_reconnect'),
     hapticEnabled: prefs.getBool('haptic_feedback'),
     alertSoundEnabled: prefs.getBool('alert_sound_enabled'),
+    obstacleAvoidanceEnabled: prefs.getBool('obstacle_avoidance_enabled'),
   );
   runApp(const ICarApp());
 }

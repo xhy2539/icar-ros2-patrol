@@ -1,6 +1,6 @@
 """Obstacle classification node — reads /scan and publishes /obstacle_status.
 
-Detection: ±30° front sector. <0.5m = DANGER/STOP, <1.0m = WARNING/SLOW_DOWN.
+Detection: ±30° front sector. ≤0.2m = DANGER/STOP, ≤0.5m = WARNING/SLOW_DOWN.
 The velocity mux applies directional limits so Nav2 can still rotate or reverse
 around a static obstacle. A legacy full-stop Twist can be enabled explicitly.
 """
@@ -14,8 +14,8 @@ from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
 
 FRONT_SECTOR_DEGREES = 30.0
-WARNING_DISTANCE_M = 1.0
-DANGER_DISTANCE_M = 0.5
+WARNING_DISTANCE_M = 0.5
+DANGER_DISTANCE_M = 0.2
 
 
 def classify_front_scan(
