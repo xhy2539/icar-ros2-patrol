@@ -15,8 +15,8 @@ ExecStartPre=/bin/bash -c 'lsmod | grep -q "^uvcvideo" || modprobe uvcvideo 2>/d
 ExecStartPre=/bin/bash -c '[ -e /dev/video0 ] || printf "2bc5 050f\n" > /sys/bus/usb/drivers/uvcvideo/new_id 2>/dev/null || true'
 
 # 优先用 release 路径，不存在则用 git 仓库
-ExecStartPre=/bin/bash -c '[ -x /home/jetson/icar-deploy/current/scripts/icar_startup.sh ] || [ -x /home/jetson/icar-ros2-patrol/scripts/icar_startup.sh ] || (echo "startup script missing" && exit 1)'
-ExecStart=/bin/bash -c 'if [ -x /home/jetson/icar-deploy/current/scripts/icar_startup.sh ]; then /home/jetson/icar-deploy/current/scripts/icar_startup.sh; else /home/jetson/icar-ros2-patrol/scripts/icar_startup.sh; fi'
+ExecStartPre=/bin/bash -c '[ -f /home/jetson/icar-deploy/current/scripts/icar_startup.sh ] || [ -f /home/jetson/icar-ros2-patrol/scripts/icar_startup.sh ] || (echo "startup script missing" && exit 1)'
+ExecStart=/bin/bash -c 'if [ -f /home/jetson/icar-deploy/current/scripts/icar_startup.sh ]; then /bin/bash /home/jetson/icar-deploy/current/scripts/icar_startup.sh; else /bin/bash /home/jetson/icar-ros2-patrol/scripts/icar_startup.sh; fi'
 
 Restart=on-failure
 RestartSec=30

@@ -65,7 +65,7 @@ if [ "$APP_ENABLE_JOYSTICK" = "1" ]; then
        -r /cmd_vel:=/cmd_vel_joy </dev/null >/tmp/joy_ctrl.log 2>&1 &"
 fi
 
-WEB_USER="${ICAR_WEB_USER:-$(stat -c '%U' "$REPO_DIR")}"
+WEB_USER="${ICAR_WEB_USER:-jetson}"
 WEB_SERVICE="${ICAR_WEB_SERVICE:-icar_web_gateway.service}"
 USE_SYSTEMD_WEB=0
 if [ "$(id -u)" -eq 0 ] && systemctl cat "$WEB_SERVICE" >/dev/null 2>&1; then

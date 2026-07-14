@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
+User=jetson
 ExecStartPre=/bin/bash -c 'if [ -d /home/jetson/icar-deploy/current ]; then cd /home/jetson/icar-deploy/current; else cd /home/jetson/icar-ros2-patrol; fi'
 ExecStart=/bin/bash -c 'if [ -f /home/jetson/icar-deploy/current/app/web_gateway.py ]; then DIR=/home/jetson/icar-deploy/current; else DIR=/home/jetson/icar-ros2-patrol; fi; exec /usr/bin/python3 "$DIR/app/web_gateway.py"'
 WorkingDirectory=/home/jetson/icar-ros2-patrol
