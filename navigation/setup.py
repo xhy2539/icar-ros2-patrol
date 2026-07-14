@@ -26,6 +26,7 @@ setup(
             'obstacle_avoid_node = obstacle_avoid.obstacle_avoid_node:main',
             'slam_node = slam.slam_node:main',
             'lidar_node = lidar.lidar_node:main',
+            'nav2_bridge_node = navigation.nav2_bridge_node:main',
         ],
     },
 )
