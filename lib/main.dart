@@ -28,9 +28,9 @@ void main() async {
   // 从 SharedPreferences 加载持久化设置
   final prefs = await SharedPreferences.getInstance();
   final savedHost = prefs.getString('car_ip');
-  // 旧 APK 使用 .218；当前车端与网页统一使用 .117。
-  final carHost = savedHost == null || savedHost == '192.168.137.218'
-      ? '192.168.137.117'
+  // 当前实车在校园网地址；旧热点地址自动迁移，用户仍可在设置页覆盖。
+  final carHost = savedHost == null || savedHost.startsWith('192.168.137.')
+      ? '10.247.5.83'
       : savedHost;
   if (savedHost != carHost) {
     await prefs.setString('car_ip', carHost);
