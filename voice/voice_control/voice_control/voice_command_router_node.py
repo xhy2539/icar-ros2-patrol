@@ -88,8 +88,11 @@ class VoiceCommandRouterNode(Node):
         except json.JSONDecodeError:
             event = {"text": msg.data, "is_listen": False}
 
+        is_listen = bool(event.get("is_listen", True))
         text = str(event.get("text", ""))
-        if text:
+        # Only accumulate user speech (is_listen=True), not Doubao's own replies.
+        # Doubao's TTS output has is_listen=False and must not go to DeepSeek.
+        if text and is_listen:
             self._turn_text += text
 
         if any(phrase in self._turn_text for phrase in EMERGENCY_PHRASES):
@@ -98,12 +101,12 @@ class VoiceCommandRouterNode(Node):
             self._was_speaking = False
             return
 
-        is_speaking = not bool(event.get("is_listen", True))
+        is_speaking = not is_listen
         turn_finished = bool(event.get("end_of_turn", False)) or (
             self._was_speaking and not is_speaking
         )
         self._was_speaking = is_speaking
-        if turn_finished:
+        if turn_finished and self._turn_text.strip():
             self._route_completed_turn(self._turn_text.strip())
             self._turn_text = ""
 

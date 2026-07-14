@@ -74,7 +74,7 @@ class CloudBridgeNode(Node):
         self.declare_parameter("mqtt_keepalive", 60)
         self.declare_parameter("mqtt_qos", 1)
         self.declare_parameter("topic_prefix", os.getenv("ICAR_MQTT_TOPIC_PREFIX", "/icar"))
-        self.declare_parameter("device_id", os.getenv("ICAR_DEVICE_ID", ""))
+        self.declare_parameter("device_id", "")
         self.declare_parameter("max_command_bytes", 16 * 1024)
         self.declare_parameter("cloud_cmd_vel_topic", "/cmd_vel_cloud")
         self.declare_parameter("max_linear", 0.35)
