@@ -117,16 +117,16 @@ class DatasetRecorderNode(Node):
 
     def save_latest(self, reason, tag=None):
         if self.latest_msg is None:
-            self.publish_status("no_frame", {"reason": reason})
+            self.publish_status("no_frame", {"reason": reason, "tag": tag})
             return
         if self.saved_count >= self.max_images:
             self.publish_status(
                 "max_images_reached",
-                {"max_images": self.max_images, "reason": reason},
+                {"max_images": self.max_images, "reason": reason, "tag": tag},
             )
             return
         if self.bridge is None or cv2 is None:
-            self.publish_status("save_unavailable", {"reason": reason})
+            self.publish_status("save_unavailable", {"reason": reason, "tag": tag})
             return
 
         try:
@@ -143,7 +143,9 @@ class DatasetRecorderNode(Node):
                 [int(cv2.IMWRITE_JPEG_QUALITY), self.jpeg_quality],
             )
             if not ok:
-                self.publish_status("save_failed", {"path": str(path), "reason": reason})
+                self.publish_status(
+                    "save_failed", {"path": str(path), "reason": reason, "tag": tag}
+                )
                 return
             self.saved_count += 1
             self.publish_status(
@@ -152,12 +154,15 @@ class DatasetRecorderNode(Node):
                     "path": str(path),
                     "count": self.saved_count,
                     "reason": reason,
+                    "tag": tag,
                     "width": self.latest_msg.width,
                     "height": self.latest_msg.height,
                 },
             )
         except Exception as exc:  # pylint: disable=broad-except
-            self.publish_status("save_exception", {"error": str(exc), "reason": reason})
+            self.publish_status(
+                "save_exception", {"error": str(exc), "reason": reason, "tag": tag}
+            )
 
     def publish_status(self, event, data):
         payload = {

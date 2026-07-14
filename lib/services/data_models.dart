@@ -54,6 +54,8 @@ class SafetyAlarm {
   final String checkpoint;
   final String severity;
   final String message;
+  final bool capturePending;
+  final String captureStatus;
   final RobotPose pose;
 
   const SafetyAlarm({
@@ -69,6 +71,8 @@ class SafetyAlarm {
     this.checkpoint = '',
     this.severity = 'WARN',
     this.message = '',
+    this.capturePending = false,
+    this.captureStatus = '',
     this.pose = const RobotPose(),
   });
 
@@ -87,6 +91,8 @@ class SafetyAlarm {
       checkpoint: json['checkpoint']?.toString() ?? '',
       severity: json['severity']?.toString() ?? 'WARN',
       message: json['message']?.toString() ?? '',
+      capturePending: json['capture_pending'] == true,
+      captureStatus: json['capture_status']?.toString() ?? '',
       pose: rawPose is Map
           ? RobotPose.fromJson(Map<String, dynamic>.from(rawPose))
           : const RobotPose(),
@@ -206,6 +212,8 @@ class NavStatus {
         return '已到达';
       case 'FAILED':
         return '导航失败';
+      case 'PAUSED':
+        return '已暂停';
       default:
         return status;
     }
@@ -219,6 +227,8 @@ class NavStatus {
         return AppColors.successGreen;
       case 'FAILED':
         return AppColors.errorRed;
+      case 'PAUSED':
+        return AppColors.warningOrange;
       default:
         return AppColors.blueGray;
     }
@@ -276,6 +286,8 @@ class TaskStatus {
         return '检测中';
       case 'COLLECTING':
         return '采集中';
+      case 'PAUSED':
+        return '等待确认';
       case 'COMPLETED':
         return '已完成';
       case 'FAILED':
@@ -293,6 +305,8 @@ class TaskStatus {
         return AppColors.successGreen;
       case 'FAILED':
         return AppColors.errorRed;
+      case 'PAUSED':
+        return AppColors.warningOrange;
       case 'CANCELLED':
         return AppColors.blueGray;
       case 'NAVIGATING':

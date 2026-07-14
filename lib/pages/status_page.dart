@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../services/car_controller.dart';
+import '../services/data_models.dart';
 
 class StatusPage extends StatefulWidget {
   const StatusPage({super.key});
@@ -93,6 +94,10 @@ class _StatusPageState extends State<StatusPage> {
               // 状态概览
               _buildStatusOverview(),
               const SizedBox(height: 16),
+              if (_ctrl.latestSafetyAlarm?.active == true) ...[
+                _buildSafetyAlarmCard(_ctrl.latestSafetyAlarm!),
+                const SizedBox(height: 16),
+              ],
               // 详细信息
               _buildDetailCards(),
               const SizedBox(height: 16),
@@ -216,6 +221,53 @@ class _StatusPageState extends State<StatusPage> {
 
   Widget _buildDetailCards() {
     return Column(children: [_buildObstacleCard(), _buildTaskProgressCard()]);
+  }
+
+  Widget _buildSafetyAlarmCard(SafetyAlarm alarm) {
+    final critical = alarm.isCritical;
+    final color = critical ? AppColors.errorRed : AppColors.warningOrange;
+    final evidence = alarm.capturePending
+        ? '证据截图保存中'
+        : alarm.imagePath.isNotEmpty
+        ? '证据已保存'
+        : alarm.captureStatus.isNotEmpty
+        ? '截图${alarm.captureStatus}'
+        : '暂无截图';
+    return AppCard(
+      title: '需工作人员处理的安全告警',
+      icon: critical ? Icons.emergency : Icons.water_damage,
+      child: Column(
+        children: [
+          _buildDetailRow('事件', alarm.typeZh, Icons.warning_amber, color),
+          const SizedBox(height: 10),
+          _buildDetailRow(
+            '处置',
+            alarm.action == 'replan_current_goal' ? '已请求绕行' : '请人工确认',
+            Icons.route,
+            color,
+          ),
+          const SizedBox(height: 10),
+          _buildDetailRow('证据', evidence, Icons.photo_camera, color),
+          if (alarm.checkpoint.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            _buildDetailRow('位置', alarm.checkpoint, Icons.location_on, color),
+          ],
+          if (alarm.message.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                alarm.message,
+                style: const TextStyle(
+                  color: AppColors.blueGrayDark,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 
   /// 避障状态卡片

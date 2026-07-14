@@ -293,6 +293,10 @@ class CarController extends ChangeNotifier {
   CaptureStatus? _latestCaptureStatus;
   CaptureStatus? get latestCaptureStatus => _latestCaptureStatus;
 
+  /// Latest structured safety event, including automatic hazard evidence.
+  SafetyAlarm? _latestSafetyAlarm;
+  SafetyAlarm? get latestSafetyAlarm => _latestSafetyAlarm;
+
   /// 视觉检测流
   Stream<DetectionArray> get detectionStream => _service.detectionStream;
 
@@ -910,6 +914,7 @@ class CarController extends ChangeNotifier {
   }
 
   void _onSafetyAlarm(SafetyAlarm alarm) {
+    _latestSafetyAlarm = alarm;
     if (!alarm.active) return;
     _playAlertSound();
     _addMessage(
