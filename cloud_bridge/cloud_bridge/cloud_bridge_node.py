@@ -157,6 +157,7 @@ class CloudBridgeNode(Node):
             Twist, self.get_parameter("cloud_cmd_vel_topic").value, qos
         )
         self.alarm_sound_pub = self.create_publisher(ROSBool, "/safety/alarm_sound_enabled", qos)
+        self.obstacle_avoid_pub = self.create_publisher(ROSBool, "/safety/obstacle_avoidance_enabled", qos)
         self.report_client = self.create_client(GenerateReport, "/llm/generate_report")
         self.create_timer(0.05, self._publish_cloud_motion)
 
@@ -244,6 +245,7 @@ class CloudBridgeNode(Node):
             client.subscribe(self.topics.llm_generate_report, qos=self.mqtt_qos)
             client.subscribe(self.topics.snapshot_request, qos=self.mqtt_qos)
             client.subscribe(self.topics.alarm, qos=self.mqtt_qos)
+            client.subscribe(self.topics.obstacle_toggle, qos=self.mqtt_qos)
             client.subscribe(self.topics.water_toggle, qos=self.mqtt_qos)
             client.publish(
                 self.topics.online,
@@ -302,6 +304,12 @@ class CloudBridgeNode(Node):
                 enabled = bool(data.get("enabled", True)) if isinstance(data, dict) else True
                 self.alarm_sound_pub.publish(ROSBool(data=enabled))
                 self.get_logger().info(f"云→车 告警声音: {'开' if enabled else '关'}")
+
+            elif msg.topic == self.topics.obstacle_toggle:
+                data = json.loads(payload.decode("utf-8"))
+                enabled = bool(data.get("enabled", True)) if isinstance(data, dict) else True
+                self.obstacle_avoid_pub.publish(ROSBool(data=enabled))
+                self.get_logger().info(f"云→车 避障: {'开' if enabled else '关'}")
 
             elif msg.topic == self.topics.water_toggle:
                 data = json.loads(payload.decode("utf-8"))

@@ -38,6 +38,10 @@ ensure_single_ad() {
   docker exec -d autodrive_ros2 bash -lc "source /opt/ros/foxy/setup.bash; source /root/yahboomcar_ros2_ws/software/library_ws/install/setup.bash; source /root/yahboomcar_ros2_ws/yahboomcar_ws/install/setup.bash; source /root/icar_app_ws/install/setup.bash; export ROS_DOMAIN_ID=30; $*" 2>/dev/null || true
 }
 
+# ── Disable buzzer ──
+docker exec icar_ros2 bash -lc "source /opt/ros/foxy/setup.bash && ros2 topic pub -1 /safety/alarm_sound_enabled std_msgs/msg/Bool \"data: false\" 2>/dev/null" || true
+docker exec autodrive_ros2 bash -lc "source /opt/ros/foxy/setup.bash && ros2 topic pub -1 /Buzzer std_msgs/msg/Bool \"data: false\" 2>/dev/null" || true
+
 # ── Critical ──
 ensure_single cloud_bridge  icar_ros2 "cloud_bridge_node" \
   "ros2 run cloud_bridge cloud_bridge_node"

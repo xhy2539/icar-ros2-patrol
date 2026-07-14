@@ -44,6 +44,7 @@ class CloudTopics:
     capture: str
     tracking: str
     water_toggle: str
+    obstacle_toggle: str
 
     @classmethod
     def build(cls, prefix: str = "/icar", device_id: str = "") -> "CloudTopics":
@@ -84,6 +85,7 @@ class CloudTopics:
             capture=f"{base}/capture",
             tracking=f"{base}/tracking",
             water_toggle=f"{base}/water_toggle",
+            obstacle_toggle=f"{base}/obstacle_toggle",
         )
 
 

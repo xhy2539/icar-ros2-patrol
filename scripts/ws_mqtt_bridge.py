@@ -16,8 +16,8 @@ import paho.mqtt.client as mqtt
 import websockets
 from websockets.server import WebSocketServerProtocol
 
-WS_HOST = os.getenv("ICAR_WS_MQTT_HOST", "127.0.0.1")
-WS_PORT = int(os.getenv("ICAR_WS_MQTT_PORT", "9002"))
+WS_HOST = os.getenv("ICAR_WS_MQTT_HOST", "0.0.0.0")
+WS_PORT = int(os.getenv("ICAR_WS_MQTT_PORT", "9003"))
 MQTT_HOST = os.getenv("ICAR_MQTT_HOST", "82.156.132.43")
 MQTT_PORT = int(os.getenv("ICAR_MQTT_PORT", "1883"))
 MQTT_USER = os.getenv("ICAR_MQTT_USER", "icar")
@@ -61,6 +61,7 @@ CMD_TOPICS = {
     "snapshot/request": "snapshot/request",
     "alarm": "alarm",
     "water_toggle": "water_toggle",
+    "obstacle_toggle": "obstacle_toggle",
 }
 
 
@@ -83,7 +84,8 @@ class MqttBridge:
 
     def start(self):
         """Start the persistent MQTT connection. Call once at startup."""
-        self.client.connect_async(MQTT_HOST, MQTT_PORT, keepalive=30)
+        self.client.reconnect_delay_set(min_delay=1, max_delay=10)
+        self.client.connect_async(MQTT_HOST, MQTT_PORT, keepalive=15)
         self.client.loop_start()
 
     def stop(self):

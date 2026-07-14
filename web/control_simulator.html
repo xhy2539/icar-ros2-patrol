@@ -335,7 +335,7 @@ function releaseCloud(){if(active&&connected)send('stop');release()}
     /* ════════════════════════════════════════ Cloud MQTT mode ════════════════════════════════════════ */
     function connectCloud(){
       if(ws){try{ws.close()}catch(_){}ws=null}
-      const bridgeUrl='ws://127.0.0.1:9002';
+      const bridgeUrl='ws://127.0.0.1:9003';
       $('#stateDot').className='dot busy';$('#stateText').textContent='云端连接中';
       log('正在连接 MQTT 桥接 '+bridgeUrl);
       ws=new WebSocket(bridgeUrl);
@@ -347,7 +347,7 @@ function releaseCloud(){if(active&&connected)send('stop');release()}
       };
       ws.onmessage=handleCloudMessage;
       ws.onerror=()=>{log('云端桥接错误，请确认 ws_mqtt_bridge.py 已启动');toast('云端连接失败，请运行 python3 scripts/ws_mqtt_bridge.py')};
-      ws.onclose=()=>{setConnected(false);log('云端连接已关闭')};
+      ws.onclose=()=>{setConnected(false);log('云端连接已关闭');if(mode==='cloud'){log('3秒后自动重连...');setTimeout(connectCloud,3000)}};
     }
     function handleCloudMessage(event){
       try{
@@ -391,7 +391,7 @@ function releaseCloud(){if(active&&connected)send('stop');release()}
     $('#stop').disabled=true;$('#stop').onclick=()=>{if(mode==='cloud')releaseCloud();else release();};
     $('#speed').oninput=()=>{const p=+$('#speed').value;$('#speedValue').textContent=p;$('.speed-unit').textContent=`% · ${(.45*p/100).toFixed(2)} m/s`;if(active){send(active);motion(active)}};
     function syncAlertSound(){if(mode==='cloud'&&ws?.readyState===WebSocket.OPEN)cloudAction('alarm',{enabled:alertSoundEnabled});else if(mode==='real'&&ws?.readyState===WebSocket.OPEN)ws.send(JSON.stringify({action:'set_alert_sound',enabled:alertSoundEnabled}))}
-    function syncObstacleAvoidance(){if(mode==='real'&&ws?.readyState===WebSocket.OPEN)ws.send(JSON.stringify({action:'set_obstacle_avoidance',enabled:obstacleAvoidanceEnabled}))}
+    function syncObstacleAvoidance(){if(mode==='cloud'&&ws?.readyState===WebSocket.OPEN)cloudAction('obstacle_toggle',{enabled:obstacleAvoidanceEnabled});else if(mode==='real'&&ws?.readyState===WebSocket.OPEN)ws.send(JSON.stringify({action:'set_obstacle_avoidance',enabled:obstacleAvoidanceEnabled}))}
     $('#alertSound').onclick=()=>{alertSoundEnabled=!alertSoundEnabled;localStorage.setItem('icar.alertSoundEnabled',String(alertSoundEnabled));if(!alertSoundEnabled)stopAlertSound();syncAlertSound();updateAlertSoundButton();toast(alertSoundEnabled?'告警声音已开启':'告警声音已关闭')};updateAlertSoundButton();
     $('#obstacleAvoidance').onclick=()=>{obstacleAvoidanceEnabled=!obstacleAvoidanceEnabled;localStorage.setItem('icar.obstacleAvoidanceEnabled',String(obstacleAvoidanceEnabled));syncObstacleAvoidance();updateObstacleAvoidanceButton();toast(obstacleAvoidanceEnabled?'避障拦截已开启':'避障拦截已关闭，请确认周边安全')};updateObstacleAvoidanceButton();
     const keyboardCommands={ArrowUp:'forward',ArrowDown:'backward',ArrowLeft:'left',ArrowRight:'right',a:'turn_left',d:'turn_right'};

@@ -1175,7 +1175,7 @@ class _MissionPageState extends State<MissionPage> {
                     height: 42,
                     width: 42,
                     child: GestureDetector(
-                      onTap: _isListening ? _stopListening : _startListening,
+                      onTap: _speechAvailable ? (_isListening ? _stopListening : _startListening) : null,
                       child: AnimatedContainer(
                         duration: const Duration(milliseconds: 200),
                         decoration: BoxDecoration(
