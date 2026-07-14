@@ -124,8 +124,11 @@ sleep 3
 # n1 is the vendor-provided interactive shortcut.  It supplies the robot and
 # lidar arguments that the raw launch files require, and it is the sole owner
 # of the chassis, EKF, lidar and base_link -> laser TF chain.
-nohup docker exec autodrive_ros2 bash -ic 'n1' \
-  </dev/null >/tmp/n1_laser_bringup.log 2>&1 &
+(
+  exec 9>&-
+  nohup docker exec autodrive_ros2 bash -ic 'n1' \
+    </dev/null >/tmp/n1_laser_bringup.log 2>&1
+) &
 sleep 10
 
 echo "[6/14] Syncing and building app_control"
@@ -192,11 +195,9 @@ ICAR_ROS_CONTAINER=autodrive_ros2 ROS_DOMAIN_ID="$DOMAIN" \
 
 if [ "$ENABLE_NAV2" = "1" ]; then
   echo "[9.5/14] Starting Nav2 through /cmd_vel_nav safety mux"
-  # Ensure laser TF is published (persistent fix)
-  docker exec autodrive_ros2 bash -c "source /opt/ros/foxy/setup.bash; export ROS_DOMAIN_ID=30; ros2 run tf2_ros static_transform_publisher 0 0 0.12 0 0 0 base_link laser &>/dev/null &"
-  sleep 2
+  # n1 owns the base_link -> laser transform; do not publish a second static TF here.
   # Ensure map origin covers all checkpoints (persistent fix)
-  docker exec autodrive_ros2 sed -i 's/origin: \[-21\.2, -45\.2, 0\]/origin: [-10.0, -10.0, 0]/' /root/yahboomcar_ros2_ws/yahboomcar_ws/src/yahboomcar_nav/maps/yahboomcar.yaml 2>/dev/null || true
+  docker exec autodrive_ros2 sed -i 's/origin: \[-21\.2, -45\.2, 0\]/origin: [-10.0, -10.0, 0]/' "$NAV2_MAP" 2>/dev/null || true
   docker exec autodrive_ros2 pkill -f '[n]avigation_dwa_launch.py' 2>/dev/null || true
   docker exec autodrive_ros2 pkill -f '[n]avigation_mux.launch.py' 2>/dev/null || true
   docker exec autodrive_ros2 bash -lc \
@@ -237,11 +238,14 @@ if [ -n "$DOUBAO_ACCESS_KEY" ]; then
 fi
 # Restart these nodes from the freshly built install tree. Merely checking for
 # an old process leaves the previous Python code loaded after a deployment.
+pkill -f '[d]ocker exec icar_ros2 .*llm_gateway' 2>/dev/null || true
+pkill -f '[d]ocker exec icar_ros2 .*cloud_bridge' 2>/dev/null || true
 docker exec icar_ros2 pkill -f '/task_manager/lib/task_manager/task_manager_node' 2>/dev/null || true
 docker exec icar_ros2 pkill -f '/task_manager/lib/task_manager/obstacle_alarm_node' 2>/dev/null || true
 docker exec icar_ros2 pkill -f '/navigation/lib/navigation/obstacle_avoid_node' 2>/dev/null || true
 docker exec icar_ros2 pkill -f '/navigation/lib/navigation/nav2_bridge_node' 2>/dev/null || true
 docker exec icar_ros2 pkill -f '/llm_gateway/lib/llm_gateway/llm_gateway_node' 2>/dev/null || true
+docker exec icar_ros2 pkill -f '[r]os2 run llm_gateway llm_gateway_node' 2>/dev/null || true
 docker exec icar_ros2 pkill -f '/cloud_bridge/lib/cloud_bridge/cloud_bridge_node' 2>/dev/null || true
 docker exec icar_ros2 pkill -f '[r]os2 run cloud_bridge cloud_bridge_node' 2>/dev/null || true
 docker exec icar_ros2 pkill -f '/voice_control/lib/voice_control/web_voice_gateway_node' 2>/dev/null || true
@@ -255,9 +259,9 @@ sleep 1
 eval "$ICAR_DOCKER_CMD; nohup ros2 run navigation obstacle_avoid_node --mode real </dev/null >/tmp/obstacle_avoid.log 2>&1 &'"
 sleep 1
 if [ "$ENABLE_NAV2" = "1" ]; then
-  # Nav2 启用时，navigation_mux.launch.py 中的 nav2_goal_adapter_node 桥接 /goal_pose → /nav_status。
-  # 额外启动 nav2_bridge_node --mode real 作为备用，在 Nav2 未就绪时通过 /pose 反馈判定到达。
-  eval "$ICAR_DOCKER_CMD; nohup ros2 run navigation nav2_bridge_node --mode real </dev/null >/tmp/nav2_bridge.log 2>&1 &'"
+  # Nav2 启用时，navigation_mux.launch.py 中的 nav2_goal_adapter_node 是唯一
+  # /goal_pose -> /navigate_to_pose -> /nav_status 桥接。
+  echo "Nav2 feedback bridge is nav2_goal_adapter from navigation_mux"
 else
   # Nav2 未启用时，nav2_bridge_node mock 模式是唯一的 /goal_pose → /nav_status 桥接。
   # 8 秒模拟导航后自动返回 ARRIVED，保证巡检状态机能够正常流转。
@@ -357,11 +361,14 @@ if [ "$ENABLE_NAV2" = "1" ]; then
   require_single_process autodrive_ros2 '/nav2_controller/controller_server' controller_server
   require_single_process autodrive_ros2 '/nav2_planner/planner_server' planner_server
   require_process_count autodrive_ros2 '/nav2_lifecycle_manager/lifecycle_manager' lifecycle_manager 2
+  require_single_process autodrive_ros2 '/root/icar_app_ws/install/app_control/lib/app_control/nav2_goal_adapter_node' nav2_goal_adapter
 fi
 require_single_process icar_ros2 '/install/task_manager/lib/task_manager/task_manager_node' task_manager_node
 require_single_process icar_ros2 '/install/task_manager/lib/task_manager/obstacle_alarm_node' obstacle_alarm_node
-require_single_process icar_ros2 '/install/navigation/lib/navigation/nav2_bridge_node' nav2_bridge_node || \
-  echo "WARNING: nav2_bridge_node is unavailable; patrol goal feedback may be missing"
+if [ "$ENABLE_NAV2" != "1" ]; then
+  require_single_process icar_ros2 '/install/navigation/lib/navigation/nav2_bridge_node' nav2_bridge_node || \
+    echo "WARNING: nav2_bridge_node is unavailable; patrol goal feedback may be missing"
+fi
 require_single_process icar_ros2 '/install/llm_gateway/lib/llm_gateway/llm_gateway_node' llm_gateway_node
 # Camera/vision is deliberately independent from localization and patrol.
 # Keep startup moving when the camera is unavailable; the Web health endpoint
