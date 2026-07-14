@@ -60,6 +60,21 @@ docker exec autodrive_ros2 pkill -f '[l]aser_bringup_launch.py' 2>/dev/null || t
 docker exec autodrive_ros2 pkill -f '[d]isplay_nav_launch.py' 2>/dev/null || true
 docker exec autodrive_ros2 pkill -f '[n]avigation_dwa_launch.py' 2>/dev/null || true
 docker exec autodrive_ros2 pkill -f '[n]avigation_mux.launch.py' 2>/dev/null || true
+# ros2 launch can leave Nav2 children orphaned when a previous systemd attempt
+# is terminated. Remove those direct /cmd_vel publishers before launching the
+# remapped Nav2 stack again.
+for nav_process in \
+  '/nav2_map_server/map_server' \
+  '/nav2_amcl/amcl' \
+  '/nav2_controller/controller_server' \
+  '/nav2_planner/planner_server' \
+  '/nav2_recoveries/recoveries_server' \
+  '/nav2_bt_navigator/bt_navigator' \
+  '/nav2_waypoint_follower/waypoint_follower' \
+  '/nav2_lifecycle_manager/lifecycle_manager' \
+  '/rviz2/rviz2'; do
+  docker exec autodrive_ros2 pkill -f "$nav_process" 2>/dev/null || true
+done
 docker exec autodrive_ros2 pkill -f \
   '[/]navigation/lib/navigation/obstacle_avoid_node' 2>/dev/null || true
 sleep 3
@@ -230,40 +245,56 @@ echo "$DRIVER_INFO"
 echo "$MUX_INFO" | grep -q '^    /cmd_vel: geometry_msgs/msg/Twist$'
 echo "$DRIVER_INFO" | grep -q '^    /cmd_vel: geometry_msgs/msg/Twist$'
 
-# Fast DDS can briefly retain endpoints after replacing a process during boot.
-# Keep the service in one startup attempt while those endpoints expire instead
-# of failing immediately and letting systemd launch another overlapping stack.
-REQUIRED_UNIQUE_NODES=(
-  /velocity_mux
-  /app_bridge
-  /driver_node
-  /task_manager_node
-  /obstacle_alarm_node
-  /llm_gateway_node
-  /vision_node
-  /vision_mjpeg_server
-  /cloud_bridge_node
-)
-NODE_LIST=""
-for attempt in $(seq 1 4); do
-  NODE_LIST=$(docker exec -e ROS_DOMAIN_ID=30 autodrive_ros2 bash -lc \
-    'source /opt/ros/foxy/setup.bash; ros2 node list --no-daemon --spin-time 10')
-  UNIQUE_GRAPH=1
-  for node in "${REQUIRED_UNIQUE_NODES[@]}"; do
-    if [ "$(echo "$NODE_LIST" | grep -c "^${node}$")" -ne 1 ]; then
-      UNIQUE_GRAPH=0
-    fi
-  done
-  if [ "$UNIQUE_GRAPH" -eq 1 ]; then
+# Cross-container node discovery can be incomplete while Nav2 is loading the
+# Jetson. Verify the live executable count directly, then use one refreshed ROS
+# daemon to prove that /cmd_vel still has only the safety mux publisher.
+require_single_process() {
+  local container="$1"
+  local pattern="$2"
+  local label="$3"
+  local count
+  count=$(docker exec "$container" pgrep -fc "$pattern" 2>/dev/null || true)
+  if [ "$count" -ne 1 ]; then
+    echo "ERROR: expected one $label process, found $count"
+    return 1
+  fi
+}
+require_single_process autodrive_ros2 '/root/icar_app_ws/install/app_control/lib/app_control/velocity_mux_node' velocity_mux
+require_single_process autodrive_ros2 '/root/icar_app_ws/install/app_control/lib/app_control/app_bridge_node' app_bridge
+require_single_process autodrive_ros2 '/yahboomcar_bringup/lib/yahboomcar_bringup/Mcnamu_driver_X3' driver_node
+require_single_process icar_ros2 '/install/task_manager/lib/task_manager/task_manager_node' task_manager_node
+require_single_process icar_ros2 '/install/task_manager/lib/task_manager/obstacle_alarm_node' obstacle_alarm_node
+require_single_process icar_ros2 '/install/llm_gateway/lib/llm_gateway/llm_gateway_node' llm_gateway_node
+require_single_process icar_ros2 '/install/vision_patrol/lib/vision_patrol/vision_node' vision_node
+require_single_process icar_ros2 '/install/vision_patrol/lib/vision_patrol/mjpeg_server' vision_mjpeg_server
+require_single_process icar_ros2 '/install/cloud_bridge/lib/cloud_bridge/cloud_bridge_node' cloud_bridge_node
+
+CMD_VEL_INFO=""
+for attempt in $(seq 1 3); do
+  docker exec -e ROS_DOMAIN_ID=30 autodrive_ros2 bash -lc \
+    'source /opt/ros/foxy/setup.bash; ros2 daemon stop >/dev/null 2>&1 || true; ros2 daemon start >/dev/null'
+  sleep 8
+  CMD_VEL_INFO=$(docker exec -e ROS_DOMAIN_ID=30 autodrive_ros2 bash -lc \
+    'source /opt/ros/foxy/setup.bash; ros2 topic info /cmd_vel -v' 2>/dev/null || true)
+  if echo "$CMD_VEL_INFO" | grep -q '^Publisher count: 1$' && \
+     echo "$CMD_VEL_INFO" | grep -q '^Subscription count: 1$' && \
+     echo "$CMD_VEL_INFO" | grep -q '^Node name: velocity_mux$' && \
+     echo "$CMD_VEL_INFO" | grep -q '^Node name: driver_node$'; then
     break
   fi
-  if [ "$attempt" -lt 4 ]; then
-    echo "ROS graph still has missing or stale duplicate nodes; retrying discovery ($attempt/4)"
-    sleep 10
+  if [ "$attempt" -lt 3 ]; then
+    echo "Waiting for the unique /cmd_vel graph ($attempt/3)"
   fi
 done
+echo "$CMD_VEL_INFO"
+echo "$CMD_VEL_INFO" | grep -q '^Publisher count: 1$'
+echo "$CMD_VEL_INFO" | grep -q '^Subscription count: 1$'
+echo "$CMD_VEL_INFO" | grep -q '^Node name: velocity_mux$'
+echo "$CMD_VEL_INFO" | grep -q '^Node name: driver_node$'
+
+NODE_LIST=$(docker exec -e ROS_DOMAIN_ID=30 autodrive_ros2 bash -lc \
+  'source /opt/ros/foxy/setup.bash; ros2 node list' 2>/dev/null || true)
 echo "$NODE_LIST"
-[ "$UNIQUE_GRAPH" -eq 1 ]
 
 echo "[12/14] Verifying web gateway"
 curl --fail --silent --show-error --max-time 5 http://127.0.0.1:6500/health
