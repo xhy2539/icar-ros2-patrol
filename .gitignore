@@ -34,6 +34,8 @@ models/
 .DS_Store
 
 # 敏感配置文件（含密码）
+*.env
+!.env.example
 小车配置
 云服务器配置
 
