@@ -13,9 +13,9 @@ from icar_interfaces.msg import TaskRequest, TaskStatus
 from icar_interfaces.srv import ParseTask
 
 from .intent_classifier import classify_intent
+from .voice_command_router_logic import command_from_assistant_result
 
 
-CONTROL_PREFIX = "执行任务："
 EMERGENCY_PHRASES = ("紧急停止", "立即停止")
 VALID_POINTS = {"A", "B", "C", "D", "E", "F"}
 
@@ -111,19 +111,11 @@ class VoiceCommandRouterNode(Node):
     def _route_completed_turn(self, text):
         if not text:
             return
-        # 豆包确认的指令：送 DeepSeek 执行
-        if CONTROL_PREFIX in text:
-            command = text.split(CONTROL_PREFIX, 1)[1].strip()
-            command = re.split(r"[。！？\n]", command, maxsplit=1)[0].strip()
-            if not command or command == self._last_command:
-                return
-            self._send_to_llm(command)
-            self._last_command = command
+        command = command_from_assistant_result(text)
+        if not command or command == self._last_command:
             return
-        # 非控制文本（问题/闲聊）：也送 DeepSeek 做意图识别
-        # DeepSeek 匹配到工具就执行，没匹配到 reply 则豆包已处理聊天
-        if len(text) > 3 and len(text) < 200:
-            self._send_to_llm(text)
+        self._send_to_llm(command)
+        self._last_command = command
 
     def _send_to_llm(self, text):
         message = String()
