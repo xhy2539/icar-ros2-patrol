@@ -63,6 +63,7 @@ run_node /tmp/icar_tracker.log \
     -p min_confidence:=0.20 \
     -p max_linear_speed:=0.08 \
     -p max_angular_speed:=0.25 \
+    -p cmd_publish_period_sec:=0.10 \
     -p desired_bbox_area_ratio:=0.10
 
 run_node /tmp/icar_mjpeg.log \

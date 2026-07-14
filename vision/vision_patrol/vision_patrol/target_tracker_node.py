@@ -34,6 +34,7 @@ class TargetTrackerNode(Node):
         self.declare_parameter("max_linear_speed", 0.18)
         self.declare_parameter("max_angular_speed", 0.6)
         self.declare_parameter("lost_timeout_sec", 0.8)
+        self.declare_parameter("cmd_publish_period_sec", 0.1)
         self.declare_parameter("publish_stop_on_lost", True)
         self.declare_parameter("allow_fallback", True)
         self.declare_parameter("frame_width", 640)
@@ -58,6 +59,9 @@ class TargetTrackerNode(Node):
         self.max_linear_speed = float(self.get_parameter("max_linear_speed").value)
         self.max_angular_speed = float(self.get_parameter("max_angular_speed").value)
         self.lost_timeout_sec = float(self.get_parameter("lost_timeout_sec").value)
+        self.cmd_publish_period_sec = max(
+            0.02, float(self.get_parameter("cmd_publish_period_sec").value)
+        )
         self.publish_stop_on_lost = bool(self.get_parameter("publish_stop_on_lost").value)
         self.allow_fallback = bool(self.get_parameter("allow_fallback").value)
         self.frame_width = int(self.get_parameter("frame_width").value)
@@ -66,6 +70,7 @@ class TargetTrackerNode(Node):
         self.last_seen_at = 0.0
         self.last_frame_size = None
         self.last_target = None
+        self.last_cmd = Twist()
 
         self.cmd_pub = self.create_publisher(Twist, self.cmd_vel_topic, 10)
         self.status_pub = self.create_publisher(String, self.status_topic, 10)
@@ -98,6 +103,9 @@ class TargetTrackerNode(Node):
             10,
         )
         self.timer = self.create_timer(0.2, self.check_lost_target)
+        self.cmd_timer = self.create_timer(
+            self.cmd_publish_period_sec, self.republish_last_command
+        )
 
         self.get_logger().info(
             f"Target tracker listening on {self.detections_topic}; "
@@ -124,6 +132,7 @@ class TargetTrackerNode(Node):
                 self.fallback_classes = self.normalize_class_list(fallback)
             self.enabled = True
             self.last_seen_at = 0.0
+            self.last_cmd = Twist()
             self.publish_status(
                 "tracking_started",
                 {
@@ -135,6 +144,7 @@ class TargetTrackerNode(Node):
         elif action in ("stop", "pause", "cancel"):
             self.enabled = False
             self.last_seen_at = 0.0
+            self.last_cmd = Twist()
             self.cmd_pub.publish(Twist())
             self.publish_status("tracking_stopped", {})
         elif action == "set_params":
@@ -195,6 +205,7 @@ class TargetTrackerNode(Node):
             return
 
         cmd, control = self.compute_command(target, width, height)
+        self.last_cmd = cmd
         self.cmd_pub.publish(cmd)
         self.last_seen_at = time.monotonic()
         self.last_frame_size = (width, height)
@@ -280,9 +291,17 @@ class TargetTrackerNode(Node):
         if elapsed <= self.lost_timeout_sec:
             return
         self.last_seen_at = 0.0
+        self.last_cmd = Twist()
         if self.publish_stop_on_lost:
             self.cmd_pub.publish(Twist())
         self.publish_status("target_lost", {"lost_timeout_sec": self.lost_timeout_sec})
+
+    def republish_last_command(self):
+        if not self.enabled or self.last_seen_at <= 0:
+            return
+        if time.monotonic() - self.last_seen_at > self.lost_timeout_sec:
+            return
+        self.cmd_pub.publish(self.last_cmd)
 
     def publish_status(self, event, data):
         payload = {
@@ -325,10 +344,15 @@ class TargetTrackerNode(Node):
             "max_linear_speed",
             "max_angular_speed",
             "lost_timeout_sec",
+            "cmd_publish_period_sec",
         ]
         for field in numeric_fields:
             if field in command:
-                setattr(self, field, float(command[field]))
+                value = float(command[field])
+                if field == "cmd_publish_period_sec":
+                    value = max(0.02, value)
+                    self.cmd_timer.timer_period_ns = int(value * 1_000_000_000)
+                setattr(self, field, value)
         if "allow_fallback" in command:
             self.allow_fallback = bool(command["allow_fallback"])
         if "publish_stop_on_lost" in command:
@@ -343,6 +367,7 @@ class TargetTrackerNode(Node):
             "desired_bbox_area_ratio": self.desired_bbox_area_ratio,
             "max_linear_speed": self.max_linear_speed,
             "max_angular_speed": self.max_angular_speed,
+            "cmd_publish_period_sec": self.cmd_publish_period_sec,
             "cmd_vel_topic": self.cmd_vel_topic,
         }
 

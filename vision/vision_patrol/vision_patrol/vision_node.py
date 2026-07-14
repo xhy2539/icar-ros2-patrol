@@ -84,6 +84,7 @@ class VisionNode(Node):
         self.declare_parameter("detector_backend", "auto")
         self.declare_parameter("publish_json_debug", True)
         self.declare_parameter("publish_annotated", False)
+        self.declare_parameter("inference_frame_stride", 1)
         self.declare_parameter("enable_road_detection", False)
         self.declare_parameter("min_color_area", 600.0)
         self.declare_parameter("yolo_model", "")
@@ -119,6 +120,9 @@ class VisionNode(Node):
         self.detector_backend = str(self.get_parameter("detector_backend").value).lower()
         self.publish_json_debug = bool(self.get_parameter("publish_json_debug").value)
         self.publish_annotated = bool(self.get_parameter("publish_annotated").value)
+        self.inference_frame_stride = max(
+            1, int(self.get_parameter("inference_frame_stride").value)
+        )
         self.enable_road_detection = bool(
             self.get_parameter("enable_road_detection").value
         )
@@ -211,7 +215,8 @@ class VisionNode(Node):
         self.get_logger().info(
             f"Vision node mode={self.mode}, backend={self.detector_backend}, "
             f"image_topic={self.image_topic}, "
-            f"detections_topic={self.detections_topic}"
+            f"detections_topic={self.detections_topic}, "
+            f"inference_frame_stride={self.inference_frame_stride}"
         )
         if not self.typed_detections_available:
             self.get_logger().warning(
@@ -290,8 +295,9 @@ class VisionNode(Node):
 
     def on_image(self, msg):
         self.frame_count += 1
-        if self.frame_count % self.inference_frame_stride != 0:
+        if (self.frame_count - 1) % self.inference_frame_stride != 0:
             return
+
         frame = self.to_cv_frame(msg)
 
         detections = self.run_object_detection(frame)
