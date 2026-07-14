@@ -192,7 +192,13 @@ ros_node_info() {
   done
   return 1
 }
-MUX_INFO=$(ros_node_info /velocity_mux)
+if ! MUX_INFO=$(ros_node_info /velocity_mux); then
+  echo "velocity_mux was not discoverable; restarting the safe app stack once"
+  ICAR_ROS_CONTAINER=autodrive_ros2 ROS_DOMAIN_ID="$DOMAIN" \
+    ICAR_REPO_DIR="$REPO" \
+    "$REPO/scripts/start_car_app_stack.sh"
+  MUX_INFO=$(ros_node_info /velocity_mux)
+fi
 DRIVER_INFO=$(ros_node_info /driver_node)
 echo "$MUX_INFO"
 echo "$DRIVER_INFO"
