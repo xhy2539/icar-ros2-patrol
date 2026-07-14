@@ -22,9 +22,11 @@ from .obstacle_alarm_logic import ObstacleAlarmController
 class ObstacleAlarmNode(Node):
     def __init__(self) -> None:
         super().__init__("obstacle_alarm_node")
-        self.declare_parameter("repeat_sec", 5.0)
-        self.declare_parameter("pulse_sec", 0.18)
-        self.declare_parameter("pulse_count", 3)
+        # The chassis buzzer is a binary device, so reduce disturbance by
+        # making a safety reminder one short chirp instead of a loud pattern.
+        self.declare_parameter("repeat_sec", 10.0)
+        self.declare_parameter("pulse_sec", 0.10)
+        self.declare_parameter("pulse_count", 1)
 
         self._pulse_sec = max(0.05, float(self.get_parameter("pulse_sec").value))
         self._pulse_count = max(1, int(self.get_parameter("pulse_count").value))
