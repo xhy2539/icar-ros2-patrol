@@ -49,7 +49,10 @@ class RobotTools:
         self.task_control_client = None
         self.task_request_publisher = None
         self.tracking_command_publisher = None
+        self.llm_motion_publisher = None
         self.buzzer_publisher = None
+        self._motion_lock = threading.Lock()
+        self._motion_cancel = None
         self._init_ros2()
 
     def _init_ros2(self):
@@ -60,6 +63,7 @@ class RobotTools:
             from icar_interfaces.srv import TaskControl
             from icar_interfaces.msg import TaskRequest
             from rclpy.qos import QoSProfile, ReliabilityPolicy
+            from geometry_msgs.msg import Twist
             from std_msgs.msg import Bool, String
 
             qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
@@ -74,6 +78,9 @@ class RobotTools:
 
             self.tracking_command_publisher = self.node.create_publisher(
                 String, '/vision/target_tracking/command', qos
+            )
+            self.llm_motion_publisher = self.node.create_publisher(
+                Twist, '/cmd_vel_llm', qos
             )
 
             self.buzzer_publisher = self.node.create_publisher(
@@ -126,6 +133,7 @@ class RobotTools:
         )
 
     def stop_robot(self, reason: str = "user requested emergency stop") -> dict:
+        self._cancel_motion()
         return self.call_task_control(
             action="stop",
             reason=reason,
@@ -214,6 +222,70 @@ class RobotTools:
         )
         self.tracking_command_publisher.publish(message)
         return {"success": True, "message": f"Tracking stopped: {reason}"}
+
+    def move_robot(
+        self, direction: str, duration_sec: float = 0.0, speed: float = 0.2,
+        distance_m: float = 0.0,
+    ) -> dict:
+        """Perform one short, low-speed movement via velocity_mux.
+
+        Either duration_sec or distance_m can be specified. If distance_m is
+        given, duration_sec is computed automatically from distance / speed.
+        """
+        if self.llm_motion_publisher is None:
+            return {"success": False, "message": "ROS2 node not initialized, cannot move"}
+        vectors = {
+            "forward": (1.0, 0.0, 0.0),
+            "backward": (-1.0, 0.0, 0.0),
+            "left": (0.0, 1.0, 0.0),
+            "right": (0.0, -1.0, 0.0),
+            "turn_left": (0.0, 0.0, 1.0),
+            "turn_right": (0.0, 0.0, -1.0),
+        }
+        direction = str(direction).strip().lower()
+        if direction not in vectors:
+            return {"success": False, "message": f"unsupported move direction: {direction}"}
+        velocity = max(0.05, min(float(speed), 0.25))
+        if float(distance_m) > 0.0:
+            duration = max(0.2, min(float(distance_m) / velocity, 10.0))
+        else:
+            # DeepSeek may pass stale defaults; ensure meaningful motion
+            duration = max(1.5, min(float(duration_sec or 2.0), 5.0))
+        self._cancel_motion()
+        cancelled = threading.Event()
+        with self._motion_lock:
+            self._motion_cancel = cancelled
+
+        def publish_motion():
+            from geometry_msgs.msg import Twist
+            x, y, z = vectors[direction]
+            until = time.monotonic() + duration
+            while not cancelled.is_set() and time.monotonic() < until:
+                message = Twist()
+                message.linear.x = x * velocity
+                message.linear.y = y * velocity
+                message.angular.z = z * min(velocity * 4.0, 0.6)
+                self.llm_motion_publisher.publish(message)
+                time.sleep(0.1)
+            self.llm_motion_publisher.publish(Twist())
+
+        threading.Thread(target=publish_motion, daemon=True).start()
+        return {
+            "success": True,
+            "message": f"moving {direction} for {duration:.1f}s at {velocity:.2f}",
+            "direction": direction,
+            "duration_sec": duration,
+            "speed": velocity,
+        }
+
+    def _cancel_motion(self) -> None:
+        with self._motion_lock:
+            if self._motion_cancel is not None:
+                self._motion_cancel.set()
+                self._motion_cancel = None
+        if self.llm_motion_publisher is not None:
+            from geometry_msgs.msg import Twist
+            self.llm_motion_publisher.publish(Twist())
 
     # ── 信息查询工具（读取节点缓存的最新数据）─────────────────
 

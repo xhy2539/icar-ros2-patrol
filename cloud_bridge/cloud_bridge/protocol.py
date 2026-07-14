@@ -43,6 +43,7 @@ class CloudTopics:
     detection: str
     capture: str
     tracking: str
+    water_toggle: str
 
     @classmethod
     def build(cls, prefix: str = "/icar", device_id: str = "") -> "CloudTopics":
@@ -82,6 +83,7 @@ class CloudTopics:
             detection=f"{base}/detection",
             capture=f"{base}/capture",
             tracking=f"{base}/tracking",
+            water_toggle=f"{base}/water_toggle",
         )
 
 
@@ -296,15 +298,15 @@ def parse_motion_command(
     if isinstance(lease_ms, bool) or not isinstance(lease_ms, (int, float)):
         raise CommandValidationError("lease_ms 必须是数字")
     lease_ms = int(lease_ms)
-    if not 200 <= lease_ms <= 1500:
-        raise CommandValidationError("lease_ms 必须在 200~1500ms 范围内")
+    if not 100 <= lease_ms <= 5000:
+        raise CommandValidationError("lease_ms 必须在 100~5000ms 范围内")
 
     issued_at_ms = data.get("issued_at_ms")
     if isinstance(issued_at_ms, bool) or not isinstance(issued_at_ms, (int, float)):
         raise CommandValidationError("issued_at_ms 必须是 Unix 毫秒时间戳")
     current_ms = int(time.time() * 1000) if now_ms is None else int(now_ms)
     age_ms = current_ms - int(issued_at_ms)
-    if age_ms > 3000:
+    if age_ms > 10000:
         raise CommandValidationError("方向指令已过期")
     if age_ms < -5000:
         raise CommandValidationError("方向指令时间戳超前超过 5 秒")

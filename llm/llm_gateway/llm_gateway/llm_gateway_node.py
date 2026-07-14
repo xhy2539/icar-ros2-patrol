@@ -1004,6 +1004,8 @@ class LlmGatewayNode(Node):
             "download_audio":     self._tool_download_audio,
             "start_tracking":     self._tool_start_tracking,
             "stop_tracking":      self._tool_stop_tracking,
+            "move_robot":         self._tool_move_robot,
+            "reply":              self._tool_reply_handler,
         }
 
         if tool_name not in tool_map:
@@ -1152,6 +1154,12 @@ class LlmGatewayNode(Node):
     def _tool_stop_tracking(self, reason: str = "user stopped tracking") -> dict:
         return self._robot_tools.stop_tracking(reason=reason)
 
+    def _tool_move_robot(
+        self, direction: str, duration_sec: float = 0.0, speed: float = 0.2,
+        distance_m: float = 0.0,
+    ) -> dict:
+        return self._robot_tools.move_robot(direction, duration_sec, speed, distance_m)
+
     @staticmethod
     def _tool_reply(result: dict) -> str:
         if not result.get("success"):
@@ -1169,12 +1177,19 @@ class LlmGatewayNode(Node):
             "download_audio": "音频下载指令已执行。",
             "start_tracking": "已启动目标跟踪，人工控制和安全急停仍保持更高优先级。",
             "stop_tracking": "已停止目标跟踪。",
+            "move_robot": "已执行受限低速移动；松手、超时、避障或急停都会停止。",
             "execute_plan": "复杂任务计划已接收，将按步骤安全接续执行。",
+            "reply": result.get("message", ""),
         }
         return replies.get(
             str(result.get("tool_name", "")),
             str(result.get("message", "执行完成")),
         )
+
+    @staticmethod
+    def _tool_reply_handler(message: str = "") -> dict:
+        """Handle conversational replies when no other tool matches."""
+        return {"success": True, "message": message or "收到，但我不太确定怎么处理这个请求。"}
 
 
 # ---------------------------------------------------------------------------

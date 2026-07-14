@@ -60,6 +60,7 @@ CMD_TOPICS = {
     "llm/generate_report": "llm/generate_report",
     "snapshot/request": "snapshot/request",
     "alarm": "alarm",
+    "water_toggle": "water_toggle",
 }
 
 
@@ -78,12 +79,32 @@ class MqttBridge:
         self._connected = False
         self._subscribed: set[str] = set()
 
+    # ── MQTT lifecycle (called once per process) ──
+
+    def start(self):
+        """Start the persistent MQTT connection. Call once at startup."""
+        self.client.connect_async(MQTT_HOST, MQTT_PORT, keepalive=30)
+        self.client.loop_start()
+
+    def stop(self):
+        """Tear down MQTT. Call once at shutdown."""
+        self.client.loop_stop()
+        self.client.disconnect()
+
+    # ── MQTT callbacks ──
+
     def _on_connect(self, client, userdata, flags, reason_code, properties=None):
         rc = getattr(reason_code, "value", reason_code)
         if rc == 0:
             self._connected = True
             for topic in self._subscribed:
                 client.subscribe(topic, qos=1)
+            # Notify the browser that MQTT is now ready
+            if self._loop is not None and self.ws is not None:
+                asyncio.run_coroutine_threadsafe(
+                    self._safe_send({"type": "mqtt_ready"}),
+                    self._loop,
+                )
 
     def _on_disconnect(self, client, userdata, reason_code, properties=None):
         self._connected = False
@@ -126,6 +147,8 @@ class MqttBridge:
         except websockets.ConnectionClosed:
             self.ws = None
 
+    # ── Browser API ──
+
     def subscribe(self, suffix: str):
         topic = _car_topic(suffix)
         if topic not in self._subscribed:
@@ -141,10 +164,11 @@ class MqttBridge:
     async def handle(self, ws: WebSocketServerProtocol):
         self.ws = ws
         self._loop = asyncio.get_running_loop()
-        self.client.connect_async(MQTT_HOST, MQTT_PORT, keepalive=30)
-        self.client.loop_start()
         try:
-            await ws.send(json.dumps({"type": "connected"}))
+            await ws.send(json.dumps({
+                "type": "connected",
+                "mqtt": self._connected,
+            }))
             async for raw in ws:
                 try:
                     msg = json.loads(raw)
@@ -161,12 +185,12 @@ class MqttBridge:
                     )
         finally:
             self.ws = None
-            self.client.loop_stop()
-            self.client.disconnect()
+            # MQTT stays connected — do NOT tear it down here
 
 
 async def main():
     bridge = MqttBridge()
+    bridge.start()  # persistent MQTT connection
     stop = asyncio.Event()
 
     def _shutdown():
@@ -187,6 +211,8 @@ async def main():
             f" → mqtt://{MQTT_HOST}:{MQTT_PORT}"
         )
         await stop.wait()
+
+    bridge.stop()
 
 
 if __name__ == "__main__":

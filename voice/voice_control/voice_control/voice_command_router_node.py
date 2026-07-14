@@ -33,16 +33,24 @@ class VoiceCommandRouterNode(Node):
         self.task_status_sub = self.create_subscription(
             TaskStatus, "/task/status", self._on_task_status, qos
         )
+        self.llm_response_sub = self.create_subscription(
+            String, "/llm/response", self._on_llm_response, qos
+        )
         self.task_pub = self.create_publisher(TaskRequest, "/task/request", qos)
+        self.llm_command_pub = self.create_publisher(String, "/llm/user_command", qos)
         self.control_pub = self.create_publisher(String, "/voice/control", qos)
         self.intent_pub = self.create_publisher(String, "/voice/intent", qos)
         self.robot_status_pub = self.create_publisher(
             String, "/voice/robot_status", qos
         )
+        self.user_text_pub = self.create_publisher(
+            String, "/voice/user_text", qos
+        )
         self.parse_client = self.create_client(ParseTask, "/llm/parse_task")
         self._turn_text = ""
         self._was_speaking = False
         self._last_command = ""
+        self._pending_llm = False
         self.get_logger().info("voice_command_router_node ready")
 
     def _on_user_text(self, msg):
@@ -100,22 +108,54 @@ class VoiceCommandRouterNode(Node):
             self._turn_text = ""
 
     def _route_completed_turn(self, text):
-        if CONTROL_PREFIX not in text:
+        if not text:
             return
-        command = text.split(CONTROL_PREFIX, 1)[1].strip()
-        command = re.split(r"[。！？\n]", command, maxsplit=1)[0].strip()
-        if not command or command == self._last_command:
+        # 豆包确认的指令：送 DeepSeek 执行
+        if CONTROL_PREFIX in text:
+            command = text.split(CONTROL_PREFIX, 1)[1].strip()
+            command = re.split(r"[。！？\n]", command, maxsplit=1)[0].strip()
+            if not command or command == self._last_command:
+                return
+            self._send_to_llm(command)
+            self._last_command = command
             return
-        if not self.parse_client.service_is_ready():
-            self.get_logger().error("/llm/parse_task is unavailable")
-            return
+        # 非控制文本（问题/闲聊）：也送 DeepSeek 做意图识别
+        # DeepSeek 匹配到工具就执行，没匹配到 reply 则豆包已处理聊天
+        if len(text) > 3 and len(text) < 200:
+            self._send_to_llm(text)
 
-        request = ParseTask.Request()
-        request.input_text = command
-        future = self.parse_client.call_async(request)
-        future.add_done_callback(
-            lambda done, source=command: self._on_parsed(done, source)
+    def _send_to_llm(self, text):
+        message = String()
+        message.data = json.dumps(
+            {"input_text": text, "source": "voice", "request_id": "voice"},
+            ensure_ascii=False,
         )
+        self.llm_command_pub.publish(message)
+        self._pending_llm = True
+        self.get_logger().info(f"voice → LLM: {text[:60]}")
+
+    def _on_llm_response(self, msg):
+        if not self._pending_llm:
+            return
+        try:
+            result = json.loads(msg.data)
+        except json.JSONDecodeError:
+            return
+        self._pending_llm = False
+        reply = result.get("reply") or result.get("message", "")
+        tool = result.get("tool_name", "")
+        success = result.get("success", False)
+        if not success and not reply:
+            return
+        # 工具执行结果或 DeepSeek 回复 → TTS 朗读
+        tts_text = reply if len(reply) < 200 else reply[:200] + "..."
+        tts_msg = String()
+        tts_msg.data = json.dumps(
+            {"text": tts_text, "source": "deepseek", "tool": tool},
+            ensure_ascii=False,
+        )
+        self.user_text_pub.publish(tts_msg)
+        self.get_logger().info(f"DeepSeek → TTS: {tts_text[:60]}")
 
     def _on_parsed(self, future, source):
         try:

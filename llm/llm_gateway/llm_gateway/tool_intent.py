@@ -42,6 +42,13 @@ def parse_tool_intent(
     tracking_words = ("跟踪", "追踪", "跟随", "尾随")
     stop_words = ("停止", "停下", "别动", "不要动", "急停", "紧急停车")
 
+    # Resolve explicit compound commands before their individual actions.
+    # For example, “巡检 A、B 后跟踪前面的人” must wait for patrol completion
+    # instead of immediately replacing the patrol request with tracking.
+    complex_plan = build_rule_plan(text, default_route)
+    if complex_plan is not None:
+        return complex_plan
+
     if any(word in compact for word in tracking_words):
         if any(word in compact for word in stop_words + ("取消", "结束", "关闭")):
             return {
@@ -64,12 +71,30 @@ def parse_tool_intent(
     if is_reset_confirmation(compact) or "安全后复位" in compact:
         return {"tool_name": "reset_task", "arguments": {"reason": text}}
 
+    motion_map = (
+        (("前进", "向前", "往前"), "forward"),
+        (("后退", "向后", "往后"), "backward"),
+        (("左转",), "turn_left"),
+        (("右转",), "turn_right"),
+        (("左移", "向左平移"), "left"),
+        (("右移", "向右平移"), "right"),
+    )
+    for phrases, direction in motion_map:
+        if any(phrase in compact for phrase in phrases):
+            match = re.search(r"(\d+(?:\.\d+)?)\s*(?:秒|s)", compact)
+            duration = float(match.group(1)) if match else 1.0
+            speed = 0.08 if "慢" in compact else (0.18 if "快" in compact else 0.12)
+            return {
+                "tool_name": "move_robot",
+                "arguments": {
+                    "direction": direction,
+                    "duration_sec": min(max(duration, 0.2), 3.0),
+                    "speed": speed,
+                },
+            }
+
     if any(word in compact for word in stop_words):
         return {"tool_name": "stop_robot", "arguments": {"reason": text}}
-
-    complex_plan = build_rule_plan(text, default_route)
-    if complex_plan is not None:
-        return complex_plan
 
     if any(word in compact for word in ("巡检", "巡逻", "巡视")) or re.search(
         r"(?:去|前往|导航到)[A-Fa-f](?:点)?", compact

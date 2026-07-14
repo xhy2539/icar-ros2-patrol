@@ -36,3 +36,11 @@ def test_unknown_text_is_left_for_model():
 def test_reset_requires_explicit_confirmation():
     assert is_reset_confirmation("现场安全，确认复位")
     assert not is_reset_confirmation("重新开始")
+
+
+def test_short_directional_motion_is_bounded():
+    result = parse_tool_intent("慢速前进 10 秒")
+    assert result["tool_name"] == "move_robot"
+    assert result["arguments"]["direction"] == "forward"
+    assert result["arguments"]["duration_sec"] == 3.0
+    assert result["arguments"]["speed"] == 0.08

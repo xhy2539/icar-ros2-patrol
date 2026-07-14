@@ -14,8 +14,8 @@ from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
 
 FRONT_SECTOR_DEGREES = 30.0
-WARNING_DISTANCE_M = 0.5
-DANGER_DISTANCE_M = 0.2
+WARNING_DISTANCE_M = 1.0
+DANGER_DISTANCE_M = 0.5
 
 
 def classify_front_scan(
@@ -75,6 +75,10 @@ class ObstacleAvoidNode(Node):
         self.pub_status = self.create_publisher(ObstacleStatus, "/obstacle_status", 10)
         self.pub_cmd = self.create_publisher(Twist, "/cmd_vel_safety", 10)
         self.create_subscription(LaserScan, "/scan", self.on_scan, 10)
+        # Debounce: require N consecutive danger/warning readings before acting
+        self._danger_count = 0
+        self._warning_count = 0
+        self._debounce_frames = 3  # ~0.3s at 10Hz LiDAR
         self.get_logger().info(
             f"Obstacle avoid node started ({mode} mode, front=±{FRONT_SECTOR_DEGREES}°, danger={DANGER_DISTANCE_M}m, warning={WARNING_DISTANCE_M}m)")
 
@@ -83,14 +87,33 @@ class ObstacleAvoidNode(Node):
             msg.ranges, float(msg.angle_min), float(msg.angle_increment),
             float(msg.range_min), float(msg.range_max),
             front_center_deg=self.front_center_degrees)
+        # Debounce: require N consecutive frames before changing state
+        if result["risk_level"] == "danger":
+            self._danger_count += 1
+            self._warning_count = 0
+        elif result["risk_level"] == "warning":
+            self._warning_count += 1
+            self._danger_count = 0
+        else:
+            self._danger_count = max(0, self._danger_count - 1)
+            self._warning_count = max(0, self._warning_count - 1)
+
+        if self._danger_count < self._debounce_frames and self._warning_count < self._debounce_frames:
+            # Not yet confirmed — keep last state, don't publish
+            if self._danger_count == 0 and self._warning_count == 0:
+                # Fully cleared — publish safe
+                pass
+            else:
+                return
+
         status = ObstacleStatus()
         status.is_obstacle = result["is_obstacle"]
         status.min_distance = result["min_distance"]
         status.direction = result["direction"]
-        status.risk_level = result["risk_level"]
-        status.action = result["action"]
+        status.risk_level = result["risk_level"] if self._danger_count >= self._debounce_frames else ("warning" if self._warning_count >= self._debounce_frames else "safe")
+        status.action = result["action"] if self._danger_count >= self._debounce_frames else ("slow_down" if self._warning_count >= self._debounce_frames else "none")
         self.pub_status.publish(status)
-        if result["risk_level"] == "danger":
+        if status.risk_level == "danger":
             if self.publish_hard_stop_cmd:
                 self.pub_cmd.publish(Twist())
             self.get_logger().warn(

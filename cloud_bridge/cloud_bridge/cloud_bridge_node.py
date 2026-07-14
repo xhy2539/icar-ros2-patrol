@@ -162,20 +162,32 @@ class CloudBridgeNode(Node):
 
         # ── 视频帧转发 (MJPEG → MQTT) ──
         self.declare_parameter("video_enabled", True)
-        self.declare_parameter("video_fps", 10)
-        self.declare_parameter("video_resize_width", 640)
+        self.declare_parameter("video_fps", 5)
+        self.declare_parameter("video_resize_width", 320)
         self.declare_parameter("video_mjpeg_url", "http://127.0.0.1:6502/video_feed")
         self._video_stop = threading.Event()
+        self._water_proc = None
+        self._water_proc_lock = threading.Lock()
+        self._video_pub_failures = 0
         if self.get_parameter("video_enabled").value:
+            # Separate MQTT client for video — never blocks control
+            self._video_mqtt = self._create_mqtt_client()
+            if user:
+                self._video_mqtt.username_pw_set(user, pw)
+            self._video_mqtt.max_queued_messages_set(50)
+            self._video_mqtt.reconnect_delay_set(min_delay=1, max_delay=30)
+            self._video_mqtt.connect_async(host, port, keepalive=30)
+            self._video_mqtt.loop_start()
             self._video_thread = threading.Thread(
                 target=self._video_grabber, daemon=True
             )
             self._video_thread.start()
 
-        # ── MQTT ──
+        # ── MQTT (控制) ──
         self.mqtt = self._create_mqtt_client()
         if user:
             self.mqtt.username_pw_set(user, pw)
+        self.mqtt.max_queued_messages_set(500)
         self.mqtt.reconnect_delay_set(min_delay=1, max_delay=30)
         self.mqtt.on_connect = self._on_mqtt_connect
         self.mqtt.on_disconnect = self._on_mqtt_disconnect
@@ -232,6 +244,7 @@ class CloudBridgeNode(Node):
             client.subscribe(self.topics.llm_generate_report, qos=self.mqtt_qos)
             client.subscribe(self.topics.snapshot_request, qos=self.mqtt_qos)
             client.subscribe(self.topics.alarm, qos=self.mqtt_qos)
+            client.subscribe(self.topics.water_toggle, qos=self.mqtt_qos)
             client.publish(
                 self.topics.online,
                 json.dumps({"online": True}, ensure_ascii=False),
@@ -289,6 +302,14 @@ class CloudBridgeNode(Node):
                 enabled = bool(data.get("enabled", True)) if isinstance(data, dict) else True
                 self.alarm_sound_pub.publish(ROSBool(data=enabled))
                 self.get_logger().info(f"云→车 告警声音: {'开' if enabled else '关'}")
+
+            elif msg.topic == self.topics.water_toggle:
+                data = json.loads(payload.decode("utf-8"))
+                enabled = bool(data.get("enabled", False)) if isinstance(data, dict) else False
+                if enabled:
+                    self._start_water_model()
+                else:
+                    self._stop_water_model()
 
             elif msg.topic == self.topics.command:
                 command = parse_task_command(
@@ -713,15 +734,25 @@ class CloudBridgeNode(Node):
                 self._video_stop.wait(5)
 
     def _publish_mqtt_binary(self, topic, data: bytes):
-        """Publish binary payload (JPEG frame) to MQTT."""
+        """Publish binary payload (JPEG frame) via dedicated video MQTT client."""
+        client = getattr(self, "_video_mqtt", None) or self.mqtt
         try:
-            info = self.mqtt.publish(topic, data, qos=0)
-            if getattr(info, "rc", 0) != 0:
-                self.get_logger().warn(
-                    f"MQTT 视频帧发送排队失败: topic={topic}, rc={info.rc}"
-                )
+            info = client.publish(topic, data, qos=0)
+            rc = getattr(info, "rc", 0)
+            if rc != 0:
+                self._video_pub_failures += 1
+                if self._video_pub_failures <= 1 or self._video_pub_failures % 30 == 0:
+                    self.get_logger().warn(
+                        f"视频帧发送失败 (rc={rc}, 累计{self._video_pub_failures}次)"
+                    )
+            else:
+                self._video_pub_failures = 0
         except Exception as e:
-            self.get_logger().warn(f"MQTT 视频帧发送失败: {e}")
+            self._video_pub_failures += 1
+            if self._video_pub_failures <= 1 or self._video_pub_failures % 30 == 0:
+                self.get_logger().warn(
+                    f"视频帧发送异常: {e} (累计{self._video_pub_failures}次)"
+                )
 
     def _telemetry_due(self, key, force=False):
         now = time.monotonic()
@@ -744,9 +775,63 @@ class CloudBridgeNode(Node):
         except Exception as e:
             self.get_logger().warn(f"MQTT 发送失败: {e}")
 
+    def _start_water_model(self):
+        with self._water_proc_lock:
+            if self._water_proc is not None:
+                self.get_logger().info("积水模型已在运行")
+                return
+            import subprocess
+            ws = "/root/icar_ros2_ws/icar_ws"
+            model_path = f"{ws}/models/water_seg_v1.pt"
+            env = os.environ.copy()
+            env["ROS_DOMAIN_ID"] = "30"
+            cmd = (
+                "source /opt/ros/foxy/setup.bash && "
+                "source /root/icar_ros2_ws/software/library_ws/install/setup.bash && "
+                "source /root/icar_ros2_ws/icar_ws/install/setup.bash && "
+                "ros2 run vision_patrol vision_node --ros-args "
+                "-p mode:=detect "
+                "-p image_topic:=/camera/color/image_raw "
+                "-p detector_backend:=yolo "
+                "-p water_detector_backend:=yolo "
+                f"-p water_model:={model_path} "
+                "-p water_device:=cpu "
+                "-p water_confidence:=0.20 "
+                "-p water_imgsz:=320 "
+                "-p water_class_name:=water "
+                "-p inference_frame_stride:=12 "
+                "-p target_classes:=[] "
+                "-p publish_annotated:=false"
+            )
+            self._water_proc = subprocess.Popen(
+                ["bash", "-lc", cmd],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+            )
+            self.get_logger().info(f"积水模型已启动 PID={self._water_proc.pid}")
+
+    def _stop_water_model(self):
+        with self._water_proc_lock:
+            if self._water_proc is None:
+                return
+            self._water_proc.terminate()
+            try:
+                self._water_proc.wait(timeout=5)
+            except Exception:
+                self._water_proc.kill()
+            self._water_proc = None
+            self.get_logger().info("积水模型已停止")
+
     def destroy_node(self):
         if hasattr(self, "_video_stop"):
             self._video_stop.set()
+        if hasattr(self, "_video_mqtt") and self._video_mqtt is not None:
+            try:
+                self._video_mqtt.loop_stop()
+                self._video_mqtt.disconnect()
+            except Exception:
+                pass
         if hasattr(self, "cloud_cmd_vel_pub"):
             self._stop_cloud_motion("节点关闭")
         if hasattr(self, "mqtt"):

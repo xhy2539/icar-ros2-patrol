@@ -208,9 +208,6 @@ class VisionNode(Node):
         self.yolo_confidence = float(self.get_parameter("yolo_confidence").value)
         self.yolo_iou = float(self.get_parameter("yolo_iou").value)
         self.yolo_imgsz = int(self.get_parameter("yolo_imgsz").value)
-        self.inference_frame_stride = max(
-            1, int(self.get_parameter("inference_frame_stride").value)
-        )
         self.target_classes = self.normalize_class_list(
             self.get_parameter("target_classes").value
         )

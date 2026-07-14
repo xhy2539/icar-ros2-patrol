@@ -215,6 +215,7 @@ docker exec icar_ros2 pkill -f '/llm_gateway/lib/llm_gateway/llm_gateway_node' 2
 docker exec icar_ros2 pkill -f '/cloud_bridge/lib/cloud_bridge/cloud_bridge_node' 2>/dev/null || true
 docker exec icar_ros2 pkill -f '/voice_control/lib/voice_control/web_voice_gateway_node' 2>/dev/null || true
 docker exec icar_ros2 pkill -f '/voice_control/lib/voice_control/doubao_voice_node' 2>/dev/null || true
+docker exec icar_ros2 pkill -f '/voice_control/lib/voice_control/voice_command_router_node' 2>/dev/null || true
 sleep 1
 eval "$ICAR_DOCKER_CMD; nohup ros2 run task_manager task_manager_node </dev/null >/tmp/task_manager.log 2>&1 &'"
 sleep 2
@@ -228,6 +229,8 @@ if [ -n "$DOUBAO_APP_ID" ] && [ -n "$DOUBAO_ACCESS_KEY" ]; then
   eval "$ICAR_DOCKER_CMD; nohup ros2 run voice_control web_voice_gateway_node </dev/null >/tmp/web_voice_gateway.log 2>&1 &'"
   sleep 1
   eval "$ICAR_DOCKER_CMD; nohup ros2 run voice_control doubao_voice_node </dev/null >/tmp/doubao_voice.log 2>&1 &'"
+  sleep 1
+  eval "$ICAR_DOCKER_CMD; nohup ros2 run voice_control voice_command_router_node </dev/null >/tmp/voice_command_router.log 2>&1 &'"
 else
   echo "豆包语音未启动：请设置 DOUBAO_APP_ID 和 DOUBAO_ACCESS_KEY"
 fi
@@ -306,8 +309,6 @@ require_single_process autodrive_ros2 '/yahboomcar_bringup/lib/yahboomcar_bringu
 require_single_process icar_ros2 '/install/task_manager/lib/task_manager/task_manager_node' task_manager_node
 require_single_process icar_ros2 '/install/task_manager/lib/task_manager/obstacle_alarm_node' obstacle_alarm_node
 require_single_process icar_ros2 '/install/llm_gateway/lib/llm_gateway/llm_gateway_node' llm_gateway_node
-require_single_process icar_ros2 '/install/vision_patrol/lib/vision_patrol/vision_node' vision_node
-require_single_process icar_ros2 '/install/vision_patrol/lib/vision_patrol/mjpeg_server' vision_mjpeg_server
 require_single_process icar_ros2 '/install/cloud_bridge/lib/cloud_bridge/cloud_bridge_node' cloud_bridge_node
 
 CMD_VEL_INFO=""
