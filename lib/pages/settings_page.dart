@@ -256,26 +256,31 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               const SizedBox(width: 10),
               const Expanded(
-                child: Text(
-                  '连接模式',
-                  style: TextStyle(color: AppColors.darkNavy, fontSize: 14),
+                child: Text('连接模式', style: TextStyle(color: AppColors.darkNavy, fontSize: 14)),
+              ),
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: () { setState(() => _connectionMode = CarConnectionMode.local); _markDirty(); },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: _connectionMode == CarConnectionMode.local ? AppColors.bluePurple : AppColors.surfaceAlt,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text('局域网', style: TextStyle(color: _connectionMode == CarConnectionMode.local ? Colors.white : AppColors.blueGray, fontSize: 12, fontWeight: FontWeight.w600)),
                 ),
               ),
-              DropdownButton<CarConnectionMode>(
-                value: _connectionMode,
-                items: CarConnectionMode.values
-                    .map(
-                      (mode) => DropdownMenuItem(
-                        value: mode,
-                        child: Text(mode.label),
-                      ),
-                    )
-                    .toList(),
-                onChanged: (mode) {
-                  if (mode == null) return;
-                  setState(() => _connectionMode = mode);
-                  _markDirty();
-                },
+              const SizedBox(width: 4),
+              GestureDetector(
+                onTap: () { setState(() => _connectionMode = CarConnectionMode.cloud); _markDirty(); },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: _connectionMode == CarConnectionMode.cloud ? AppColors.bluePurple : AppColors.surfaceAlt,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text('☁️ 云端', style: TextStyle(color: _connectionMode == CarConnectionMode.cloud ? Colors.white : AppColors.blueGray, fontSize: 12, fontWeight: FontWeight.w600)),
+                ),
               ),
             ],
           ),

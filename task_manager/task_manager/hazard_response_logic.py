@@ -161,6 +161,7 @@ def _matching_detection(
     detections: Iterable[Any],
     min_confidence: float,
     class_keys,
+    min_bbox_area: float = 0.0,
 ) -> Optional[dict]:
     best = None
     for detection in detections or []:
@@ -170,15 +171,17 @@ def _matching_detection(
         confidence = float(_field(detection, "confidence", 0.0))
         if confidence < min_confidence:
             continue
+        x_min = int(_field(detection, "x_min", 0))
+        y_min = int(_field(detection, "y_min", 0))
+        x_max = int(_field(detection, "x_max", 0))
+        y_max = int(_field(detection, "y_max", 0))
+        bbox_area = (x_max - x_min) * (y_max - y_min)
+        if min_bbox_area > 0 and bbox_area < min_bbox_area:
+            continue
         candidate = {
             "class_name": class_name,
             "confidence": confidence,
-            "bbox": [
-                int(_field(detection, "x_min", 0)),
-                int(_field(detection, "y_min", 0)),
-                int(_field(detection, "x_max", 0)),
-                int(_field(detection, "y_max", 0)),
-            ],
+            "bbox": [x_min, y_min, x_max, y_max],
             "image_path": str(_field(detection, "image_path", "")),
         }
         if best is None or candidate["confidence"] > best["confidence"]:

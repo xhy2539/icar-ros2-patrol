@@ -90,9 +90,7 @@ class VoiceCommandRouterNode(Node):
 
         is_listen = bool(event.get("is_listen", True))
         text = str(event.get("text", ""))
-        # Only accumulate user speech (is_listen=True), not Doubao's own replies.
-        # Doubao's TTS output has is_listen=False and must not go to DeepSeek.
-        if text and is_listen:
+        if text:
             self._turn_text += text
 
         if any(phrase in self._turn_text for phrase in EMERGENCY_PHRASES):

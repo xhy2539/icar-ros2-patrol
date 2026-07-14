@@ -62,6 +62,12 @@ class CloudMqttTopics {
   final String snapshotRequest;
   final String snapshot;
   final String alarm;
+  final String detection;
+  final String capture;
+  final String tracking;
+  final String videoFrame;
+  final String waterToggle;
+  final String obstacleToggle;
 
   const CloudMqttTopics._({
     required this.command,
@@ -82,6 +88,12 @@ class CloudMqttTopics {
     required this.snapshotRequest,
     required this.snapshot,
     required this.alarm,
+    required this.detection,
+    required this.capture,
+    required this.tracking,
+    required this.videoFrame,
+    required this.waterToggle,
+    required this.obstacleToggle,
   });
 
   factory CloudMqttTopics.build({
@@ -119,6 +131,12 @@ class CloudMqttTopics {
       snapshotRequest: '$base/snapshot/request',
       snapshot: '$base/snapshot',
       alarm: '$base/alarm',
+      detection: '$base/detection',
+      capture: '$base/capture',
+      tracking: '$base/tracking',
+      videoFrame: '$base/video_frame',
+      waterToggle: '$base/water_toggle',
+      obstacleToggle: '$base/obstacle_toggle',
     );
   }
 
@@ -135,6 +153,10 @@ class CloudMqttTopics {
     llmResponse,
     llmReport,
     snapshot,
+    detection,
+    capture,
+    tracking,
+    videoFrame,
   ];
 }
 

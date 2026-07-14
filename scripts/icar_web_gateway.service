@@ -6,8 +6,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=jetson
-ExecStartPre=/bin/bash -c 'if [ -d /home/jetson/icar-deploy/current ]; then cd /home/jetson/icar-deploy/current; else cd /home/jetson/icar-ros2-patrol; fi'
-ExecStart=/bin/bash -c 'if [ -f /home/jetson/icar-deploy/current/app/web_gateway.py ]; then DIR=/home/jetson/icar-deploy/current; else DIR=/home/jetson/icar-ros2-patrol; fi; exec /usr/bin/python3 "$DIR/app/web_gateway.py"'
+ExecStartPre=/bin/bash -c 'cd /home/jetson/icar-ros2-patrol'
+ExecStart=/usr/bin/python3 /home/jetson/icar-ros2-patrol/app/web_gateway.py
 WorkingDirectory=/home/jetson/icar-ros2-patrol
 Environment=ICAR_BRIDGE_HOST=127.0.0.1
 Environment=ICAR_BRIDGE_PORT=6501

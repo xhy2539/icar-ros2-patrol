@@ -7,6 +7,7 @@ import 'package:mqtt_client/mqtt_server_client.dart';
 import 'car_tcp_service.dart' show CarConnectionState;
 import 'cloud_protocol.dart';
 import 'data_models.dart';
+import 'vision_models.dart';
 
 class CloudMqttService {
   MqttServerClient? _client;
@@ -35,6 +36,10 @@ class CloudMqttService {
       StreamController<Map<String, dynamic>>.broadcast();
   final _reportController = StreamController<Map<String, dynamic>>.broadcast();
   final _snapshotController = StreamController<CloudSnapshot>.broadcast();
+  final _detectionController = StreamController<DetectionArray>.broadcast();
+  final _captureStatusController = StreamController<CaptureStatus>.broadcast();
+  final _trackingController = StreamController<TrackingStatus>.broadcast();
+  final _videoFrameController = StreamController<String>.broadcast();
 
   Stream<TaskStatus> get taskStatusStream => _taskStatusController.stream;
   Stream<NavStatus> get navStatusStream => _navStatusController.stream;
@@ -50,6 +55,10 @@ class CloudMqttService {
       _llmCommandController.stream;
   Stream<Map<String, dynamic>> get reportStream => _reportController.stream;
   Stream<CloudSnapshot> get snapshotStream => _snapshotController.stream;
+  Stream<DetectionArray> get detectionStream => _detectionController.stream;
+  Stream<CaptureStatus> get captureStatusStream => _captureStatusController.stream;
+  Stream<TrackingStatus> get trackingStatusStream => _trackingController.stream;
+  Stream<String> get videoFrameStream => _videoFrameController.stream;
 
   void Function(CarConnectionState)? onStateChanged;
   void Function(String)? onError;
@@ -185,6 +194,16 @@ class CloudMqttService {
     return _publish(_topics.alarm, {'enabled': enabled});
   }
 
+  bool publishWaterToggle({required bool enabled}) {
+    if (!isConnected || !_robotOnline) return false;
+    return _publish(_topics.waterToggle, {'enabled': enabled});
+  }
+
+  bool publishObstacleToggle({required bool enabled}) {
+    if (!isConnected || !_robotOnline) return false;
+    return _publish(_topics.obstacleToggle, {'enabled': enabled});
+  }
+
   bool _publish(String topic, Map<String, dynamic> payload) {
     final client = _client;
     if (!isConnected || client == null) return false;
@@ -243,6 +262,15 @@ class CloudMqttService {
         _llmCommandController.add(json);
       } else if (topic == _topics.llmReport) {
         _reportController.add(json);
+      } else if (topic == _topics.detection) {
+        _detectionController.add(DetectionArray.fromJson(json));
+      } else if (topic == _topics.capture) {
+        _captureStatusController.add(CaptureStatus.fromJson(json));
+      } else if (topic == _topics.tracking) {
+        _trackingController.add(TrackingStatus.fromJson(json));
+      } else if (topic == _topics.videoFrame) {
+        final b64 = json['data'] as String? ?? '';
+        if (b64.isNotEmpty) _videoFrameController.add(b64);
       } else if (topic == _topics.snapshot) {
         _snapshotController.add(CloudSnapshot.fromJson(json));
       }
@@ -294,5 +322,9 @@ class CloudMqttService {
     await _llmCommandController.close();
     await _reportController.close();
     await _snapshotController.close();
+    await _detectionController.close();
+    await _captureStatusController.close();
+    await _trackingController.close();
+    await _videoFrameController.close();
   }
 }

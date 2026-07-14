@@ -64,6 +64,10 @@ class CarController extends ChangeNotifier {
     _cloudService.ackStream.listen(_onCloudAck);
     _cloudService.onlineStream.listen(_onRobotOnline);
     _cloudService.snapshotStream.listen(_onRemoteSnapshot);
+    _cloudService.detectionStream.listen(_onDetection);
+    _cloudService.captureStatusStream.listen(_onCaptureStatus);
+    _cloudService.trackingStatusStream.listen(_onTrackingStatus);
+    _cloudService.videoFrameStream.listen(_imageFrameEvents.add);
   }
 
   final CarWebSocketService _service = CarWebSocketService();
@@ -257,7 +261,9 @@ class CarController extends ChangeNotifier {
     }
     if (obstacleAvoidanceEnabled != null) {
       _obstacleAvoidanceEnabled = obstacleAvoidanceEnabled;
-      if (!isCloudMode && _service.isConnected) {
+      if (isCloudMode && _cloudService.isConnected) {
+        _cloudService.publishObstacleToggle(enabled: obstacleAvoidanceEnabled);
+      } else if (!isCloudMode && _service.isConnected) {
         _service.sendJson({
           'action': 'set_obstacle_avoidance',
           'enabled': obstacleAvoidanceEnabled,

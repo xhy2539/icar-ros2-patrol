@@ -15,11 +15,14 @@ ExecStartPre=/bin/bash -c 'lsmod | grep -q "^uvcvideo" || modprobe uvcvideo 2>/d
 ExecStartPre=/bin/bash -c '[ -e /dev/video0 ] || printf "2bc5 050f\n" > /sys/bus/usb/drivers/uvcvideo/new_id 2>/dev/null || true'
 
 # 优先用 release 路径，不存在则用 git 仓库
-ExecStartPre=/bin/bash -c '[ -f /home/jetson/icar-deploy/current/scripts/icar_startup.sh ] || [ -f /home/jetson/icar-ros2-patrol/scripts/icar_startup.sh ] || (echo "startup script missing" && exit 1)'
-ExecStart=/bin/bash -c 'if [ -f /home/jetson/icar-deploy/current/scripts/icar_startup.sh ]; then /bin/bash /home/jetson/icar-deploy/current/scripts/icar_startup.sh; else /bin/bash /home/jetson/icar-ros2-patrol/scripts/icar_startup.sh; fi'
+ExecStartPre=/bin/bash -c '[ -f /home/jetson/icar-ros2-patrol/scripts/icar_startup.sh ] || (echo "startup script missing" && exit 1)'
+ExecStart=/bin/bash /home/jetson/icar-ros2-patrol/scripts/icar_startup.sh
 
-Restart=on-failure
-RestartSec=30
+# This oneshot launches long-lived ROS processes inside Docker. Retrying the
+# oneshot can stack a second hardware/navigation launch after a late validation
+# failure. Fail visibly and let an operator restart from the script's clean
+# container boundary.
+Restart=no
 
 [Install]
 WantedBy=multi-user.target
