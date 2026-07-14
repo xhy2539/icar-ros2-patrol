@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """豆包端到端实时语音 API — 二进制帧编解码器。
 
 WebSocket 端点: wss://openspeech.bytedance.com/api/v3/realtime/dialogue
