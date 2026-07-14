@@ -23,7 +23,9 @@ LISTEN_PORT = int(os.getenv("ICAR_LOCAL_PROXY_PORT", "8765"))
 HTTP_PORT = int(os.getenv("ICAR_LOCAL_HTTP_PROXY_PORT", "8766"))
 CAR_HOST = os.getenv("ICAR_CAR_HOST", "192.168.137.117")
 CAR_PORT = int(os.getenv("ICAR_CAR_PORT", "6500"))
+CAR_VOICE_PORT = int(os.getenv("ICAR_CAR_VOICE_PORT", "8767"))
 CAR_URL = f"ws://{CAR_HOST}:{CAR_PORT}/ws/control"
+VOICE_URL = f"ws://{CAR_HOST}:{CAR_VOICE_PORT}/ws/voice"
 HTTP_ROUTES = {
     "/health",
     "/video_feed",
@@ -92,7 +94,16 @@ async def relay(source, destination):
 
 
 async def proxy(browser_socket):
-    async with connect(CAR_URL, open_timeout=5) as car_socket:
+    """Relay control on the legacy path and microphone frames on /ws/voice."""
+    path = browser_socket.request.path
+    if path == "/ws/voice":
+        target = VOICE_URL
+    elif path in ("/", "/ws/control"):
+        target = CAR_URL
+    else:
+        await browser_socket.close(code=1008, reason="unsupported proxy route")
+        return
+    async with connect(target, open_timeout=5) as car_socket:
         browser_to_car = asyncio.create_task(relay(browser_socket, car_socket))
         car_to_browser = asyncio.create_task(relay(car_socket, browser_socket))
         done, pending = await asyncio.wait(
@@ -106,6 +117,7 @@ async def proxy(browser_socket):
 
 async def main():
     print(f"Local control proxy: ws://{LISTEN_HOST}:{LISTEN_PORT} -> {CAR_URL}")
+    print(f"Local voice proxy:   ws://{LISTEN_HOST}:{LISTEN_PORT}/ws/voice -> {VOICE_URL}")
     print(
         f"Local vision proxy:  http://{LISTEN_HOST}:{HTTP_PORT} "
         f"-> http://{CAR_HOST}:{CAR_PORT}"

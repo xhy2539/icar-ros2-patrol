@@ -25,7 +25,7 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
-from std_msgs.msg import String
+from std_msgs.msg import String, UInt8MultiArray
 
 from .doubao_protocol import (
     build_frame,
@@ -129,6 +129,8 @@ class DoubaoVoiceNode(Node):
 
         # 跨线程队列: ROS2 回调 → asyncio
         self._text_queue = queue.Queue(maxsize=32)
+        self._web_audio_queue = queue.Queue(maxsize=256)
+        self._web_audio_active = False
         self._running = True
 
         # ── QoS ──
@@ -137,6 +139,12 @@ class DoubaoVoiceNode(Node):
         # ── 订阅 ──
         self._user_text_sub = self.create_subscription(
             String, "/voice/user_text", self._on_user_text, qos
+        )
+        self._web_audio_sub = self.create_subscription(
+            UInt8MultiArray, "/voice/web_audio", self._on_web_audio, qos
+        )
+        self._web_audio_control_sub = self.create_subscription(
+            String, "/voice/web_audio_control", self._on_web_audio_control, qos
         )
 
         # ── 发布 ──
@@ -183,6 +191,27 @@ class DoubaoVoiceNode(Node):
             self._text_queue.put_nowait(text)
         except queue.Full:
             self.get_logger().warn("文本队列满，丢弃消息")
+
+    def _on_web_audio_control(self, msg: String):
+        try:
+            frame = json.loads(msg.data)
+        except json.JSONDecodeError:
+            return
+        event = frame.get("type")
+        if event == "start":
+            self._web_audio_active = True
+            self._publish_status("listening", "browser microphone")
+        elif event == "end":
+            self._web_audio_active = False
+            self._publish_status("processing", "browser turn ended")
+
+    def _on_web_audio(self, msg: UInt8MultiArray):
+        if not self._web_audio_active:
+            return
+        try:
+            self._web_audio_queue.put_nowait(bytes(msg.data))
+        except queue.Full:
+            self.get_logger().warn("网页音频队列满，丢弃分片")
 
     @staticmethod
     def _extract_text(raw: str) -> str:
@@ -267,6 +296,7 @@ class DoubaoVoiceNode(Node):
             # 并发: 处理用户文本 + 接收服务端事件 + 保活
             await asyncio.gather(
                 self._process_text_loop(),
+                self._process_web_audio_loop(),
                 self._recv_loop(),
                 self._keepalive_loop(),
             )
@@ -356,6 +386,22 @@ class DoubaoVoiceNode(Node):
                 self.get_logger().info(f"已发送到豆包: {text[:50]}...")
             except Exception as e:
                 self.get_logger().error(f"发送文本失败: {e}")
+                break
+
+    async def _process_web_audio_loop(self):
+        """Forward browser PCM chunks into the active Doubao speech session."""
+        loop = asyncio.get_running_loop()
+        while self._running and self._connected:
+            try:
+                audio = await loop.run_in_executor(
+                    None, lambda: self._web_audio_queue.get(timeout=0.25)
+                )
+            except queue.Empty:
+                continue
+            try:
+                await self._ws.send(build_audio_frame(audio, self._session_id))
+            except Exception as exc:
+                self.get_logger().error(f"发送网页音频失败: {exc}")
                 break
 
     async def _keepalive_loop(self):
