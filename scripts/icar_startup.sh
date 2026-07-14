@@ -261,7 +261,14 @@ require_single_process() {
   local pattern="$2"
   local label="$3"
   local count
-  count=$(docker exec "$container" pgrep -fc "$pattern" 2>/dev/null || true)
+  # The vendor container's PID 1 does not always reap a just-terminated ROS
+  # child.  `pgrep` counts those zombies forever, although they cannot publish
+  # or hold a device.  Count only runnable/sleeping processes instead.
+  count=$(docker exec "$container" bash -lc \
+    "ps -eo stat=,args= | grep -F -- '$pattern' | grep -v '^[[:space:]]*Z' | wc -l" \
+    2>/dev/null || true)
+  count=$(printf '%s' "$count" | tr -cd '0-9')
+  count=${count:-0}
   if [ "$count" -ne 1 ]; then
     echo "ERROR: expected one $label process, found $count"
     return 1
