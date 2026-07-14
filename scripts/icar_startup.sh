@@ -4,6 +4,7 @@
 set -euo pipefail
 
 LOG="/home/jetson/icar_startup.log"
+LOCK_FILE="/run/icar_startup.lock"
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 REPO=$(cd "$SCRIPT_DIR/.." && pwd -P)
 DOMAIN=30
@@ -11,6 +12,11 @@ ENABLE_NAV2="${ICAR_ENABLE_NAV2:-1}"
 NAV2_MAP="${ICAR_NAV2_MAP:-/root/yahboomcar_ros2_ws/yahboomcar_ws/src/yahboomcar_nav/maps/yahboomcar.yaml}"
 NAV2_PARAMS="${ICAR_NAV2_PARAMS:-/root/yahboomcar_ros2_ws/yahboomcar_ws/src/yahboomcar_nav/params/dwa_nav_params.yaml}"
 exec > >(tee -a "$LOG") 2>&1
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+  echo "ERROR: another iCar startup is already running"
+  exit 1
+fi
 echo "=== iCar safe startup $(date) ==="
 
 echo "[0/14] Setting USB speaker as default and volume"
@@ -49,6 +55,7 @@ docker exec autodrive_ros2 pkill -f '^python3 /tmp/fast_bridge.py$' 2>/dev/null 
 # The vendor DWA launch publishes directly to /cmd_vel and bypasses the
 # application mux. Navigation is started separately only after localization.
 docker exec autodrive_ros2 pkill -f '[n]avigation_dwa_launch.py' 2>/dev/null || true
+docker exec autodrive_ros2 pkill -f '[n]avigation_mux.launch.py' 2>/dev/null || true
 docker exec autodrive_ros2 pkill -f \
   '[/]navigation/lib/navigation/obstacle_avoid_node' 2>/dev/null || true
 
@@ -205,15 +212,37 @@ echo "$DRIVER_INFO"
 echo "$MUX_INFO" | grep -q '^    /cmd_vel: geometry_msgs/msg/Twist$'
 echo "$DRIVER_INFO" | grep -q '^    /cmd_vel: geometry_msgs/msg/Twist$'
 
-NODE_LIST=$(docker exec -e ROS_DOMAIN_ID=30 autodrive_ros2 bash -lc \
-  'source /opt/ros/foxy/setup.bash; ros2 node list --no-daemon --spin-time 10')
+# Fast DDS can briefly retain endpoints after replacing a process during boot.
+# Keep the service in one startup attempt while those endpoints expire instead
+# of failing immediately and letting systemd launch another overlapping stack.
+REQUIRED_UNIQUE_NODES=(
+  /task_manager_node
+  /obstacle_alarm_node
+  /llm_gateway_node
+  /vision_node
+  /vision_mjpeg_server
+  /cloud_bridge_node
+)
+NODE_LIST=""
+for attempt in $(seq 1 4); do
+  NODE_LIST=$(docker exec -e ROS_DOMAIN_ID=30 autodrive_ros2 bash -lc \
+    'source /opt/ros/foxy/setup.bash; ros2 node list --no-daemon --spin-time 10')
+  UNIQUE_GRAPH=1
+  for node in "${REQUIRED_UNIQUE_NODES[@]}"; do
+    if [ "$(echo "$NODE_LIST" | grep -c "^${node}$")" -ne 1 ]; then
+      UNIQUE_GRAPH=0
+    fi
+  done
+  if [ "$UNIQUE_GRAPH" -eq 1 ]; then
+    break
+  fi
+  if [ "$attempt" -lt 4 ]; then
+    echo "ROS graph still has missing or stale duplicate nodes; retrying discovery ($attempt/4)"
+    sleep 10
+  fi
+done
 echo "$NODE_LIST"
-[ "$(echo "$NODE_LIST" | grep -c '^/task_manager_node$')" -eq 1 ]
-[ "$(echo "$NODE_LIST" | grep -c '^/obstacle_alarm_node$')" -eq 1 ]
-[ "$(echo "$NODE_LIST" | grep -c '^/llm_gateway_node$')" -eq 1 ]
-[ "$(echo "$NODE_LIST" | grep -c '^/vision_node$')" -eq 1 ]
-[ "$(echo "$NODE_LIST" | grep -c '^/vision_mjpeg_server$')" -eq 1 ]
-[ "$(echo "$NODE_LIST" | grep -c '^/cloud_bridge_node$')" -eq 1 ]
+[ "$UNIQUE_GRAPH" -eq 1 ]
 
 echo "[12/14] Verifying web gateway"
 curl --fail --silent --show-error --max-time 5 http://127.0.0.1:6500/health
