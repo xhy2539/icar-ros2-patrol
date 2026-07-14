@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/app_theme.dart';
@@ -33,6 +35,8 @@ class _SettingsPageState extends State<SettingsPage> {
 
   bool _dirty = false; // 是否有未保存的更改
   bool _saving = false;
+  bool _checkingConnection = false;
+  String? _connectionDiagnostic;
 
   late final TextEditingController _ipCtrl;
   late final TextEditingController _portCtrl;
@@ -194,6 +198,8 @@ class _SettingsPageState extends State<SettingsPage> {
           child: Column(
             children: [
               _buildConnectionSettings(),
+              const SizedBox(height: 16),
+              _buildConnectionDiagnostic(),
               const SizedBox(height: 16),
               _buildControlSettings(),
               const SizedBox(height: 16),
@@ -418,6 +424,80 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
               ],
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _checkLocalConnection() async {
+    if (_connectionMode == CarConnectionMode.cloud) {
+      setState(() => _connectionDiagnostic = '云端模式请通过“小车在线”状态确认 MQTT 连接。');
+      return;
+    }
+    setState(() {
+      _checkingConnection = true;
+      _connectionDiagnostic = null;
+    });
+    final host = _ipCtrl.text.trim();
+    final port = int.tryParse(_portCtrl.text) ?? _wsPort;
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+    try {
+      final request = await client.getUrl(
+        Uri.parse('http://$host:$port/health'),
+      );
+      final response = await request.close().timeout(
+        const Duration(seconds: 5),
+      );
+      final body = await utf8.decodeStream(response);
+      if (response.statusCode != HttpStatus.ok) {
+        throw HttpException('HTTP ${response.statusCode}');
+      }
+      final json = jsonDecode(body) as Map<String, dynamic>;
+      final camera = json['camera'] as Map<String, dynamic>? ?? const {};
+      final bridge = json['bridge_ready'] == true;
+      final raw = camera['raw_ready'] == true;
+      final annotated = camera['annotated_ready'] == true;
+      setState(() {
+        _connectionDiagnostic =
+            '控制桥 ${bridge ? '正常' : '异常'} · 原始视频 ${raw ? '正常' : '异常'} · 标注视频 ${annotated ? '正常' : '未就绪'}';
+      });
+    } catch (error) {
+      setState(() => _connectionDiagnostic = '连接检查失败：$error');
+    } finally {
+      client.close(force: true);
+      if (mounted) setState(() => _checkingConnection = false);
+    }
+  }
+
+  Widget _buildConnectionDiagnostic() {
+    final text = _connectionDiagnostic;
+    return AppCard(
+      title: '连接诊断',
+      icon: Icons.health_and_safety,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            text ?? '检查控制桥、原始视频与标注视频是否可用。',
+            style: TextStyle(
+              color: text?.contains('失败') == true
+                  ? AppColors.errorRed
+                  : AppColors.blueGrayDark,
+              fontSize: 13,
+            ),
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: _checkingConnection ? null : _checkLocalConnection,
+            icon: _checkingConnection
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.network_check),
+            label: Text(_checkingConnection ? '检查中…' : '检查当前连接'),
           ),
         ],
       ),

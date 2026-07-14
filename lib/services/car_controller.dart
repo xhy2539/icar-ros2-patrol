@@ -109,7 +109,7 @@ class CarController extends ChangeNotifier {
 
   /// 当前 IP
   String get host => _host;
-  String _host = '192.168.137.117';
+  String _host = '10.247.5.83';
 
   /// 当前端口
   int get port => _port;
@@ -246,7 +246,9 @@ class CarController extends ChangeNotifier {
     }
     if (alertSoundEnabled != null) {
       _alertSoundEnabled = alertSoundEnabled;
-      if (!isCloudMode && _service.isConnected) {
+      if (isCloudMode && _cloudService.isConnected) {
+        _cloudService.publishAlertSound(enabled: alertSoundEnabled);
+      } else if (!isCloudMode && _service.isConnected) {
         _service.sendJson({
           'action': 'set_alert_sound',
           'enabled': alertSoundEnabled,
