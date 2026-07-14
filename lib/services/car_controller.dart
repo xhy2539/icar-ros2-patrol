@@ -689,18 +689,20 @@ class CarController extends ChangeNotifier {
     return ok;
   }
 
-  /// 启动人员跟踪
+  /// 启动人员跟踪（局域网/云端双模式）
   bool sendTrackingStart([List<String> targetClasses = const ['person']]) {
-    if (!isConnected || isCloudMode) {
-      _addMessage(isCloudMode ? '远程跟踪尚未开放' : '未连接，无法启动跟踪');
+    if (!canSendCommands) {
+      _addMessage('小车不可达，无法启动跟踪');
       notifyListeners();
       return false;
     }
     _addMessage('[跟踪] 启动跟踪: ${targetClasses.join(",")}');
-    final ok = _service.sendTrackingCommand({
-      'command': 'start',
-      'target_classes': targetClasses,
-    });
+    final ok = isCloudMode
+        ? _cloudService.publishLlmCommand('启动跟踪，跟踪前面的人', '')
+        : _service.sendTrackingCommand({
+            'command': 'start',
+            'target_classes': targetClasses,
+          });
     if (ok) {
       _currentAction = '跟踪中';
     }
@@ -708,15 +710,17 @@ class CarController extends ChangeNotifier {
     return ok;
   }
 
-  /// 停止人员跟踪
+  /// 停止人员跟踪（局域网/云端双模式）
   bool sendTrackingStop() {
-    if (!isConnected || isCloudMode) {
-      _addMessage(isCloudMode ? '远程跟踪尚未开放' : '未连接，无法停止跟踪');
+    if (!canSendCommands) {
+      _addMessage('小车不可达，无法停止跟踪');
       notifyListeners();
       return false;
     }
     _addMessage('[跟踪] 停止跟踪');
-    final ok = _service.sendTrackingCommand({'command': 'stop'});
+    final ok = isCloudMode
+        ? _cloudService.publishLlmCommand('停止跟踪', '')
+        : _service.sendTrackingCommand({'command': 'stop'});
     notifyListeners();
     return ok;
   }
