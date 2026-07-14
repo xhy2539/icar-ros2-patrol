@@ -84,7 +84,7 @@
       <div>
         <article class="card">
           <div class="card-title"><div><div class="eyebrow">Connection</div><h2>连接状态</h2></div><span id="stateText">未连接</span></div>
-          <div class="connection"><i id="stateDot" class="dot"></i><input id="host" class="host" value="192.168.180.83" aria-label="小车 IP"><button id="connect" class="connect-btn">连接</button></div>
+          <div class="connection"><i id="stateDot" class="dot"></i><input id="host" class="host" value="10.247.5.83" aria-label="小车 IP"><button id="connect" class="connect-btn">连接</button></div>
           <div id="safeNote" class="safe-note">当前为安全模拟模式：不会向真车发送任何指令。</div>
         </article>
         <article class="card">
@@ -223,7 +223,8 @@
       if(mode==='real'&&(!ws||ws.readyState!==1)){log('真实连接不可用，指令未发送','');return}const data=payload(cmd);if(mode==='real')ws.send(data);if(!quiet)log(`发送 ${data}`,'tx');if(mode==='mock'&&!quiet)setTimeout(()=>log(`模拟确认 command=${cmd} accepted=true`,'rx'),90)}
     function motion(cmd){const v=.45*(+$('#speed').value/100),a=1.2*(+$('#speed').value/100);let x=0,y=0,z=0;if(cmd==='forward')x=v;if(cmd==='backward')x=-v;if(cmd==='left')y=v;if(cmd==='right')y=-v;if(cmd==='turn_left')z=a;if(cmd==='turn_right')z=-a;$('#vx').textContent=`vx ${x.toFixed(2)}`;$('#vy').textContent=`vy ${y.toFixed(2)}`;$('#wz').textContent=`wz ${z.toFixed(2)}`;$('#motionBar').style.width=cmd==='stop'?'0':`${$('#speed').value}%`}
     function press(button){if(!connected)return;release(false);active=button.dataset.command;button.classList.add('pressed');$('#action').textContent=names[active];beat=0;send(active);motion(active);pulse=setInterval(()=>{beat++;send(active,true);$('#heartbeat').textContent=`看门狗续租：${beat} · 100 ms`},100)}
-    function release(withLog=true){if(pulse)clearInterval(pulse);pulse=null;$$('.pressed').forEach(b=>b.classList.remove('pressed'));if(active&&connected){if(mode==='cloud'){setTimeout(()=>send('stop',!withLog),300)}else{send('stop',!withLog)}}active='';motion('stop');$('#heartbeat').textContent='看门狗：未激活';if(connected)$('#action').textContent='已停止'}
+    function release(withLog=true){if(pulse)clearInterval(pulse);pulse=null;$$('.pressed').forEach(b=>b.classList.remove('pressed'));if(active&&connected&&mode!=='cloud')send('stop',!withLog);active='';motion('stop');$('#heartbeat').textContent='看门狗：未激活';if(connected)$('#action').textContent='已停止'}
+function releaseCloud(){if(active&&connected)send('stop');release()}
     function visionBase(){return `http://${$('#host').value.trim()}:6500`}
     let _visionTimer=null;
     function startVision(){
@@ -296,23 +297,24 @@
         return;
       }
       const id='web_'+Date.now().toString(36);ws.send(JSON.stringify({action:'llm_command',request_id:id,input_text:text}));log(`LLM 指挥发送: ${text}`,'tx')}
-    function voiceSocketUrl(){return ['127.0.0.1','localhost'].includes(location.hostname)?'ws://127.0.0.1:8765/ws/voice':`ws://${$('#host').value.trim()}:8767/ws/voice`}
+    function voiceSocketUrl(){return 'ws://127.0.0.1:8768'}
     function pcm16k(samples,sourceRate){const ratio=sourceRate/16000,count=Math.floor(samples.length/ratio),out=new Int16Array(count);for(let i=0;i<count;i++){const start=Math.floor(i*ratio),end=Math.min(samples.length,Math.floor((i+1)*ratio));let sum=0;for(let j=start;j<end;j++)sum+=samples[j];const sample=Math.max(-1,Math.min(1,sum/Math.max(1,end-start)));out[i]=sample<0?sample*0x8000:sample*0x7fff}return out.buffer}
     function setVoiceListening(value){voiceListening=value;const button=$('#voiceMic');button.classList.toggle('listening',value);button.setAttribute('aria-pressed',String(value));button.textContent=value?'■ 停止':'🎙 语音'}
     async function startVoice(){
-      if(mode==='mock'){addChatEntry('error','请先切换到真实或云端模式。');return}
-      // 云端模式：浏览器 SpeechRecognition + SpeechSynthesis
-      if(mode==='cloud'){
-        const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
-        if(!SpeechRecognition){addChatEntry('error','浏览器不支持语音识别，请使用 Chrome。');return}
-        if(!window._cloudRecognition){window._cloudRecognition=new SpeechRecognition();window._cloudRecognition.lang='zh-CN';window._cloudRecognition.interimResults=false;window._cloudRecognition.continuous=false;
-          window._cloudRecognition.onresult=e=>{const text=e.results[0][0].transcript.trim();if(text){addChatEntry('user',text);sendMissionCommand(text)}setVoiceListening(false);if(voiceContinuous&&connected)setTimeout(()=>startVoice(),1000)};
-          window._cloudRecognition.onerror=()=>{setVoiceListening(false);if(voiceContinuous&&connected)setTimeout(()=>startVoice(),2000)};
-          window._cloudRecognition.onend=()=>setVoiceListening(false)}
-        window._cloudRecognition.start();setVoiceListening(true);addChatEntry('pending','正在聆听（浏览器语音）…');return}
-      // 真实模式：豆包实时语音 WS
-      if(!navigator.mediaDevices?.getUserMedia){addChatEntry('error','当前浏览器不支持麦克风采集，请使用 Chrome 或 Edge。');return}try{voiceStream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true}});voiceSocket=new WebSocket(voiceSocketUrl());voiceSocket.binaryType='arraybuffer';voiceSocket.onopen=()=>{voiceSocket.send(JSON.stringify({type:'start',sample_rate:16000,channels:1,format:'pcm_s16le'}));voiceAudioContext=new (window.AudioContext||window.webkitAudioContext)();voiceSource=voiceAudioContext.createMediaStreamSource(voiceStream);voiceProcessor=voiceAudioContext.createScriptProcessor(4096,1,1);voiceProcessor.onaudioprocess=e=>{if(voiceSocket?.readyState===WebSocket.OPEN)voiceSocket.send(pcm16k(e.inputBuffer.getChannelData(0),voiceAudioContext.sampleRate))};voiceSource.connect(voiceProcessor);voiceProcessor.connect(voiceAudioContext.destination);setVoiceListening(true);addChatEntry('pending','正在聆听，请说话…')};voiceSocket.onmessage=e=>{try{const data=JSON.parse(e.data);if(data.type==='error')addChatEntry('error','语音网关错误：'+data.code)}catch(_){}};voiceSocket.onerror=()=>{addChatEntry('error','无法连接语音网关，请检查本机代理和小车语音服务。');stopVoice()};voiceSocket.onclose=()=>{if(voiceListening)stopVoice()}}catch(error){addChatEntry('error',error?.name==='NotAllowedError'?'麦克风权限被拒绝。':'无法打开麦克风：'+error.message);stopVoice()}}
-    function stopVoice(){if(mode==='cloud'&&window._cloudRecognition){window._cloudRecognition.stop();setVoiceListening(false);if(voiceContinuous&&connected){clearTimeout(window._voiceRestart);window._voiceRestart=setTimeout(()=>{if(voiceContinuous&&connected)startVoice()},2000)}return}if(voiceSocket?.readyState===WebSocket.OPEN)voiceSocket.send(JSON.stringify({type:'end'}));voiceSocket?.close();voiceSocket=null;voiceProcessor?.disconnect();voiceSource?.disconnect();voiceAudioContext?.close();voiceProcessor=null;voiceSource=null;voiceAudioContext=null;voiceStream?.getTracks().forEach(track=>track.stop());voiceStream=null;if(voiceListening){missionHistory=missionHistory.filter(m=>m.type!=='pending');addChatEntry('system','已结束录音，正在等待豆包识别与回复。')}setVoiceListening(false);if(voiceContinuous&&connected){clearTimeout(window._voiceRestart);window._voiceRestart=setTimeout(()=>{if(voiceContinuous&&connected)startVoice()},2500)}}
+      if(mode==='mock'){addChatEntry('error','请先连接到小车。');return}
+      // 豆包语音 — 通过本地代理 :8768 转发到车，不依赖车IP
+      if(!navigator.mediaDevices?.getUserMedia){addChatEntry('error','当前浏览器不支持麦克风，请使用 Chrome。');return}
+      try{voiceStream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true}});
+        voiceSocket=new WebSocket(voiceSocketUrl());voiceSocket.binaryType='arraybuffer';
+        voiceSocket.onopen=()=>{voiceSocket.send(JSON.stringify({type:'start',sample_rate:16000,channels:1,format:'pcm_s16le'}));
+          voiceAudioContext=new (window.AudioContext||window.webkitAudioContext)();voiceSource=voiceAudioContext.createMediaStreamSource(voiceStream);
+          voiceProcessor=voiceAudioContext.createScriptProcessor(4096,1,1);
+          voiceProcessor.onaudioprocess=e=>{if(voiceSocket?.readyState===WebSocket.OPEN)voiceSocket.send(pcm16k(e.inputBuffer.getChannelData(0),voiceAudioContext.sampleRate))};
+          voiceSource.connect(voiceProcessor);voiceProcessor.connect(voiceAudioContext.destination);setVoiceListening(true);addChatEntry('pending','正在聆听…')};
+        voiceSocket.onmessage=e=>{try{const data=JSON.parse(e.data);if(data.type==='error')addChatEntry('error','语音网关错误：'+data.code)}catch(_){}};
+        voiceSocket.onerror=()=>{addChatEntry('error','无法连接语音网关');stopVoice()};voiceSocket.onclose=()=>{if(voiceListening)stopVoice()}}
+      catch(error){addChatEntry('error',error?.name==='NotAllowedError'?'麦克风权限被拒绝。':'无法打开麦克风：'+error.message);stopVoice()}}
+    function stopVoice(){if(voiceSocket?.readyState===WebSocket.OPEN)voiceSocket.send(JSON.stringify({type:'end'}));voiceSocket?.close();voiceSocket=null;voiceProcessor?.disconnect();voiceSource?.disconnect();voiceAudioContext?.close();voiceProcessor=null;voiceSource=null;voiceAudioContext=null;voiceStream?.getTracks().forEach(track=>track.stop());voiceStream=null;if(voiceListening&&mode==='real'){missionHistory=missionHistory.filter(m=>m.type!=='pending');addChatEntry('system','已结束录音，正在等待豆包识别与回复。')}setVoiceListening(false);if(voiceContinuous&&connected){clearTimeout(window._voiceRestart);window._voiceRestart=setTimeout(()=>{if(voiceContinuous&&connected)startVoice()},2500)}}
     function sendQuickPatrol(){if(!selectedRoute.size||!connected||mode==='mock')return;const route=[...selectedRoute].sort();if(mode==='cloud'){cloudAction('cmd',{action:'patrol',route,params:{actions:['navigate','detect','collect']},command_id:'web_'+Date.now().toString(36),issued_at:Math.floor(Date.now()/1000),expires_at:Math.floor(Date.now()/1000)+30});addChatEntry('user','一键巡检: '+route.join(' → '));addChatEntry('tool','[云端] 任务已下发，路线: '+route.join(' → '));log('云端巡检已下发: '+route.join(','),'tx');renderChat();return}addChatEntry('user',`一键巡检: ${route.join(' → ')}`);addChatEntry('tool','任务已下发至 task_manager，路线: '+route.join(' → '));log(`一键巡检已下发: ${route.join(',')}`,'tx');renderChat()}
     function sendGenerateReport(){const id=$('#reportTaskId').value.trim();if(!id||!connected||mode==='mock')return;if(mode==='cloud'){cloudAction('llm/generate_report',{task_id:id});addChatEntry('user','请求报告: '+id);addChatEntry('pending','正在生成报告…');log('云端请求报告 task_id='+id,'tx');return}ws.send(JSON.stringify({action:'generate_report',task_id:id}));addChatEntry('user','请求报告: '+id);addChatEntry('pending','正在生成报告…');log(`请求生成报告 task_id=${id}`,'tx')}
     function handleLlmResponse(data){const success=data.success!==false,reply=data.reply||data.message||data.error_msg||(success?'执行完成':'执行失败'),tool=data.tool_name||'';missionHistory=missionHistory.filter(m=>m.type!=='pending');if(tool)addChatEntry('tool',`[${tool}] ${reply}`);else if(data.report_text)addChatEntry('report',data.report_text);else addChatEntry(success?'system':'error',reply);renderChat();speakReply(reply)}
@@ -386,7 +388,7 @@
     $('#mockMode').onclick=()=>{if(connected)disconnect();mode='mock';$('#mockMode').classList.add('active');$('#realMode').classList.remove('active');$('#cloudMode').classList.remove('active');$('#modeText').textContent='模拟';$('#safeNote').textContent='当前为安全模拟模式：不会向真车发送任何指令。';$('#safeNote').style.background='#fff6ed';log('已切换到安全模拟模式')};
     $('#realMode').onclick=()=>{if(connected)disconnect();if(!confirm('真实模式会向小车发送运动指令。请确认车轮架空或周围安全。'))return;mode='real';$('#realMode').classList.add('active');$('#mockMode').classList.remove('active');$('#cloudMode').classList.remove('active');$('#modeText').textContent='真实';$('#safeNote').textContent='真实控制已启用：长按运动、松手即停，断线由车端看门狗停车。';$('#safeNote').style.background='#ffeaea';log('已切换到真实小车模式')};$('#cloudMode').onclick=()=>{if(connected)disconnect();mode='cloud';$('#cloudMode').classList.add('active');$('#mockMode').classList.remove('active');$('#realMode').classList.remove('active');$('#modeText').textContent='云端';$('#safeNote').textContent='云端控制已启用：MQTT 远程操控 + 视频帧。需要先启动 python3 scripts/ws_mqtt_bridge.py';$('#safeNote').style.background='#eaf0ff';log('已切换到云端模式（需启动 ws_mqtt_bridge.py）')};
     $$('[data-command]').forEach(b=>{b.disabled=true;b.addEventListener('pointerdown',e=>{e.preventDefault();b.setPointerCapture(e.pointerId);press(b)});b.addEventListener('pointerup',()=>release());b.addEventListener('pointercancel',()=>release());b.addEventListener('lostpointercapture',()=>release())});
-    $('#stop').disabled=true;$('#stop').onclick=()=>release();
+    $('#stop').disabled=true;$('#stop').onclick=()=>{if(mode==='cloud')releaseCloud();else release();};
     $('#speed').oninput=()=>{const p=+$('#speed').value;$('#speedValue').textContent=p;$('.speed-unit').textContent=`% · ${(.45*p/100).toFixed(2)} m/s`;if(active){send(active);motion(active)}};
     function syncAlertSound(){if(mode==='cloud'&&ws?.readyState===WebSocket.OPEN)cloudAction('alarm',{enabled:alertSoundEnabled});else if(mode==='real'&&ws?.readyState===WebSocket.OPEN)ws.send(JSON.stringify({action:'set_alert_sound',enabled:alertSoundEnabled}))}
     function syncObstacleAvoidance(){if(mode==='real'&&ws?.readyState===WebSocket.OPEN)ws.send(JSON.stringify({action:'set_obstacle_avoidance',enabled:obstacleAvoidanceEnabled}))}

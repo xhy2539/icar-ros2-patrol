@@ -80,7 +80,7 @@ class RobotTools:
                 String, '/vision/target_tracking/command', qos
             )
             self.llm_motion_publisher = self.node.create_publisher(
-                Twist, '/cmd_vel_llm', qos
+                Twist, '/cmd_vel_cloud', qos
             )
 
             self.buzzer_publisher = self.node.create_publisher(

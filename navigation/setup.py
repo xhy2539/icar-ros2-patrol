@@ -27,6 +27,7 @@ setup(
             'slam_node = slam.slam_node:main',
             'lidar_node = lidar.lidar_node:main',
             'nav2_bridge_node = navigation.nav2_bridge_node:main',
+            'pose_bridge_node = pose_bridge.pose_bridge_node:main',
         ],
     },
 )

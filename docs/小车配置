@@ -6,7 +6,7 @@ Docker: slam_test / boring_keldysh (yahboomtechnology/ros-foxy:5.0.1)
 别名: s=docker start, d=docker exec 进入容器
 
 # 小车 #2（新，当前使用）
-ssh jetson@192.168.180.83
+ssh jetson@10.247.5.83
 密码：yahboom
 
 e

@@ -38,7 +38,7 @@ def constrain_for_obstacle(
             x = warning_limit
         return SafeVelocity(x, y, z, (x, y, z) != original)
 
-    if risk != "danger" and action != "stop":
+    if risk != "danger":
         return SafeVelocity(x, y, z, False)
 
     if direction in ("front", "front_left", "front_right"):
