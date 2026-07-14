@@ -11,6 +11,8 @@
                                                   → /voice/status
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import os
@@ -79,11 +81,13 @@ SAMPLE_RATE_OUT = 24000
 SILENCE = b"\x00" * 640  # 20ms PCM silence, 用于保持音频管线活跃
 
 DEFAULT_SYSTEM_ROLE = (
-    "你是智能巡检小车的语音助手，你的名字叫小巡。"
-    "用简短自然的中文与用户交流。"
+    "你是养老院的智能巡检语音助手，你的名字叫小巡。"
+    "你的工作是帮助护理人员和老人完成日常巡检、安全监控和信息查询。"
+    "用亲切、温和、简短的中文交流，语速适中，让老人感到温暖和安心。"
     "当用户要求巡检或执行任务时，先复述内容并请用户确认。"
     "只有用户明确确认后，才用「执行任务：」开头输出最终指令。"
     "用户说「停下」「停止」「别动」「紧急停止」时，立即回复「紧急停止」。"
+    "遇到老人表示不舒服或需要帮助时，表达关心并建议联系护理人员。"
 )
 
 
@@ -260,10 +264,11 @@ class DoubaoVoiceNode(Node):
                 f"豆包会话已建立 (dialog_id={self._dialog_id[:12]}...)"
             )
 
-            # 并发: 处理用户文本 + 接收服务端事件
+            # 并发: 处理用户文本 + 接收服务端事件 + 保活
             await asyncio.gather(
                 self._process_text_loop(),
                 self._recv_loop(),
+                self._keepalive_loop(),
             )
 
     async def _handshake(self):
@@ -345,17 +350,24 @@ class DoubaoVoiceNode(Node):
                 continue
 
             try:
-                # 保持音频管线活跃
-                await self._ws.send(
-                    build_audio_frame(SILENCE, self._session_id)
-                )
-                await asyncio.sleep(0.1)
-
                 # 发送文本查询
                 await self._ws.send(build_text_frame(text, self._session_id))
                 self.get_logger().info(f"已发送到豆包: {text[:50]}...")
             except Exception as e:
                 self.get_logger().error(f"发送文本失败: {e}")
+                break
+
+    async def _keepalive_loop(self):
+        """每30秒发送静音保活，防止会话超时断开。"""
+        while self._running and self._connected:
+            await asyncio.sleep(30)
+            try:
+                if self._ws and self._connected:
+                    await self._ws.send(
+                        build_audio_frame(SILENCE, self._session_id)
+                    )
+                    self.get_logger().debug("keepalive sent")
+            except Exception:
                 break
 
     # ── 接收服务端事件 ───────────────────────────────────────
@@ -366,7 +378,11 @@ class DoubaoVoiceNode(Node):
         tts_bytes = 0
 
         while self._running and self._connected:
-            resp = await self._recv_one(timeout=2.0)
+            try:
+                resp = await self._recv_one(timeout=2.0)
+            except Exception as e:
+                self.get_logger().warn(f"recv 异常: {e}")
+                break
             if resp is None:
                 continue
 
