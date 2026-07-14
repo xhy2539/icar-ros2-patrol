@@ -32,6 +32,7 @@ class ObstacleAlarmNode(Node):
             repeat_sec=float(self.get_parameter("repeat_sec").value)
         )
         self._external_active = set()
+        self._sound_enabled = True
         self._pattern = []
         self._next_transition_at = 0.0
 
@@ -43,8 +44,21 @@ class ObstacleAlarmNode(Node):
         self.create_subscription(
             String, "/safety/hazard_event", self._on_hazard_event, 10
         )
+        self.create_subscription(
+            Bool, "/safety/alarm_sound_enabled", self._on_sound_enabled, 10
+        )
         self.create_timer(0.05, self._tick)
         self.get_logger().info("obstacle alarm ready: /obstacle_status -> /Buzzer")
+
+    def _on_sound_enabled(self, message: Bool) -> None:
+        """Mute only the buzzer; safety events and obstacle blocking continue."""
+        self._sound_enabled = bool(message.data)
+        if not self._sound_enabled:
+            self._pattern.clear()
+            self._buzzer_pub.publish(Bool(data=False))
+        self.get_logger().info(
+            f"obstacle alarm sound {'enabled' if self._sound_enabled else 'muted'}"
+        )
 
     def _on_obstacle(self, message: ObstacleStatus) -> None:
         decision = self._controller.update(
@@ -80,6 +94,8 @@ class ObstacleAlarmNode(Node):
             self.get_logger().info("obstacle alarm cleared")
 
     def _start_pattern(self) -> None:
+        if not self._sound_enabled:
+            return
         self._pattern = [value for _ in range(self._pulse_count) for value in (True, False)]
         self._next_transition_at = 0.0
 

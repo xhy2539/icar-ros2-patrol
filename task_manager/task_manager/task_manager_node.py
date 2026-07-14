@@ -69,6 +69,7 @@ class PatrolState(Enum):
     CHECKPOINT = "CHECKPOINT"     # 到达巡检点，记录打卡
     DETECTING = "DETECTING"       # 视觉检测
     COLLECTING = "COLLECTING"     # 传感器采集
+    PAUSED = "PAUSED"             # 安全事件等待人工处置
     COMPLETED = "COMPLETED"       # 任务正常结束
     FAILED = "FAILED"             # 任务异常终止
     CANCELLED = "CANCELLED"       # 人工取消
@@ -77,11 +78,12 @@ class PatrolState(Enum):
 # 允许的状态转换
 ALLOWED_TRANSITIONS = {
     PatrolState.PENDING:    [PatrolState.RUNNING, PatrolState.CANCELLED],
-    PatrolState.RUNNING:    [PatrolState.NAVIGATING, PatrolState.CANCELLED, PatrolState.FAILED],
-    PatrolState.NAVIGATING: [PatrolState.CHECKPOINT, PatrolState.CANCELLED, PatrolState.FAILED],
-    PatrolState.CHECKPOINT: [PatrolState.DETECTING, PatrolState.COLLECTING, PatrolState.CANCELLED, PatrolState.FAILED],
-    PatrolState.DETECTING:  [PatrolState.COLLECTING, PatrolState.CANCELLED, PatrolState.FAILED],
-    PatrolState.COLLECTING: [PatrolState.NAVIGATING, PatrolState.COMPLETED, PatrolState.CANCELLED, PatrolState.FAILED],
+    PatrolState.RUNNING:    [PatrolState.NAVIGATING, PatrolState.PAUSED, PatrolState.CANCELLED, PatrolState.FAILED],
+    PatrolState.NAVIGATING: [PatrolState.CHECKPOINT, PatrolState.PAUSED, PatrolState.CANCELLED, PatrolState.FAILED],
+    PatrolState.CHECKPOINT: [PatrolState.DETECTING, PatrolState.COLLECTING, PatrolState.PAUSED, PatrolState.CANCELLED, PatrolState.FAILED],
+    PatrolState.DETECTING:  [PatrolState.COLLECTING, PatrolState.PAUSED, PatrolState.CANCELLED, PatrolState.FAILED],
+    PatrolState.COLLECTING: [PatrolState.NAVIGATING, PatrolState.PAUSED, PatrolState.COMPLETED, PatrolState.CANCELLED, PatrolState.FAILED],
+    PatrolState.PAUSED:     [PatrolState.PENDING, PatrolState.CANCELLED],
     PatrolState.COMPLETED:  [PatrolState.PENDING],   # 允许复位接受新任务
     PatrolState.FAILED:     [PatrolState.PENDING],   # 允许复位接受新任务
     PatrolState.CANCELLED:  [PatrolState.PENDING],   # 允许复位接受新任务
@@ -116,6 +118,10 @@ class TaskManagerNode(Node):
         self.last_detections = None    # 最新检测结果
         self.current_pose = {"x": 0.0, "y": 0.0, "frame_id": "map"}
         self.emergency_stop_active = False
+        # A confirmed visual hazard gets a tagged evidence capture.  Keeping
+        # the tag here lets the later recorder status be joined back to the
+        # original alarm without guessing from a filename.
+        self._pending_hazard_captures = {}
         self.checkpoints = load_navigation_checkpoints()
         self.route_goals = []
         self.goal_sent_for_index = None
@@ -134,6 +140,7 @@ class TaskManagerNode(Node):
         self.declare_parameter("fall_min_confidence", 0.75)
         self.declare_parameter("fall_confirm_frames", 3)
         self.declare_parameter("fall_repeat_sec", 30.0)
+        self.declare_parameter("capture_hazard_evidence", True)
         self.obstacle_controller = ObstacleDetourController(
             clear_sec=float(self.get_parameter("obstacle_clear_sec").value),
             max_block_sec=float(
@@ -201,6 +208,9 @@ class TaskManagerNode(Node):
         self.vision_sub = self.create_subscription(
             DetectionArray, '/vision/detections', self._on_detections, best_effort_qos)
 
+        self.capture_status_sub = self.create_subscription(
+            String, '/vision/capture_status', self._on_capture_status, reliable_qos)
+
         self.pose_sub = self.create_subscription(
             PoseStamped, '/pose', self._on_pose, reliable_qos)
 
@@ -226,6 +236,12 @@ class TaskManagerNode(Node):
 
         self.hazard_event_pub = self.create_publisher(
             String, '/safety/hazard_event', reliable_qos)
+
+        self.capture_command_pub = self.create_publisher(
+            String, '/vision/capture_command', reliable_qos)
+
+        self.navigation_pause_pub = self.create_publisher(
+            Bool, '/navigation/pause', reliable_qos)
 
         self.goal_pose_pub = self.create_publisher(
             PoseStamped, '/goal_pose', reliable_qos)
@@ -275,6 +291,7 @@ class TaskManagerNode(Node):
             PatrolState.CHECKPOINT: f"到达巡检点 {self._current_checkpoint()}，记录打卡",
             PatrolState.DETECTING: "正在执行视觉检测",
             PatrolState.COLLECTING: "正在采集传感器数据",
+            PatrolState.PAUSED: "巡航已暂停，等待工作人员确认安全",
             PatrolState.COMPLETED: "巡检任务完成",
             PatrolState.FAILED: "任务异常终止",
             PatrolState.CANCELLED: "任务已取消",
@@ -323,6 +340,12 @@ class TaskManagerNode(Node):
     def _publish_safety_stop_state(self):
         """Publish one aggregate stop state for every safety reason."""
         self.safety_stop_pub.publish(Bool(data=self.emergency_stop_active))
+
+    def _pause_navigation(self, reason: str):
+        """Pause the current patrol without latching the whole vehicle stop."""
+        self.cmd_vel_pub.publish(Twist())
+        self.navigation_pause_pub.publish(Bool(data=True))
+        self.get_logger().warning(f"巡航已暂停: {reason}")
 
     def _publish_hazard_event(self, payload: dict):
         message = String()
@@ -481,6 +504,43 @@ class TaskManagerNode(Node):
             self.fall_controller.update(msg.detections, now=now)
         )
 
+    def _on_capture_status(self, msg: String):
+        """Attach a recorder result to the hazard that requested it.
+
+        The initial alarm is intentionally sent before the JPEG is saved, so
+        staff are notified even if a camera is unavailable.  A second alarm
+        event then supplies the evidence path (or a precise capture failure).
+        """
+        try:
+            status = json.loads(msg.data)
+            if not isinstance(status, dict):
+                return
+        except json.JSONDecodeError:
+            return
+
+        data = status.get("data")
+        data = data if isinstance(data, dict) else {}
+        tag = str(data.get("tag", ""))
+        pending = self._pending_hazard_captures.pop(tag, None)
+        if pending is None:
+            return
+
+        event = str(status.get("event", ""))
+        payload = dict(pending)
+        payload["capture_pending"] = False
+        payload["capture_status"] = event
+        if event == "image_saved":
+            payload["event"] = "evidence_captured"
+            payload["image_path"] = str(data.get("path", ""))
+            payload["message"] = "积水证据截图已保存，已通知工作人员清理"
+            severity = "WARN"
+        else:
+            payload["event"] = "evidence_capture_failed"
+            payload["message"] = "积水已告警，但证据截图未保存"
+            severity = "WARN"
+        self._log_event("HAZARD_EVIDENCE", payload, severity=severity)
+        self._publish_hazard_event(payload)
+
     def _pose_payload(self):
         return dict(self.current_pose)
 
@@ -510,23 +570,46 @@ class TaskManagerNode(Node):
             "checkpoint": self._current_checkpoint(),
             "pose": self._pose_payload(),
         }
+        should_capture = (
+            bool(self.get_parameter("capture_hazard_evidence").value)
+            and hazard_type == "water"
+            and decision.active
+            and decision.event in ("started", "repeated")
+        )
+        if should_capture:
+            tag = f"hazard_water_{uuid.uuid4().hex[:12]}"
+            payload["capture_pending"] = True
+            payload["capture_tag"] = tag
+            payload["message"] = "检测到积水，正在保存证据截图并通知工作人员清理"
+            self._pending_hazard_captures[tag] = dict(payload)
         prefix = "WATER_HAZARD" if hazard_type == "water" else "VISUAL_OBSTACLE"
         event_type = f"{prefix}_CLEARED" if decision.event == "cleared" else prefix
         severity = "INFO" if decision.event == "cleared" else "WARN"
         self._log_event(event_type, payload, severity=severity)
         self._publish_hazard_event(payload)
+        if should_capture:
+            command = String()
+            command.data = json.dumps({
+                "action": "capture_once",
+                "tag": tag,
+                "reason": "water_hazard",
+            }, ensure_ascii=False)
+            self.capture_command_pub.publish(command)
         self._publish_status()
 
     def _handle_fall_hazard(self, decision):
         if not decision.should_report:
             return
         detection = decision.detection or {}
-        self._emergency_stop("视觉确认人员摔倒")
+        # A fall needs immediate attention, but is not a chassis/system fault.
+        # Pause only the patrol, leaving normal recovery controls available
+        # after staff confirm the scene is safe.
+        self._pause_navigation("视觉确认人员摔倒")
         payload = {
             "hazard_type": "fallen_person",
             "event": decision.event,
             "active": True,
-            "action": "stop_and_report",
+            "action": "pause_task_and_report",
             "confidence": round(float(detection.get("confidence", 0.0)), 3),
             "class_name": detection.get("class_name", "fallen_person"),
             "bbox": detection.get("bbox", [0, 0, 0, 0]),
@@ -544,7 +627,7 @@ class TaskManagerNode(Node):
             PatrolState.DETECTING,
             PatrolState.COLLECTING,
         ):
-            self._transition_to(PatrolState.FAILED)
+            self._transition_to(PatrolState.PAUSED)
 
     def _on_pose(self, msg: PoseStamped):
         self.current_pose = {
@@ -611,6 +694,8 @@ class TaskManagerNode(Node):
                 self.water_controller.reset()
                 self.visual_obstacle_controller.reset()
                 self.fall_controller.reset()
+                self._pending_hazard_captures.clear()
+                self.navigation_pause_pub.publish(Bool(data=False))
                 for hazard_type in ("water", "visual_obstacle", "fallen_person"):
                     self._publish_hazard_event({
                         "hazard_type": hazard_type,
@@ -657,6 +742,7 @@ class TaskManagerNode(Node):
             PatrolState.CHECKPOINT: self._handle_checkpoint,
             PatrolState.DETECTING:  self._handle_detecting,
             PatrolState.COLLECTING: self._handle_collecting,
+            PatrolState.PAUSED:     self._handle_paused,
             PatrolState.COMPLETED:  self._handle_completed,
             PatrolState.FAILED:     self._handle_failed,
             PatrolState.CANCELLED:  self._handle_cancelled,
@@ -841,6 +927,10 @@ class TaskManagerNode(Node):
         self.get_logger().info(
             f"任务 {self.current_task_id} 已取消，等待新任务...")
         self._transition_to(PatrolState.PENDING)
+
+    def _handle_paused(self):
+        """Hold position until the operator resets after a safety event."""
+        return
 
 
 # ---------------------------------------------------------------------------

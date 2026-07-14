@@ -29,6 +29,7 @@ class _SettingsPageState extends State<SettingsPage> {
   late bool _hapticFeedback;
   bool _vibrateOnAlert = true;
   bool _alertSoundEnabled = true;
+  bool _obstacleAvoidanceEnabled = true;
 
   bool _dirty = false; // 是否有未保存的更改
   bool _saving = false;
@@ -106,6 +107,9 @@ class _SettingsPageState extends State<SettingsPage> {
       _vibrateOnAlert = prefs.getBool('vibrate_on_alert') ?? true;
       _alertSoundEnabled =
           prefs.getBool('alert_sound_enabled') ?? _ctrl.alertSoundEnabled;
+      _obstacleAvoidanceEnabled =
+          prefs.getBool('obstacle_avoidance_enabled') ??
+          _ctrl.obstacleAvoidanceEnabled;
 
       _ipCtrl.text = _carIp;
       _portCtrl.text = _wsPort.toString();
@@ -142,6 +146,10 @@ class _SettingsPageState extends State<SettingsPage> {
     await prefs.setBool('haptic_feedback', _hapticFeedback);
     await prefs.setBool('vibrate_on_alert', _vibrateOnAlert);
     await prefs.setBool('alert_sound_enabled', _alertSoundEnabled);
+    await prefs.setBool(
+      'obstacle_avoidance_enabled',
+      _obstacleAvoidanceEnabled,
+    );
 
     // 应用到 CarController
     await _ctrl.updateSettings(
@@ -159,6 +167,7 @@ class _SettingsPageState extends State<SettingsPage> {
       autoReconnect: _autoReconnect,
       hapticEnabled: _hapticFeedback,
       alertSoundEnabled: _alertSoundEnabled,
+      obstacleAvoidanceEnabled: _obstacleAvoidanceEnabled,
     );
 
     setState(() {
@@ -481,15 +490,30 @@ class _SettingsPageState extends State<SettingsPage> {
     return AppCard(
       title: '告警设置',
       icon: Icons.notifications,
-      child: _buildSwitchRow(
-        icon: Icons.volume_up_outlined,
-        label: '告警声音',
-        subtitle: '避障和传感器告警时播放提示音；关闭不影响安全拦截',
-        value: _alertSoundEnabled,
-        onChanged: (value) {
-          setState(() => _alertSoundEnabled = value);
-          _markDirty();
-        },
+      child: Column(
+        children: [
+          _buildSwitchRow(
+            icon: Icons.volume_up_outlined,
+            label: '告警声音',
+            subtitle: '同步关闭车端蜂鸣器；不影响安全拦截',
+            value: _alertSoundEnabled,
+            onChanged: (value) {
+              setState(() => _alertSoundEnabled = value);
+              _markDirty();
+            },
+          ),
+          const Divider(height: 24),
+          _buildSwitchRow(
+            icon: Icons.shield_outlined,
+            label: '避障拦截',
+            subtitle: '关闭后允许通过障碍区域，仍保留急停；仅限确认周边安全时使用',
+            value: _obstacleAvoidanceEnabled,
+            onChanged: (value) {
+              setState(() => _obstacleAvoidanceEnabled = value);
+              _markDirty();
+            },
+          ),
+        ],
       ),
     );
   }

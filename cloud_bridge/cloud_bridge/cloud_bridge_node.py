@@ -512,7 +512,7 @@ class CloudBridgeNode(Node):
         default_messages = {
             "water": "检测到积水，已告警并请求重新规划",
             "visual_obstacle": "视觉检测到障碍物，已告警并请求重新规划",
-            "fallen_person": "检测到人员摔倒，小车已停车",
+            "fallen_person": "检测到人员摔倒，巡航已暂停，等待工作人员确认",
             "obstacle": "雷达检测到障碍物",
         }
         payload.setdefault("message", default_messages.get(hazard_type, "安全告警"))

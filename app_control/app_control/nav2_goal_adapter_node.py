@@ -7,6 +7,7 @@ from nav2_msgs.action import NavigateToPose
 import rclpy
 from rclpy.action import ActionClient
 from rclpy.node import Node
+from std_msgs.msg import Bool
 
 
 class Nav2GoalAdapterNode(Node):
@@ -21,8 +22,10 @@ class Nav2GoalAdapterNode(Node):
         )
         self._status_pub = self.create_publisher(NavStatus, "/nav_status", 10)
         self.create_subscription(PoseStamped, "/goal_pose", self._on_goal, 10)
+        self.create_subscription(Bool, "/navigation/pause", self._on_pause, 10)
         self._generation = 0
         self._initial_distance = {}
+        self._goal_handle = None
         self.get_logger().info("Nav2 goal adapter ready: /goal_pose -> NavigateToPose")
 
     def _publish(self, status, progress, distance, message):
@@ -65,10 +68,22 @@ class Nav2GoalAdapterNode(Node):
         if not goal_handle.accepted:
             self._publish("FAILED", 0.0, 0.0, "Nav2 rejected goal")
             return
+        self._goal_handle = goal_handle
         result_future = goal_handle.get_result_async()
         result_future.add_done_callback(
             lambda result, current=generation: self._on_result(result, current)
         )
+
+    def _on_pause(self, message: Bool) -> None:
+        if not message.data:
+            return
+        # Invalidate callbacks before cancellation so the expected canceled
+        # result is not reported as a patrol failure.
+        self._generation += 1
+        if self._goal_handle is not None:
+            self._goal_handle.cancel_goal_async()
+            self._goal_handle = None
+        self._publish("PAUSED", 0.0, 0.0, "巡航因安全事件暂停，等待人工确认")
 
     def _on_feedback(self, feedback_message, generation: int) -> None:
         if generation != self._generation:

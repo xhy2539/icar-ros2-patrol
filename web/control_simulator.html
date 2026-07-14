@@ -19,7 +19,7 @@
     .host{border:1px solid var(--line);background:#f6f8f9;color:var(--ink);padding:11px 12px;border-radius:12px;min-width:0;width:100%;outline:none}.host:focus{border-color:var(--orange)}.connect-btn{border:0;border-radius:12px;background:var(--ink);color:white;font-weight:750;padding:12px 16px;cursor:pointer}.connect-btn.on{background:#8a99a3}
     .safe-note{margin-top:11px;padding:10px 12px;background:#fff6ed;border:1px solid #ffd9b8;border-radius:12px;color:#995423;font-size:11px;line-height:1.5}
     .speed-head{display:flex;justify-content:space-between;align-items:end}.speed-value{font-size:30px;font-weight:850;color:var(--purple)}.speed-unit{font-size:12px;color:var(--muted);font-weight:600}.range{width:100%;accent-color:var(--orange);margin:14px 0 5px}.scale{display:flex;justify-content:space-between;color:var(--muted);font-size:10px}
-    .status-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}.stat{padding:12px;background:#f4f7f8;border-radius:14px;border:1px solid #e5ebee}.stat span{display:block;color:var(--muted);font-size:10px}.stat strong{display:block;margin-top:5px;font-size:14px}.stat strong.good{color:var(--green)}.sound-toggle{border:1px solid var(--line);background:#f5f7f8;color:var(--ink);border-radius:10px;padding:7px 10px;font-size:11px;font-weight:750;cursor:pointer}.sound-toggle.muted{background:#fff0f0;border-color:#ffcaca;color:var(--red)}
+    .status-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}.stat{padding:12px;background:#f4f7f8;border-radius:14px;border:1px solid #e5ebee}.stat span{display:block;color:var(--muted);font-size:10px}.stat strong{display:block;margin-top:5px;font-size:14px}.stat strong.good{color:var(--green)}.status-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.sound-toggle{border:1px solid var(--line);background:#f5f7f8;color:var(--ink);border-radius:10px;padding:7px 10px;font-size:11px;font-weight:750;cursor:pointer}.sound-toggle.muted{background:#fff0f0;border-color:#ffcaca;color:var(--red)}.sound-toggle.unsafe{background:#fff0f0;border-color:#ffcaca;color:var(--red)}
     .control-card{position:relative;overflow:hidden}.control-card:before{content:"";position:absolute;width:260px;height:260px;border-radius:50%;border:50px solid #4b569408;right:-120px;top:-100px;pointer-events:none}.control-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.action{font-weight:850}.heartbeat{font-size:11px;color:var(--muted)}
     .pad{display:grid;grid-template-columns:repeat(3,78px);grid-template-rows:repeat(3,70px);gap:10px;justify-content:center;margin:16px auto}.drive{border:1px solid var(--line);border-radius:18px;background:linear-gradient(145deg,#fff,#eef2f4);color:var(--ink);box-shadow:0 7px 14px #25343f14;cursor:pointer;font-weight:800;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;transition:.12s transform,.12s background}.drive b{font-size:22px;line-height:1}.drive small{font-size:10px;color:var(--muted)}.drive.pressed{transform:scale(.94);background:#fff0e4;border-color:var(--orange);color:var(--orange2)}.drive:disabled{opacity:.45;cursor:not-allowed}.forward{grid-column:2;grid-row:1}.left{grid-column:1;grid-row:2}.stop{grid-column:2;grid-row:2;background:var(--orange);color:#fff;border:0;border-radius:50%;box-shadow:0 8px 22px #ff9b5166}.stop small{color:#fff}.right{grid-column:3;grid-row:2}.backward{grid-column:2;grid-row:3}
     .turns{display:grid;grid-template-columns:1fr 1fr;gap:10px}.turn{border:1px solid #dfe1ef;background:#f4f4fb;color:var(--purple);border-radius:14px;padding:14px;cursor:pointer;font-weight:800}.turn.pressed{background:#e4e6f4;transform:scale(.97)}
@@ -28,7 +28,50 @@
     .lower{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:18px}.sensors{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}.sensor{background:#f5f7f8;border-radius:14px;padding:12px}.sensor span{font-size:10px;color:var(--muted)}.sensor strong{display:block;margin-top:6px;font-size:16px}
     .logbox{height:190px;background:#202d36;border-radius:15px;padding:12px;overflow:auto;color:#cbd5da;font:11px/1.7 ui-monospace,SFMono-Regular,monospace}.logline .time{color:#718590}.logline.tx{color:#ffd0aa}.logline.rx{color:#91e0b3}.log-actions{display:flex;gap:6px}.mini{border:1px solid var(--line);background:white;border-radius:9px;padding:6px 9px;color:var(--muted);font-size:10px;cursor:pointer}
     .toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,20px);background:var(--ink);color:white;padding:11px 16px;border-radius:12px;opacity:0;pointer-events:none;transition:.2s;box-shadow:var(--shadow);font-size:12px}.toast.show{opacity:1;transform:translate(-50%,0)}
-    @media(max-width:820px){.shell{padding:14px}.grid,.lower,.vision-layout{grid-template-columns:1fr}header{align-items:flex-start}.mode button{padding:8px 10px}.card{border-radius:18px}.connection{grid-template-columns:auto 1fr}.connect-btn{grid-column:1/-1}.sensors{grid-template-columns:repeat(2,1fr)}.resolution{width:100%;margin-left:0}}
+    /* Mission / LLM */
+    .mission-layout{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+    .chat-box{height:280px;overflow:auto;padding:10px;background:#f6f8f9;border-radius:14px;display:flex;flex-direction:column;gap:10px}
+    .chat-msg{max-width:80%;padding:10px 14px;border-radius:14px;font-size:12px;line-height:1.5;animation:msgIn .2s}
+    @keyframes msgIn{from{opacity:0;transform:translateY(8px)}}
+    .chat-msg.user{align-self:flex-end;background:var(--orange);color:#fff;border-bottom-right-radius:4px}
+    .chat-msg.system{align-self:flex-start;background:#fff;border:1px solid var(--line);border-bottom-left-radius:4px}
+    .chat-msg.pending{align-self:flex-start;background:#eef0f8;border:1px dashed #bcc3d8;color:var(--purple);font-style:italic}
+    .chat-msg.error{align-self:flex-start;background:#fff0f0;border:1px solid #ffcaca;color:var(--red)}
+    .chat-input-row{display:flex;gap:8px;margin-top:10px}
+    .chat-input{flex:1;border:1px solid var(--line);background:#f6f8f9;padding:10px 12px;border-radius:12px;font-size:12px;outline:none}
+    .chat-input:focus{border-color:var(--orange)}
+    .chat-send{border:0;border-radius:12px;background:var(--purple);color:white;padding:10px 14px;font-weight:750;font-size:12px;cursor:pointer}
+    .quick-chips{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px}
+    .chip{border:1px solid var(--line);background:white;border-radius:20px;padding:5px 10px;font-size:10px;color:var(--purple);cursor:pointer;transition:.12s}
+    .chip:hover{background:#eef0f8;border-color:var(--purple)}
+    .route-bar{display:flex;align-items:center;gap:6px;margin-top:8px}
+    .route-chip{border:1px solid var(--line);border-radius:8px;padding:5px 10px;font-size:10px;font-weight:700;cursor:pointer;background:white;color:var(--muted);transition:.12s}
+    .route-chip.sel{background:var(--purple);color:#fff;border-color:var(--purple)}
+    .route-go{border:0;border-radius:8px;background:var(--orange);color:white;padding:6px 12px;font-weight:750;font-size:10px;cursor:pointer}
+    .route-go:disabled{opacity:.4;cursor:not-allowed}
+    .report-row{display:flex;gap:6px;margin-top:8px;align-items:center}
+    .report-row input{border:1px solid var(--line);border-radius:10px;padding:6px 10px;font-size:11px;width:120px;outline:none}
+    .report-row button{border:0;border-radius:10px;background:var(--purple);color:white;padding:7px 12px;font-size:10px;cursor:pointer}
+    /* Nav progress */
+    .nav-progress{margin-top:8px}
+    .nav-progress .bar{height:6px;background:#e7ecee;border-radius:10px;overflow:hidden;margin-top:4px}
+    .nav-progress .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--purple),var(--orange));border-radius:10px;transition:width .3s}
+    .nav-progress .info{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:3px}
+    /* Task log timeline */
+    .timeline{max-height:320px;overflow:auto}
+    .tl-item{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid #eef1f3}
+    .tl-dot{width:22px;height:22px;min-width:22px;border-radius:50%;display:grid;place-items:center;font-size:10px;color:white;font-weight:800}
+    .tl-dot.nav{background:var(--purple)}.tl-dot.detection{background:var(--orange)}.tl-dot.sensor{background:var(--green)}.tl-dot.system{background:var(--muted)}
+    .tl-body{flex:1;min-width:0}
+    .tl-body .tl-title{font-size:11px;font-weight:700;color:var(--ink)}
+    .tl-body .tl-text{font-size:10px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .tl-body .tl-time{font-size:9px;color:var(--muted)}
+    .tl-empty{padding:30px;text-align:center;color:var(--muted);font-size:11px}
+    .tl-filters{display:flex;gap:4px;margin-bottom:8px}
+    .tl-filter{border:1px solid var(--line);background:white;border-radius:6px;padding:3px 8px;font-size:9px;cursor:pointer;color:var(--muted)}
+    .tl-filter.active{background:var(--purple);color:white;border-color:var(--purple)}
+    .tl-stats{font-size:10px;color:var(--muted);margin-bottom:6px}
+    @media(max-width:820px){.shell{padding:14px}.grid,.lower,.vision-layout,.mission-layout{grid-template-columns:1fr}header{align-items:flex-start}.mode button{padding:8px 10px}.card{border-radius:18px}.connection{grid-template-columns:auto 1fr}.connect-btn{grid-column:1/-1}.sensors{grid-template-columns:repeat(2,1fr)}.resolution{width:100%;margin-left:0}}
   </style>
 </head>
 <body>
@@ -49,8 +92,9 @@
           <input id="speed" class="range" type="range" min="10" max="100" step="10" value="50"><div class="scale"><span>低速 10%</span><span>最大 0.45 m/s</span></div>
         </article>
         <article class="card">
-          <div class="card-title"><div><div class="eyebrow">Vehicle</div><h2>系统状态</h2></div><button id="alertSound" class="sound-toggle" type="button" aria-pressed="true">🔊 告警声音：开</button></div>
+          <div class="card-title"><div><div class="eyebrow">Vehicle</div><h2>系统状态</h2></div><div class="status-actions"><button id="obstacleAvoidance" class="sound-toggle" type="button" aria-pressed="true">🛡️ 避障：开</button><button id="alertSound" class="sound-toggle" type="button" aria-pressed="true">🔊 告警声音：开</button></div></div>
           <div class="status-strip"><div class="stat"><span>控制模式</span><strong id="modeText">模拟</strong></div><div class="stat"><span>避障状态</span><strong id="obstacleStatus" class="good">安全</strong></div><div class="stat"><span>任务状态</span><strong id="taskStatus">待机</strong></div></div>
+          <div class="nav-progress"><div style="display:flex;justify-content:space-between"><span style="font-size:10px;color:var(--muted)">导航进度</span><span id="navStatusLabel" style="font-size:10px;color:var(--muted)">--</span></div><div class="bar"><i id="navBar"></i></div><div class="info"><span id="navRemain">剩余 --</span><span id="navStep">0/0</span></div></div>
         </article>
       </div>
       <article class="card control-card">
@@ -76,7 +120,7 @@
             <div id="visionPlaceholder" class="vision-placeholder">连接真实小车后<br>显示摄像头画面</div>
             <span class="live-badge">● LIVE</span><span id="targetBadge" class="target-badge">0 目标</span>
           </div>
-          <div class="vision-toolbar"><button id="rawFeed" class="active">原始画面</button><button id="overlayFeed">检测框叠加</button><span id="visionResolution" class="resolution">640 × 480</span></div>
+          <div class="vision-toolbar"><button id="rawFeed" class="active">原始画面</button><button id="overlayFeed">检测框叠加</button><button id="screenshotBtn" title="截图">📸</button><button id="trackingBtn" title="启动跟踪">🎯 跟踪</button><button id="autoCaptureBtn" title="自动截图">⏱ 自动</button><span id="visionResolution" class="resolution">640 × 480</span></div>
         </div>
         <div>
           <div class="vision-stats">
@@ -89,6 +133,59 @@
         </div>
       </div>
     </section>
+    <!-- ══════════════════════════════════════════ 任务指挥 + 日志 -->
+    <section class="card" style="margin-top:18px">
+      <div class="card-title">
+        <div style="display:flex;gap:8px;align-items:center">
+          <div class="eyebrow" style="margin-bottom:0">Mission</div>
+          <span style="font-size:10px">|</span>
+          <button id="missionChatTab" class="tl-filter active" style="font-size:10px;padding:4px 10px">🤖 LLM 指挥</button>
+          <button id="missionLogTab" class="tl-filter" style="font-size:10px;padding:4px 10px">📋 任务日志</button>
+        </div>
+        <span id="missionStatus" style="font-size:11px;color:var(--muted)">等待连接</span>
+      </div>
+      <!-- LLM 聊天视图 -->
+      <div id="missionChatView">
+        <div id="missionHistory" class="chat-box">
+          <div style="text-align:center;color:var(--muted);font-size:11px;padding:20px">输入自然语言指令，LLM 解析后执行安全工具<br>如"巡检 A、B、C"、"跟踪前面的人"、"立即停下"</div>
+        </div>
+        <div class="quick-chips" id="quickChips">
+          <span class="chip" data-text="巡检 A、B、C 三个点">巡检 A、B、C</span>
+          <span class="chip" data-text="跟踪前面的人">跟踪前面的人</span>
+          <span class="chip" data-text="停止跟踪">停止跟踪</span>
+          <span class="chip" data-text="你到哪个点了">当前状态</span>
+          <span class="chip" data-text="立即停下">立即停下</span>
+        </div>
+        <div class="route-bar">
+          <span style="font-size:10px;color:var(--muted)">巡检点:</span>
+          <span class="route-chip" data-route="A">A</span>
+          <span class="route-chip" data-route="B">B</span>
+          <span class="route-chip" data-route="C">C</span>
+          <button id="quickPatrol" class="route-go" disabled>一键巡检</button>
+          <span style="flex:1"></span>
+          <div class="report-row" style="margin-top:0">
+            <input id="reportTaskId" placeholder="task_id" style="font-size:10px;width:80px">
+            <button id="genReport">生成报告</button>
+          </div>
+        </div>
+        <div class="chat-input-row">
+          <input id="missionInput" class="chat-input" placeholder="输入指令，如'巡检ABC''跟踪前面的人''立即停下'">
+          <button id="missionSend" class="chat-send">发送</button>
+        </div>
+      </div>
+      <!-- 任务日志视图 -->
+      <div id="missionLogView" style="display:none">
+        <div class="tl-filters">
+          <span class="tl-filter active" data-filter="all">全部</span>
+          <span class="tl-filter" data-filter="nav">🧭 导航</span>
+          <span class="tl-filter" data-filter="detection">👁️ 检测</span>
+          <span class="tl-filter" data-filter="sensor">🌡️ 传感器</span>
+          <span class="tl-filter" data-filter="system">⚙️ 系统</span>
+        </div>
+        <div class="tl-stats" id="tlStats">日志 0 条 · 任务状态：待机</div>
+        <div id="timeline" class="timeline"><div class="tl-empty">暂无任务日志，连接小车并启动巡检后显示</div></div>
+      </div>
+    </section>
     <section class="lower">
       <article class="card"><div class="card-title"><div><div class="eyebrow">Sensors</div><h2>环境数据</h2></div><span style="font-size:11px;color:var(--muted)">模拟刷新</span></div><div class="sensors"><div class="sensor"><span>温度</span><strong id="temp">26.4°C</strong></div><div class="sensor"><span>湿度</span><strong id="humidity">45%</strong></div><div class="sensor"><span>PM2.5</span><strong id="pm">32</strong></div><div class="sensor"><span>烟雾</span><strong id="smoke">18 ppm</strong></div><div class="sensor"><span>光照</span><strong id="light">462 lux</strong></div><div class="sensor"><span>气压</span><strong id="pressure">1013 hPa</strong></div></div></article>
       <article class="card"><div class="card-title"><div><div class="eyebrow">Communication</div><h2>通信日志</h2></div><div class="log-actions"><button id="copyLog" class="mini">复制</button><button id="clearLog" class="mini">清空</button></div></div><div id="logs" class="logbox" aria-live="polite"></div></article>
@@ -98,15 +195,18 @@
   <script>
     const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
     let mode='mock', connected=false, ws=null, active='', pulse=null, beat=0, overlayEnabled=false, detections=[], imageWidth=640, imageHeight=480, visionFallbackAttempted=false;
-    let alertSoundEnabled=localStorage.getItem('icar.alertSoundEnabled')!=='false', alertSoundLastAt=0, audioContext=null, activeAlertOscillators=[];
+    let alertSoundEnabled=localStorage.getItem('icar.alertSoundEnabled')!=='false', obstacleAvoidanceEnabled=localStorage.getItem('icar.obstacleAvoidanceEnabled')!=='false', alertSoundLastAt=0, audioContext=null, activeAlertOscillators=[], autoCaptureInterval=null;
+    /* Mission state */
+    let missionHistory=[], selectedRoute=new Set(), missionLogView=false, navStatus={status:'',progress:0,distance_remain:''}, taskLogs=[], tlFilter='all', trackingActive=false;
     const names={forward:'前进中',backward:'后退中',left:'左移中',right:'右移中',turn_left:'左转中',turn_right:'右转中',stop:'已停止'};
     function now(){return new Date().toLocaleTimeString('zh-CN',{hour12:false})}
     function log(text,type=''){const d=document.createElement('div');d.className='logline '+type;d.innerHTML=`<span class="time">${now()}</span>　${text}`;$('#logs').append(d);$('#logs').scrollTop=$('#logs').scrollHeight}
     function toast(text){$('#toast').textContent=text;$('#toast').classList.add('show');setTimeout(()=>$('#toast').classList.remove('show'),1400)}
     function updateAlertSoundButton(){const button=$('#alertSound');button.classList.toggle('muted',!alertSoundEnabled);button.setAttribute('aria-pressed',String(alertSoundEnabled));button.textContent=alertSoundEnabled?'🔊 告警声音：开':'🔇 告警声音：关'}
+    function updateObstacleAvoidanceButton(){const button=$('#obstacleAvoidance');button.classList.toggle('unsafe',!obstacleAvoidanceEnabled);button.setAttribute('aria-pressed',String(obstacleAvoidanceEnabled));button.textContent=obstacleAvoidanceEnabled?'🛡️ 避障：开':'⚠️ 避障：关'}
     function stopAlertSound(){activeAlertOscillators.forEach(oscillator=>{try{oscillator.stop()}catch(_){}});activeAlertOscillators=[]}
     function playAlertSound(){if(!alertSoundEnabled||Date.now()-alertSoundLastAt<1800)return;alertSoundLastAt=Date.now();try{audioContext??=new (window.AudioContext||window.webkitAudioContext)();audioContext.resume();const oscillator=audioContext.createOscillator(),gain=audioContext.createGain();oscillator.type='square';oscillator.frequency.value=880;gain.gain.setValueAtTime(.08,audioContext.currentTime);gain.gain.exponentialRampToValueAtTime(.001,audioContext.currentTime+.25);oscillator.connect(gain).connect(audioContext.destination);activeAlertOscillators.push(oscillator);oscillator.onended=()=>activeAlertOscillators=activeAlertOscillators.filter(item=>item!==oscillator);oscillator.start();oscillator.stop(audioContext.currentTime+.25)}catch(_){}}
-    function setConnected(value){connected=value;$('#stateDot').className='dot'+(value?' on':'');$('#stateText').textContent=value?'已连接':'未连接';$('#connect').textContent=value?'断开':'连接';$('#connect').classList.toggle('on',value);$('#action').textContent=value?'待机':'等待连接';$$('[data-command],#stop').forEach(b=>b.disabled=!value);if(value&&mode==='real')startVision();else stopVision()}
+    function setConnected(value){connected=value;$('#stateDot').className='dot'+(value?' on':'');$('#stateText').textContent=value?'已连接':'未连接';$('#connect').textContent=value?'断开':'连接';$('#connect').classList.toggle('on',value);$('#action').textContent=value?'待机':'等待连接';$('#missionStatus').textContent=value?(mode==='real'?'LLM 就绪':'模拟模式'):'等待连接';$$('[data-command],#stop').forEach(b=>b.disabled=!value);if(value&&mode==='real')startVision();else stopVision()}
     function payload(cmd){return JSON.stringify({command:cmd,speed:+$('#speed').value/100})}
     function send(cmd,quiet=false){if(!connected)return;if(mode==='real'&&(!ws||ws.readyState!==1)){log('真实连接不可用，指令未发送','');return}const data=payload(cmd);if(mode==='real')ws.send(data);if(!quiet)log(`发送 ${data}`,'tx');if(mode==='mock'&&!quiet)setTimeout(()=>log(`模拟确认 command=${cmd} accepted=true`,'rx'),90)}
     function motion(cmd){const v=.45*(+$('#speed').value/100),a=1.2*(+$('#speed').value/100);let x=0,y=0,z=0;if(cmd==='forward')x=v;if(cmd==='backward')x=-v;if(cmd==='left')y=v;if(cmd==='right')y=-v;if(cmd==='turn_left')z=a;if(cmd==='turn_right')z=-a;$('#vx').textContent=`vx ${x.toFixed(2)}`;$('#vy').textContent=`vy ${y.toFixed(2)}`;$('#wz').textContent=`wz ${z.toFixed(2)}`;$('#motionBar').style.width=cmd==='stop'?'0':`${$('#speed').value}%`}
@@ -115,19 +215,46 @@
     function visionBase(){return ['127.0.0.1','localhost'].includes(location.hostname)?'http://127.0.0.1:8766':`http://${$('#host').value.trim()}:6500`}
     function startVision(){const base=visionBase();visionFallbackAttempted=false;$('#visionOverall').textContent='正在连接摄像头';$('#visionOverall').style.color='var(--muted)';$('#streamStatus').textContent='加载中';$('#visionPlaceholder').textContent='正在加载实时画面…';fetch(`${base}/health`).then(r=>r.json()).then(data=>{const camera=data.camera||{},useAnnotated=camera.annotated_ready&&!camera.raw_ready;const feed=useAnnotated?'yolo_video_feed':'video_feed';visionFallbackAttempted=useAnnotated;$('#visionFeed').src=`${base}/${feed}?t=${Date.now()}`;if(useAnnotated)$('#streamStatus').textContent='标注画面加载中';else if(camera.raw_ready)$('#streamStatus').textContent='原始画面加载中'}).catch(()=>{$('#visionFeed').src=`${base}/video_feed?t=${Date.now()}`});fetch(`${base}/yolo_detailed_status`).then(r=>r.json()).then(data=>{$('#detectorStatus').textContent=data.enabled?(data.status||'已启用'):'未启用 · 等待检测节点'}).catch(()=>{$('#detectorStatus').textContent='状态查询失败'})}
     function stopVision(){$('#visionFeed').removeAttribute('src');$('#visionFeed').style.display='none';$('#visionPlaceholder').style.display='block';$('#visionPlaceholder').innerHTML='连接真实小车后<br>显示摄像头画面';$('#visionOverall').textContent='等待真车连接';$('#visionOverall').style.color='var(--muted)';$('#streamStatus').textContent='未连接';detections=[];renderDetections();drawOverlay()}
-    function subscribeVision(){['detections','capture_status','tracking_status','obstacle_status','safety_alarm','task_status'].forEach(topic=>ws.send(JSON.stringify({subscribe:topic})))}
-    function handleMessage(event){let data;try{data=JSON.parse(event.data)}catch(_){log(`收到 ${event.data}`,'rx');return}const topic=data.topic||'';if(topic==='detections'){detections=Array.isArray(data.detections)?data.detections:[];imageWidth=Number(data.image_width)||640;imageHeight=Number(data.image_height)||480;$('#visionResolution').textContent=`${imageWidth} × ${imageHeight}`;renderDetections();drawOverlay();return}if(topic==='capture_status'){$('#captureStatus').textContent=data.error?`错误：${data.error}`:(data.event==='image_saved'?'截图已保存':(data.event||'已更新'));return}if(topic==='tracking_status'){$('#trackingStatus').textContent=data.state||data.status||data.event||'已更新';return}if(topic==='obstacle_status'){const danger=data.risk_level==='danger'||data.action==='stop';const warning=data.risk_level==='warning';if(danger||warning)playAlertSound();$('#obstacleStatus').textContent=danger?`危险 ${Number(data.min_distance||0).toFixed(2)}m`:(warning?'警告':'安全');$('#obstacleStatus').className=danger?'':(warning?'':'good');return}if(topic==='safety_alarm'){const active=Boolean(data.active),water=data.hazard_type==='water',visual=data.hazard_type==='visual_obstacle',confidence=Math.round(Number(data.confidence||0)*100);if(active)playAlertSound();$('#obstacleStatus').textContent=active?(water?`积水告警 ${confidence}%`:(visual?`视觉障碍 ${confidence}%`:`报警 ${Number(data.distance||0).toFixed(2)}m`)):'安全';$('#obstacleStatus').className=active?'':'good';log(active?(water?'检测到积水：已告警并请求重规划':(visual?'检测到视觉障碍：已告警并请求重规划':'避障报警已触发')):(water?'积水告警已解除':(visual?'视觉障碍告警已解除':'避障报警已解除')),active?'':'rx');return}if(topic==='task_status'){$('#taskStatus').textContent=data.status||'待机';return}if(topic!=='subscription')log(`收到 ${event.data}`,'rx')}
+    function subscribeVision(){['detections','capture_status','tracking_status','obstacle_status','safety_alarm','task_status','nav_status','task_log','llm_response','sensor_env_data','sensor_alert'].forEach(topic=>ws.send(JSON.stringify({subscribe:topic})))}
+    function handleMessage(event){let data;try{data=JSON.parse(event.data)}catch(_){log(`收到 ${event.data}`,'rx');return}const topic=data.topic||'';if(topic==='detections'){detections=Array.isArray(data.detections)?data.detections:[];imageWidth=Number(data.image_width)||640;imageHeight=Number(data.image_height)||480;$('#visionResolution').textContent=`${imageWidth} × ${imageHeight}`;renderDetections();drawOverlay();return}if(topic==='capture_status'){$('#captureStatus').textContent=data.error?`错误：${data.error}`:(data.event==='image_saved'?'截图已保存':(data.event||'已更新'));return}if(topic==='tracking_status'){$('#trackingStatus').textContent=data.state||data.status||data.event||'已更新';return}if(topic==='obstacle_status'){const danger=data.risk_level==='danger'||data.action==='stop';const warning=data.risk_level==='warning';if(danger||warning)playAlertSound();$('#obstacleStatus').textContent=danger?`危险 ${Number(data.min_distance||0).toFixed(2)}m`:(warning?'警告':'安全');$('#obstacleStatus').className=danger?'':(warning?'':'good');return}if(topic==='safety_alarm'){const active=Boolean(data.active),water=data.hazard_type==='water',visual=data.hazard_type==='visual_obstacle',confidence=Math.round(Number(data.confidence||0)*100);if(active)playAlertSound();$('#obstacleStatus').textContent=active?(water?`积水告警 ${confidence}%`:(visual?`视觉障碍 ${confidence}%`:`报警 ${Number(data.distance||0).toFixed(2)}m`)):'安全';$('#obstacleStatus').className=active?'':'good';log(active?(water?'检测到积水：已告警并请求重规划':(visual?'检测到视觉障碍：已告警并请求重规划':'避障报警已触发')):(water?'积水告警已解除':(visual?'视觉障碍告警已解除':'避障报警已解除')),active?'':'rx');return}if(topic==='task_status'){$('#taskStatus').textContent=data.status||'待机';renderTimeline();return}if(topic==='sensor_env_data'){if(data.temperature!==undefined)$('#temp').textContent=Number(data.temperature).toFixed(1)+'°C';if(data.humidity!==undefined)$('#humidity').textContent=Math.round(Number(data.humidity))+'%';if(data.pm25!==undefined)$('#pm').textContent=Math.round(Number(data.pm25));if(data.smoke!==undefined)$('#smoke').textContent=Math.round(Number(data.smoke))+' ppm';if(data.light!==undefined)$('#light').textContent=Math.round(Number(data.light))+' lux';if(data.pressure!==undefined)$('#pressure').textContent=Math.round(Number(data.pressure))+' hPa';return}if(topic==='sensor_alert'){playAlertSound();log('传感器告警: '+data.sensor_type+' '+Number(data.current_value)+' > '+Number(data.threshold),'rx');return}if(topic==='nav_status'){updateNavStatus(data);return}if(topic==='task_log'){addTaskLog({cat:categorizeLog(data.event_type||''),summary:data.event_type||(''+(data.data_json||'')),time:data.timestamp||'',severity:data.severity||''});return}if(topic==='llm_response'){handleLlmResponse(data);return}if(topic==='parse_task_result'){missionHistory=missionHistory.filter(m=>m.type!=='pending');if(data.success)addChatEntry('system','任务解析成功，可下发至 task_manager');else addChatEntry('error','解析失败: '+(data.error_msg||'未知错误'));renderChat();return}if(topic==='generate_report_result'){missionHistory=missionHistory.filter(m=>m.type!=='pending');if(data.success)addChatEntry('report',data.report_text||'');else addChatEntry('error','报告生成失败: '+(data.error_msg||'未知错误'));renderChat();return}if(topic!=='subscription')log(`收到 ${event.data}`,'rx')}
     function renderDetections(){const list=$('#detectionList');$('#targetBadge').textContent=`${detections.length} 目标`;$('#detectionUpdated').textContent=detections.length?now():'尚无数据';if(!detections.length){list.innerHTML='<div class="empty-detection">当前没有检测结果；请确认车端视觉节点已启动</div>';return}list.innerHTML=detections.slice(0,12).map(item=>`<div class="detection-item"><span>${escapeHtml(item.class_name||'unknown')}</span><small>${(100*(Number(item.confidence)||0)).toFixed(1)}%</small></div>`).join('')}
     function escapeHtml(value){const span=document.createElement('span');span.textContent=String(value);return span.innerHTML}
     function drawOverlay(){const canvas=$('#visionOverlay'),frame=$('#cameraFrame'),rect=frame.getBoundingClientRect(),ratio=window.devicePixelRatio||1;canvas.width=Math.max(1,Math.round(rect.width*ratio));canvas.height=Math.max(1,Math.round(rect.height*ratio));const ctx=canvas.getContext('2d');ctx.scale(ratio,ratio);ctx.clearRect(0,0,rect.width,rect.height);if(!overlayEnabled)return;ctx.lineWidth=2;ctx.font='12px sans-serif';detections.forEach((item,index)=>{const x=(Number(item.x_min)||0)/imageWidth*rect.width,y=(Number(item.y_min)||0)/imageHeight*rect.height,w=((Number(item.x_max)||0)-(Number(item.x_min)||0))/imageWidth*rect.width,h=((Number(item.y_max)||0)-(Number(item.y_min)||0))/imageHeight*rect.height,color=index%2?'#ff9b51':'#7e8de0';ctx.strokeStyle=color;ctx.fillStyle=color;ctx.strokeRect(x,y,w,h);const label=`${item.class_name||'unknown'} ${(100*(Number(item.confidence)||0)).toFixed(0)}%`;const tw=ctx.measureText(label).width+10;ctx.fillRect(x,Math.max(0,y-20),tw,20);ctx.fillStyle='#fff';ctx.fillText(label,x+5,Math.max(14,y-6))})}
-    function disconnect(){release();if(ws){ws.onclose=null;ws.close();ws=null}setConnected(false);log('连接已断开')}
-    $('#connect').onclick=()=>{if(connected){disconnect();return}if(mode==='mock'){setConnected(true);log('模拟 WebSocket 连接成功','rx');return}$('#stateDot').className='dot busy';$('#stateText').textContent='连接中';try{const localPreview=['127.0.0.1','localhost'].includes(location.hostname);const target=localPreview?'ws://127.0.0.1:8765':`ws://${$('#host').value.trim()}:6500/ws/control`;if(localPreview)log(`通过本机安全代理连接 ${$('#host').value.trim()}`);ws=new WebSocket(target);ws.onopen=()=>{setConnected(true);subscribeVision();log('真实 WebSocket 连接成功','rx')};ws.onmessage=handleMessage;ws.onerror=()=>{log('WebSocket 连接错误');toast('连接失败，请检查小车网络')};ws.onclose=()=>{setConnected(false);log('WebSocket 已关闭')}}catch(e){setConnected(false);log(`连接失败 ${e.message}`)}};
+    /* ════════════════════════════════════════ Mission / LLM ════════════════════════════════════════ */
+    function addChatEntry(type,text,data=null){missionHistory.push({type,text,data,id:Date.now()});renderChat()}
+    function renderChat(){const box=$('#missionHistory');if(!missionHistory.length){box.innerHTML='<div style="text-align:center;color:var(--muted);font-size:11px;padding:20px">输入自然语言指令，LLM 解析后执行安全工具</div>';return}
+    box.innerHTML=missionHistory.map(m=>{let cls='system',icon='';if(m.type==='user')cls='user';else if(m.type==='pending')cls='pending';else if(m.type==='error')cls='error';else if(m.type==='tool')icon='🔧 ';else if(m.type==='report')icon='📄 ';return`<div class="chat-msg ${cls}">${icon}${escapeHtml(m.text)}</div>`}).join('');box.scrollTop=box.scrollHeight}
+    function sendMissionCommand(text){if(!text.trim())return;addChatEntry('user',text);addChatEntry('pending','正在理解并执行…');$('#missionInput').value='';
+      if(mode==='mock'){setTimeout(()=>{missionHistory.pop();addChatEntry('system','[模拟] 安全规则已接收指令: "${text}"。在真实模式下会通过 LLM 工具通道执行。')},600);return}
+      if(!ws||ws.readyState!==1){missionHistory.pop();addChatEntry('error','未连接小车，无法发送指令');return}
+      const id='web_'+Date.now().toString(36);ws.send(JSON.stringify({action:'llm_command',request_id:id,input_text:text}));log(`LLM 指挥发送: ${text}`,'tx')}
+    function sendQuickPatrol(){if(!selectedRoute.size||!connected||mode==='mock')return;const route=[...selectedRoute].sort();ws.send(JSON.stringify({action:'task_request',task:{task_type:'patrol',route,actions:['navigate','detect','collect']}}));addChatEntry('user',`一键巡检: ${route.join(' → ')}`);addChatEntry('tool','任务已下发至 task_manager，路线: '+route.join(' → '));log(`一键巡检已下发: ${route.join(',')}`,'tx');renderChat()}
+    function sendGenerateReport(){const id=$('#reportTaskId').value.trim();if(!id||!connected||mode==='mock')return;ws.send(JSON.stringify({action:'generate_report',task_id:id}));addChatEntry('user','请求报告: '+id);addChatEntry('pending','正在生成报告…');log(`请求生成报告 task_id=${id}`,'tx')}
+    function handleLlmResponse(data){const success=data.success!==false,reply=data.reply||data.message||data.error_msg||(success?'执行完成':'执行失败'),tool=data.tool_name||'';missionHistory=missionHistory.filter(m=>m.type!=='pending');if(tool)addChatEntry('tool',`[${tool}] ${reply}`);else if(data.report_text)addChatEntry('report',data.report_text);else addChatEntry(success?'system':'error',reply);renderChat()}
+    /* Task log timeline */
+    function addTaskLog(log){taskLogs.push(log);if(taskLogs.length>500)taskLogs.shift();renderTimeline()}
+    function renderTimeline(){const tl=$('#timeline');$('#tlStats').textContent=`日志 ${taskLogs.length} 条 · 任务状态：${$('#taskStatus').textContent}`;let filtered=taskLogs;if(tlFilter!=='all')filtered=taskLogs.filter(l=>l.cat===tlFilter);if(!filtered.length){tl.innerHTML='<div class="tl-empty">暂无匹配日志</div>';return}
+    const icons={nav:'📍',detection:'👁️',sensor:'🌡️',system:'⚙️'},titles={nav:'导航',detection:'检测',sensor:'传感器',system:'系统'};
+    tl.innerHTML=[...filtered].reverse().slice(0,60).map(l=>`<div class="tl-item"><div class="tl-dot ${l.cat||'system'}">${icons[l.cat]||'⚙️'}</div><div class="tl-body"><div class="tl-title">${titles[l.cat]||l.cat||'系统'}</div><div class="tl-text">${escapeHtml(l.summary||'')}</div><div class="tl-time">${l.time||''}</div></div></div>`).join('')}
+    function categorizeLog(eventType){if(/nav|pose|goal|arrive/i.test(eventType))return'nav';if(/detect|vision|track|camera/i.test(eventType))return'detection';if(/sensor|env|temp|humid/i.test(eventType))return'sensor';return'system'}
+    /* Tracking + Screenshot */
+    function toggleTracking(){if(!connected||mode==='mock')return toast('仅真实模式可用');trackingActive=!trackingActive;$('#trackingBtn').textContent=trackingActive?'🎯 停止跟踪':'🎯 跟踪';$('#trackingBtn').classList.toggle('active',trackingActive);ws.send(JSON.stringify({action:'tracking',command:trackingActive?'start':'stop',target_classes:['person']}));log(trackingActive?'启动人员跟踪':'停止人员跟踪','tx')}
+    function sendScreenshot(){if(!connected||mode==='mock')return toast('仅真实模式可用');ws.send(JSON.stringify({action:'capture_once',tag:'web'}));log('截图指令已发送','tx');toast('截图指令已发送')}
+    function toggleAutoCapture(){if(!connected||mode==='mock')return toast('仅真实模式可用');const btn=$('#autoCaptureBtn');if(autoCaptureInterval){clearInterval(autoCaptureInterval);autoCaptureInterval=null;btn.classList.remove('active');btn.textContent='⏱ 自动';log('自动截图已停止');return}autoCaptureInterval=setInterval(()=>ws.send(JSON.stringify({action:'capture_once',tag:'auto'})),5000);btn.classList.add('active');btn.textContent='⏱ 自动(5s)';log('自动截图已启动(5s间隔)')}
+    /* Nav status */
+    function updateNavStatus(data){navStatus={status:data.status||'',progress:Number(data.progress||0),distance_remain:Number(data.distance_remain||0)};$('#navBar').style.width=navStatus.progress+'%';$('#navStatusLabel').textContent=navStatus.status||'--';$('#navRemain').textContent='剩余 '+(navStatus.distance_remain?navStatus.distance_remain.toFixed(2)+'m':'--');$('#navStep').textContent=navStatus.progress?Math.round(navStatus.progress)+'%':''}
+
+    function disconnect(){release();if(autoCaptureInterval)clearInterval(autoCaptureInterval);autoCaptureInterval=null;trackingActive=false;$("#trackingBtn").textContent="🎯 跟踪";$("#trackingBtn").classList.remove("active");if(ws){ws.onclose=null;ws.close();ws=null}setConnected(false);log('连接已断开')}
+    $('#connect').onclick=()=>{if(connected){disconnect();return}if(mode==='mock'){setConnected(true);log('模拟 WebSocket 连接成功','rx');return}$('#stateDot').className='dot busy';$('#stateText').textContent='连接中';try{const localPreview=['127.0.0.1','localhost'].includes(location.hostname);const target=localPreview?'ws://127.0.0.1:8765':`ws://${$('#host').value.trim()}:6500/ws/control`;if(localPreview)log(`通过本机安全代理连接 ${$('#host').value.trim()}`);ws=new WebSocket(target);ws.onopen=()=>{setConnected(true);subscribeVision();syncAlertSound();syncObstacleAvoidance();log('真实 WebSocket 连接成功','rx')};ws.onmessage=handleMessage;ws.onerror=()=>{log('WebSocket 连接错误');toast('连接失败，请检查小车网络')};ws.onclose=()=>{setConnected(false);log('WebSocket 已关闭')}}catch(e){setConnected(false);log(`连接失败 ${e.message}`)}};
     $('#mockMode').onclick=()=>{if(connected)disconnect();mode='mock';$('#mockMode').classList.add('active');$('#realMode').classList.remove('active');$('#modeText').textContent='模拟';$('#safeNote').textContent='当前为安全模拟模式：不会向真车发送任何指令。';$('#safeNote').style.background='#fff6ed';log('已切换到安全模拟模式')};
     $('#realMode').onclick=()=>{if(connected)disconnect();if(!confirm('真实模式会向小车发送运动指令。请确认车轮架空或周围安全。'))return;mode='real';$('#realMode').classList.add('active');$('#mockMode').classList.remove('active');$('#modeText').textContent='真实';$('#safeNote').textContent='真实控制已启用：长按运动、松手即停，断线由车端看门狗停车。';$('#safeNote').style.background='#ffeaea';log('已切换到真实小车模式')};
     $$('[data-command]').forEach(b=>{b.disabled=true;b.addEventListener('pointerdown',e=>{e.preventDefault();b.setPointerCapture(e.pointerId);press(b)});b.addEventListener('pointerup',()=>release());b.addEventListener('pointercancel',()=>release());b.addEventListener('lostpointercapture',()=>release())});
     $('#stop').disabled=true;$('#stop').onclick=()=>release();
     $('#speed').oninput=()=>{const p=+$('#speed').value;$('#speedValue').textContent=p;$('.speed-unit').textContent=`% · ${(.45*p/100).toFixed(2)} m/s`;if(active){send(active);motion(active)}};
-    $('#alertSound').onclick=()=>{alertSoundEnabled=!alertSoundEnabled;localStorage.setItem('icar.alertSoundEnabled',String(alertSoundEnabled));if(!alertSoundEnabled)stopAlertSound();updateAlertSoundButton();toast(alertSoundEnabled?'告警声音已开启':'告警声音已关闭')};updateAlertSoundButton();
+    function syncAlertSound(){if(mode==='real'&&ws?.readyState===WebSocket.OPEN)ws.send(JSON.stringify({action:'set_alert_sound',enabled:alertSoundEnabled}))}
+    function syncObstacleAvoidance(){if(mode==='real'&&ws?.readyState===WebSocket.OPEN)ws.send(JSON.stringify({action:'set_obstacle_avoidance',enabled:obstacleAvoidanceEnabled}))}
+    $('#alertSound').onclick=()=>{alertSoundEnabled=!alertSoundEnabled;localStorage.setItem('icar.alertSoundEnabled',String(alertSoundEnabled));if(!alertSoundEnabled)stopAlertSound();syncAlertSound();updateAlertSoundButton();toast(alertSoundEnabled?'告警声音已开启':'告警声音已关闭')};updateAlertSoundButton();
+    $('#obstacleAvoidance').onclick=()=>{obstacleAvoidanceEnabled=!obstacleAvoidanceEnabled;localStorage.setItem('icar.obstacleAvoidanceEnabled',String(obstacleAvoidanceEnabled));syncObstacleAvoidance();updateObstacleAvoidanceButton();toast(obstacleAvoidanceEnabled?'避障拦截已开启':'避障拦截已关闭，请确认周边安全')};updateObstacleAvoidanceButton();
     const keyboardCommands={ArrowUp:'forward',ArrowDown:'backward',ArrowLeft:'left',ArrowRight:'right',a:'turn_left',d:'turn_right'};
     function keyboardCommand(event){if(event.target instanceof HTMLInputElement||event.target instanceof HTMLTextAreaElement||event.target?.isContentEditable)return null;return keyboardCommands[event.key]||keyboardCommands[event.key.toLowerCase()]||null}
     document.addEventListener('keydown',event=>{const command=keyboardCommand(event);if(!command)return;event.preventDefault();if(event.repeat||active)return;const button=$(`[data-command="${command}"]`);if(button&&!button.disabled)press(button)});
@@ -137,6 +264,20 @@
     $('#clearLog').onclick=()=>{$('#logs').innerHTML='';log('日志已清空')};$('#copyLog').onclick=async()=>{await navigator.clipboard.writeText($('#logs').innerText);toast('日志已复制')};
     document.addEventListener('visibilitychange',()=>{if(document.hidden)release()});window.addEventListener('blur',()=>release());window.addEventListener('beforeunload',()=>{if(connected)send('stop',true)});
     setInterval(()=>{if(mode!=='mock')return;$('#temp').textContent=(26+Math.random()).toFixed(1)+'°C';$('#humidity').textContent=Math.round(43+Math.random()*5)+'%';$('#pm').textContent=Math.round(28+Math.random()*7);$('#smoke').textContent=Math.round(15+Math.random()*6)+' ppm';$('#light').textContent=Math.round(450+Math.random()*25)+' lux';$('#pressure').textContent=Math.round(1011+Math.random()*4)+' hPa'},2000);
+    /* Mission UI wiring */
+    $('#missionChatTab').onclick=()=>{missionLogView=false;$('#missionChatTab').classList.add('active');$('#missionLogTab').classList.remove('active');$('#missionChatView').style.display='block';$('#missionLogView').style.display='none'};
+    $('#missionLogTab').onclick=()=>{missionLogView=true;$('#missionLogTab').classList.add('active');$('#missionChatTab').classList.remove('active');$('#missionChatView').style.display='none';$('#missionLogView').style.display='block';renderTimeline()};
+    $('#missionSend').onclick=()=>sendMissionCommand($('#missionInput').value);
+    $('#missionInput').addEventListener('keydown',e=>{if(e.key==='Enter')sendMissionCommand($('#missionInput').value)});
+    $$('#quickChips .chip').forEach(c=>c.onclick=()=>{const t=c.dataset.text;$('#missionInput').value=t;sendMissionCommand(t)});
+    $$('.route-chip').forEach(c=>c.onclick=()=>{const r=c.dataset.route;if(selectedRoute.has(r))selectedRoute.delete(r);else selectedRoute.add(r);c.classList.toggle('sel',selectedRoute.has(r));$('#quickPatrol').disabled=!selectedRoute.size});
+    $('#quickPatrol').onclick=sendQuickPatrol;
+    $('#genReport').onclick=sendGenerateReport;
+    $('#reportTaskId').addEventListener('keydown',e=>{if(e.key==='Enter')sendGenerateReport()});
+    $$('.tl-filter').forEach(f=>f.onclick=()=>{tlFilter=f.dataset.filter;$$('.tl-filter').forEach(x=>x.classList.remove('active'));f.classList.add('active');renderTimeline()});
+    $('#screenshotBtn').onclick=sendScreenshot;
+    $('#trackingBtn').onclick=toggleTracking;
+    $('#autoCaptureBtn').onclick=toggleAutoCapture;
     log('控制模拟器已就绪');log('当前为安全模拟模式，不会连接真车');
   </script>
 </body>

@@ -155,6 +155,9 @@ class CarController extends ChangeNotifier {
   bool _alertSoundEnabled = true;
   bool get alertSoundEnabled => _alertSoundEnabled;
 
+  bool _obstacleAvoidanceEnabled = true;
+  bool get obstacleAvoidanceEnabled => _obstacleAvoidanceEnabled;
+
   DateTime? _lastAlertSoundAt;
 
   void _playAlertSound() {
@@ -187,6 +190,7 @@ class CarController extends ChangeNotifier {
     bool? autoReconnect,
     bool? hapticEnabled,
     bool? alertSoundEnabled,
+    bool? obstacleAvoidanceEnabled,
   }) async {
     final oldMode = _connectionMode;
     final wasConnected = isConnected;
@@ -242,6 +246,21 @@ class CarController extends ChangeNotifier {
     }
     if (alertSoundEnabled != null) {
       _alertSoundEnabled = alertSoundEnabled;
+      if (!isCloudMode && _service.isConnected) {
+        _service.sendJson({
+          'action': 'set_alert_sound',
+          'enabled': alertSoundEnabled,
+        });
+      }
+    }
+    if (obstacleAvoidanceEnabled != null) {
+      _obstacleAvoidanceEnabled = obstacleAvoidanceEnabled;
+      if (!isCloudMode && _service.isConnected) {
+        _service.sendJson({
+          'action': 'set_obstacle_avoidance',
+          'enabled': obstacleAvoidanceEnabled,
+        });
+      }
     }
 
     if (wasConnected && needReconnect) {
@@ -273,6 +292,10 @@ class CarController extends ChangeNotifier {
   /// 最新截图状态
   CaptureStatus? _latestCaptureStatus;
   CaptureStatus? get latestCaptureStatus => _latestCaptureStatus;
+
+  /// Latest structured safety event, including automatic hazard evidence.
+  SafetyAlarm? _latestSafetyAlarm;
+  SafetyAlarm? get latestSafetyAlarm => _latestSafetyAlarm;
 
   /// 视觉检测流
   Stream<DetectionArray> get detectionStream => _service.detectionStream;
@@ -891,6 +914,7 @@ class CarController extends ChangeNotifier {
   }
 
   void _onSafetyAlarm(SafetyAlarm alarm) {
+    _latestSafetyAlarm = alarm;
     if (!alarm.active) return;
     _playAlertSound();
     _addMessage(

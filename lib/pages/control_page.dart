@@ -314,7 +314,7 @@ class _ControlPageState extends State<ControlPage> with WidgetsBindingObserver {
                 style: const TextStyle(color: AppColors.darkNavy, fontSize: 14),
               ),
               Text(
-                '${(_ctrl.speed * 1.5).toStringAsFixed(1)} m/s',
+                '${(_ctrl.speed * 0.45).toStringAsFixed(2)} m/s',
                 style: const TextStyle(
                   color: AppColors.bluePurple,
                   fontSize: 14,

@@ -63,22 +63,22 @@ class ObstacleScanLogicTest(unittest.TestCase):
             range_max=12.0,
         )
 
-    def test_front_obstacle_at_035m_is_danger_stop(self):
+    def test_front_obstacle_at_035m_is_warning_slow_down(self):
         result = self.classify([2.0] * 16 + [0.35] + [2.0] * 20)
 
         self.assertTrue(result["is_obstacle"])
         self.assertAlmostEqual(result["min_distance"], 0.35)
         self.assertEqual(result["direction"], "front")
-        self.assertEqual(result["risk_level"], "danger")
-        self.assertEqual(result["action"], "stop")
-
-    def test_front_obstacle_at_08m_is_warning_slow_down(self):
-        result = self.classify([2.0] * 17 + [0.8] + [2.0] * 19)
-
-        self.assertTrue(result["is_obstacle"])
-        self.assertAlmostEqual(result["min_distance"], 0.8)
         self.assertEqual(result["risk_level"], "warning")
         self.assertEqual(result["action"], "slow_down")
+
+    def test_front_obstacle_at_02m_is_danger_stop(self):
+        result = self.classify([2.0] * 17 + [0.2] + [2.0] * 19)
+
+        self.assertTrue(result["is_obstacle"])
+        self.assertAlmostEqual(result["min_distance"], 0.2)
+        self.assertEqual(result["risk_level"], "danger")
+        self.assertEqual(result["action"], "stop")
 
     def test_front_clear_distance_is_safe_none(self):
         result = self.classify([1.5] * 37)
@@ -98,7 +98,7 @@ class ObstacleScanLogicTest(unittest.TestCase):
 
     def test_rotated_laser_mount_uses_pi_as_vehicle_front(self):
         ranges = [2.0] * 37
-        ranges[0] = 0.4
+        ranges[0] = 0.2
         result = self.module.classify_front_scan(
             ranges=ranges,
             angle_min=-math.pi,
@@ -109,7 +109,7 @@ class ObstacleScanLogicTest(unittest.TestCase):
         )
 
         self.assertTrue(result["is_obstacle"])
-        self.assertAlmostEqual(result["min_distance"], 0.4)
+        self.assertAlmostEqual(result["min_distance"], 0.2)
         self.assertEqual(result["risk_level"], "danger")
         self.assertEqual(result["action"], "stop")
 
@@ -119,12 +119,12 @@ class ObstacleScanLogicTest(unittest.TestCase):
         ranges[16] = float("inf")
         ranges[17] = 0.1
         ranges[18] = 20.0
-        ranges[19] = 0.8
+        ranges[19] = 0.35
 
         result = self.classify(ranges)
 
         self.assertTrue(result["is_obstacle"])
-        self.assertAlmostEqual(result["min_distance"], 0.8)
+        self.assertAlmostEqual(result["min_distance"], 0.35)
         self.assertEqual(result["risk_level"], "warning")
         self.assertEqual(result["action"], "slow_down")
 
