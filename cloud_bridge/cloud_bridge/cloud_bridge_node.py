@@ -169,12 +169,18 @@ class CloudBridgeNode(Node):
         self._water_proc = None
         self._water_proc_lock = threading.Lock()
         if self.get_parameter("video_enabled").value:
+            # Separate MQTT client for video — never blocks control
+            self._video_mqtt = self._create_mqtt_client()
+            if user:
+                self._video_mqtt.username_pw_set(user, pw)
+            self._video_mqtt.connect_async(host, port, keepalive=30)
+            self._video_mqtt.loop_start()
             self._video_thread = threading.Thread(
                 target=self._video_grabber, daemon=True
             )
             self._video_thread.start()
 
-        # ── MQTT ──
+        # ── MQTT (控制) ──
         self.mqtt = self._create_mqtt_client()
         if user:
             self.mqtt.username_pw_set(user, pw)
@@ -725,15 +731,14 @@ class CloudBridgeNode(Node):
                 self._video_stop.wait(5)
 
     def _publish_mqtt_binary(self, topic, data: bytes):
-        """Publish binary payload (JPEG frame) to MQTT."""
+        """Publish binary payload (JPEG frame) via dedicated video MQTT client."""
+        client = getattr(self, "_video_mqtt", None) or self.mqtt
         try:
-            info = self.mqtt.publish(topic, data, qos=0)
+            info = client.publish(topic, data, qos=0)
             if getattr(info, "rc", 0) != 0:
-                self.get_logger().warn(
-                    f"MQTT 视频帧发送排队失败: topic={topic}, rc={info.rc}"
-                )
-        except Exception as e:
-            self.get_logger().warn(f"MQTT 视频帧发送失败: {e}")
+                pass  # silently drop frames when queue full
+        except Exception:
+            pass
 
     def _telemetry_due(self, key, force=False):
         now = time.monotonic()
@@ -807,6 +812,12 @@ class CloudBridgeNode(Node):
     def destroy_node(self):
         if hasattr(self, "_video_stop"):
             self._video_stop.set()
+        if hasattr(self, "_video_mqtt") and self._video_mqtt is not None:
+            try:
+                self._video_mqtt.loop_stop()
+                self._video_mqtt.disconnect()
+            except Exception:
+                pass
         if hasattr(self, "cloud_cmd_vel_pub"):
             self._stop_cloud_motion("节点关闭")
         if hasattr(self, "mqtt"):

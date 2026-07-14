@@ -224,9 +224,14 @@ class RobotTools:
         return {"success": True, "message": f"Tracking stopped: {reason}"}
 
     def move_robot(
-        self, direction: str, duration_sec: float = 1.0, speed: float = 0.12
+        self, direction: str, duration_sec: float = 0.0, speed: float = 0.2,
+        distance_m: float = 0.0,
     ) -> dict:
-        """Perform one deliberately short, low-speed movement via velocity_mux."""
+        """Perform one short, low-speed movement via velocity_mux.
+
+        Either duration_sec or distance_m can be specified. If distance_m is
+        given, duration_sec is computed automatically from distance / speed.
+        """
         if self.llm_motion_publisher is None:
             return {"success": False, "message": "ROS2 node not initialized, cannot move"}
         vectors = {
@@ -240,8 +245,11 @@ class RobotTools:
         direction = str(direction).strip().lower()
         if direction not in vectors:
             return {"success": False, "message": f"unsupported move direction: {direction}"}
-        duration = max(0.2, min(float(duration_sec), 3.0))
-        velocity = max(0.05, min(float(speed), 0.18))
+        velocity = max(0.05, min(float(speed), 0.25))
+        if float(distance_m) > 0.0:
+            duration = max(0.2, min(float(distance_m) / velocity, 10.0))
+        else:
+            duration = max(0.2, min(float(duration_sec), 5.0))
         self._cancel_motion()
         cancelled = threading.Event()
         with self._motion_lock:
