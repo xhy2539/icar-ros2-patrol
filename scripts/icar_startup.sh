@@ -79,6 +79,35 @@ docker exec autodrive_ros2 pkill -f \
   '[/]navigation/lib/navigation/obstacle_avoid_node' 2>/dev/null || true
 sleep 3
 
+# ── 彻底清理所有 iCar 进程（避免重启时僵尸堆积）──
+echo "[4.5/14] Purging stale iCar processes"
+for container in autodrive_ros2 icar_ros2; do
+  docker exec "$container" bash -c '
+    # 通用匹配：ros2 run 启动的 Python 节点
+    for name in app_control cloud_bridge task_manager llm_gateway \
+                navigation vision_patrol voice_control; do
+      pkill -9 -f "$name" 2>/dev/null || true
+    done
+    # 驱动节点
+    pkill -9 -f Mcnamu_driver 2>/dev/null || true
+    pkill -9 -f yahboomcar_bringup 2>/dev/null || true
+    pkill -9 -f yahboom_joy 2>/dev/null || true
+  ' 2>/dev/null || true
+done
+sleep 3
+
+# 验证清理效果
+STALE_COUNT=0
+for container in autodrive_ros2 icar_ros2; do
+  cnt=$(docker exec "$container" bash -c \
+    "ps -eo args= | grep -E 'app_control|cloud_bridge|task_manager|llm_gateway|navigation|vision_patrol|voice_control' | grep -v grep | wc -l" 2>/dev/null || echo 0)
+  cnt=$(echo "$cnt" | tr -cd '0-9')
+  STALE_COUNT=$((STALE_COUNT + ${cnt:-0}))
+done
+if [ "$STALE_COUNT" -gt 0 ]; then
+  echo "WARNING: $STALE_COUNT iCar process(es) still alive after purge"
+fi
+
 echo "[5/14] Starting chassis bringup and lidar"
 # Detached vendor nodes can survive after their launch owner is killed.  Always
 # remove their direct executables before starting one controlled bringup; merely
