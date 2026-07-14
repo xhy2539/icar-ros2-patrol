@@ -187,6 +187,15 @@ echo "[10/14] Starting task_manager + LLM gateway + obstacle_avoid + alarm + clo
 export DEEPSEEK_API_KEY="${DEEPSEEK_API_KEY:-}"
 export DOUBAO_APP_ID="${DOUBAO_APP_ID:-}"
 export DOUBAO_ACCESS_KEY="${DOUBAO_ACCESS_KEY:-}"
+# The startup watchdog runs this script as root, while deployment credentials
+# are deliberately stored under the jetson account.  Load that trusted local
+# environment file so a watchdog restart does not silently skip voice nodes.
+if { [ -z "$DOUBAO_APP_ID" ] || [ -z "$DOUBAO_ACCESS_KEY" ]; } && [ -f /home/jetson/.env ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . /home/jetson/.env
+  set +a
+fi
 ICAR_DOCKER_CMD="docker exec icar_ros2 bash -lc 'source /opt/ros/foxy/setup.bash; source $ICAR_WS/install/setup.bash; export ROS_DOMAIN_ID=30"
 if [ -n "$DEEPSEEK_API_KEY" ]; then
   ICAR_DOCKER_CMD="$ICAR_DOCKER_CMD; export DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY"
