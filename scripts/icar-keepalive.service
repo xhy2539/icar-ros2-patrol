@@ -1,0 +1,17 @@
+[Unit]
+Description=iCar Cloud Bridge Keepalive
+After=icar_startup.service docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=jetson
+Environment=ROS_DOMAIN_ID=30
+ExecStart=/usr/bin/docker exec icar_ros2 bash -lc "source /opt/ros/foxy/setup.bash; source /root/icar_ros2_ws/icar_ws/install/setup.bash; ros2 run cloud_bridge cloud_bridge_node"
+Restart=always
+RestartSec=10
+StandardOutput=append:/tmp/cloud_bridge_systemd.log
+StandardError=append:/tmp/cloud_bridge_systemd.log
+
+[Install]
+WantedBy=multi-user.target

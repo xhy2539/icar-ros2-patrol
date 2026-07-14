@@ -9,6 +9,7 @@ Docker: slam_test / boring_keldysh (yahboomtechnology/ros-foxy:5.0.1)
 ssh jetson@192.168.180.83
 密码：yahboom
 
+e
 Docker: icar_ros2 (icar/ros-foxy:1.0.2) + autodrive_ros2 (yahboomtechnology/ros-foxy:5.0.1)
 别名: is=启动icar容器, id=进入icar容器, s=启动autodrive容器, d=进入autodrive容器
 

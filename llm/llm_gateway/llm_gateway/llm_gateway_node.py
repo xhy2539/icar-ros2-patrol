@@ -1004,6 +1004,7 @@ class LlmGatewayNode(Node):
             "download_audio":     self._tool_download_audio,
             "start_tracking":     self._tool_start_tracking,
             "stop_tracking":      self._tool_stop_tracking,
+            "move_robot":         self._tool_move_robot,
         }
 
         if tool_name not in tool_map:
@@ -1152,6 +1153,11 @@ class LlmGatewayNode(Node):
     def _tool_stop_tracking(self, reason: str = "user stopped tracking") -> dict:
         return self._robot_tools.stop_tracking(reason=reason)
 
+    def _tool_move_robot(
+        self, direction: str, duration_sec: float = 1.0, speed: float = 0.12
+    ) -> dict:
+        return self._robot_tools.move_robot(direction, duration_sec, speed)
+
     @staticmethod
     def _tool_reply(result: dict) -> str:
         if not result.get("success"):
@@ -1169,6 +1175,7 @@ class LlmGatewayNode(Node):
             "download_audio": "音频下载指令已执行。",
             "start_tracking": "已启动目标跟踪，人工控制和安全急停仍保持更高优先级。",
             "stop_tracking": "已停止目标跟踪。",
+            "move_robot": "已执行受限低速移动；松手、超时、避障或急停都会停止。",
             "execute_plan": "复杂任务计划已接收，将按步骤安全接续执行。",
         }
         return replies.get(

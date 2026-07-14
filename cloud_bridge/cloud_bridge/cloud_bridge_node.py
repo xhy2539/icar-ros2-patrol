@@ -166,6 +166,8 @@ class CloudBridgeNode(Node):
         self.declare_parameter("video_resize_width", 640)
         self.declare_parameter("video_mjpeg_url", "http://127.0.0.1:6502/video_feed")
         self._video_stop = threading.Event()
+        self._water_proc = None
+        self._water_proc_lock = threading.Lock()
         if self.get_parameter("video_enabled").value:
             self._video_thread = threading.Thread(
                 target=self._video_grabber, daemon=True
@@ -176,6 +178,7 @@ class CloudBridgeNode(Node):
         self.mqtt = self._create_mqtt_client()
         if user:
             self.mqtt.username_pw_set(user, pw)
+        self.mqtt.max_queued_messages_set(500)
         self.mqtt.reconnect_delay_set(min_delay=1, max_delay=30)
         self.mqtt.on_connect = self._on_mqtt_connect
         self.mqtt.on_disconnect = self._on_mqtt_disconnect
@@ -232,6 +235,7 @@ class CloudBridgeNode(Node):
             client.subscribe(self.topics.llm_generate_report, qos=self.mqtt_qos)
             client.subscribe(self.topics.snapshot_request, qos=self.mqtt_qos)
             client.subscribe(self.topics.alarm, qos=self.mqtt_qos)
+            client.subscribe(self.topics.water_toggle, qos=self.mqtt_qos)
             client.publish(
                 self.topics.online,
                 json.dumps({"online": True}, ensure_ascii=False),
@@ -289,6 +293,14 @@ class CloudBridgeNode(Node):
                 enabled = bool(data.get("enabled", True)) if isinstance(data, dict) else True
                 self.alarm_sound_pub.publish(ROSBool(data=enabled))
                 self.get_logger().info(f"云→车 告警声音: {'开' if enabled else '关'}")
+
+            elif msg.topic == self.topics.water_toggle:
+                data = json.loads(payload.decode("utf-8"))
+                enabled = bool(data.get("enabled", False)) if isinstance(data, dict) else False
+                if enabled:
+                    self._start_water_model()
+                else:
+                    self._stop_water_model()
 
             elif msg.topic == self.topics.command:
                 command = parse_task_command(
@@ -743,6 +755,54 @@ class CloudBridgeNode(Node):
                 self.get_logger().warn(f"MQTT 发送排队失败: topic={topic}, rc={info.rc}")
         except Exception as e:
             self.get_logger().warn(f"MQTT 发送失败: {e}")
+
+    def _start_water_model(self):
+        with self._water_proc_lock:
+            if self._water_proc is not None:
+                self.get_logger().info("积水模型已在运行")
+                return
+            import subprocess
+            ws = "/root/icar_ros2_ws/icar_ws"
+            model_path = f"{ws}/models/water_seg_v1.pt"
+            env = os.environ.copy()
+            env["ROS_DOMAIN_ID"] = "30"
+            cmd = (
+                "source /opt/ros/foxy/setup.bash && "
+                "source /root/icar_ros2_ws/software/library_ws/install/setup.bash && "
+                "source /root/icar_ros2_ws/icar_ws/install/setup.bash && "
+                "ros2 run vision_patrol vision_node --ros-args "
+                "-p mode:=detect "
+                "-p image_topic:=/camera/color/image_raw "
+                "-p detector_backend:=yolo "
+                "-p water_detector_backend:=yolo "
+                f"-p water_model:={model_path} "
+                "-p water_device:=cpu "
+                "-p water_confidence:=0.20 "
+                "-p water_imgsz:=320 "
+                "-p water_class_name:=water "
+                "-p inference_frame_stride:=12 "
+                "-p target_classes:=[] "
+                "-p publish_annotated:=false"
+            )
+            self._water_proc = subprocess.Popen(
+                ["bash", "-lc", cmd],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+            )
+            self.get_logger().info(f"积水模型已启动 PID={self._water_proc.pid}")
+
+    def _stop_water_model(self):
+        with self._water_proc_lock:
+            if self._water_proc is None:
+                return
+            self._water_proc.terminate()
+            try:
+                self._water_proc.wait(timeout=5)
+            except Exception:
+                self._water_proc.kill()
+            self._water_proc = None
+            self.get_logger().info("积水模型已停止")
 
     def destroy_node(self):
         if hasattr(self, "_video_stop"):

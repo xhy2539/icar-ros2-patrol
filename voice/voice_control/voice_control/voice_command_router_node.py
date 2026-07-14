@@ -34,6 +34,7 @@ class VoiceCommandRouterNode(Node):
             TaskStatus, "/task/status", self._on_task_status, qos
         )
         self.task_pub = self.create_publisher(TaskRequest, "/task/request", qos)
+        self.llm_command_pub = self.create_publisher(String, "/llm/user_command", qos)
         self.control_pub = self.create_publisher(String, "/voice/control", qos)
         self.intent_pub = self.create_publisher(String, "/voice/intent", qos)
         self.robot_status_pub = self.create_publisher(
@@ -106,16 +107,17 @@ class VoiceCommandRouterNode(Node):
         command = re.split(r"[。！？\n]", command, maxsplit=1)[0].strip()
         if not command or command == self._last_command:
             return
-        if not self.parse_client.service_is_ready():
-            self.get_logger().error("/llm/parse_task is unavailable")
-            return
-
-        request = ParseTask.Request()
-        request.input_text = command
-        future = self.parse_client.call_async(request)
-        future.add_done_callback(
-            lambda done, source=command: self._on_parsed(done, source)
+        # The executable LLM gateway owns the complete safe-tool whitelist:
+        # patrol, tracking, bounded movement, status and compound plans.
+        # Do not reduce a voice command back to patrol-only ParseTask here.
+        message = String()
+        message.data = json.dumps(
+            {"input_text": command, "source": "voice", "request_id": "voice"},
+            ensure_ascii=False,
         )
+        self.llm_command_pub.publish(message)
+        self._last_command = command
+        self.get_logger().info(f"published confirmed voice tool command: {command}")
 
     def _on_parsed(self, future, source):
         try:

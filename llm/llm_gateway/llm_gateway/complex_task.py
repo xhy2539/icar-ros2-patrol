@@ -15,7 +15,10 @@ ALLOWED_PLAN_TOOLS = {
     "stop_tracking",
 }
 TASK_TERMINAL_STATES = {"COMPLETED", "FAILED", "CANCELLED"}
-COMPOUND_MARKERS = ("然后", "之后", "完成后", "接着", "随后", "最后", "并且", "再")
+COMPOUND_MARKERS = (
+    "然后", "之后", "完成后", "接着", "随后", "最后", "并且", "再",
+    "巡检后", "点后",
+)
 
 
 @dataclass(frozen=True)
@@ -75,6 +78,25 @@ def build_rule_plan(user_input: str, default_route: List[str]) -> Optional[dict]
                         "user_text": text,
                     },
                     "wait_for": "task_completed",
+                },
+            )
+        )
+
+    tracking_index = min(
+        (text.find(word) for word in ("跟踪", "追踪", "跟随", "尾随") if word in text),
+        default=-1,
+    )
+    if tracking_index >= 0:
+        target_classes = ["vehicle"] if ("车辆" in text or "小车" in text) else ["person"]
+        occurrences.append(
+            (
+                tracking_index,
+                {
+                    "tool_name": "start_tracking",
+                    "arguments": {
+                        "target_classes": target_classes,
+                        "user_text": text,
+                    },
                 },
             )
         )

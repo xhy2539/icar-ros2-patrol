@@ -58,3 +58,13 @@ def test_plan_rejects_direct_or_recursive_tools():
         assert "unsupported" in str(exc)
     else:
         raise AssertionError("recursive plan should be rejected")
+
+
+def test_rule_plan_can_track_after_patrol():
+    call = build_rule_plan("巡检 A、B 点后跟踪前面的人", ["A", "B", "C"])
+    steps = call["arguments"]["steps"]
+    assert [step["tool_name"] for step in steps] == [
+        "start_patrol",
+        "start_tracking",
+    ]
+    assert steps[0]["wait_for"] == "task_completed"

@@ -16,6 +16,10 @@ class VelocityMuxNode(Node):
         ("app", "/cmd_vel_app", 0.4),
         ("cloud", "/cmd_vel_cloud", 0.4),
         ("tracking", "/vision/target_cmd_vel", 1.0),
+        # Short, bounded natural-language moves.  It remains below tracking
+        # and human-operated APP/cloud control, and still passes obstacle and
+        # emergency-stop protection before reaching /cmd_vel.
+        ("llm", "/cmd_vel_llm", 0.4),
         ("joy", "/cmd_vel_joy", 0.4),
         ("nav", "/cmd_vel_nav", 0.6),
     )
