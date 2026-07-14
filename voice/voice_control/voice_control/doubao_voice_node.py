@@ -40,6 +40,7 @@ from .doubao_protocol import (
     EVT_CONN_FINISHED,
     EVT_CONN_STARTED,
     EVT_DIALOG_ERROR,
+    EVT_END_ASR,
     EVT_FINISH_CONNECTION,
     EVT_FINISH_SESSION,
     EVT_SESSION_FAILED,
@@ -79,6 +80,10 @@ except ImportError:
 WS_URL = "wss://openspeech.bytedance.com/api/v3/realtime/dialogue"
 SAMPLE_RATE_OUT = 24000
 SILENCE = b"\x00" * 640  # 20ms PCM silence, 用于保持音频管线活跃
+# Browser microphone capture stops immediately at the end of a turn.  Feed a
+# short, real-time silence tail so the server-side VAD can close that turn.
+WEB_TURN_END_SILENCE_FRAMES = 50  # 1 second at 16 kHz / 20 ms per frame
+WEB_AUDIO_TURN_END = object()
 
 DEFAULT_SYSTEM_ROLE = (
     "你是养老院的智能巡检语音助手，你的名字叫小巡。"
@@ -204,7 +209,22 @@ class DoubaoVoiceNode(Node):
             self._publish_status("listening", "browser microphone")
         elif event == "end":
             self._web_audio_active = False
+            # Audio and control use separate ROS topics.  Let the last PCM
+            # packets arrive before queueing the server-side EndASR marker.
+            threading.Timer(0.15, self._queue_web_turn_silence).start()
             self._publish_status("processing", "browser turn ended")
+
+    def _queue_web_turn_silence(self):
+        """Let server VAD observe a browser turn boundary without ending chat."""
+        for _ in range(WEB_TURN_END_SILENCE_FRAMES):
+            try:
+                self._web_audio_queue.put_nowait(SILENCE)
+            except queue.Full:
+                break
+        try:
+            self._web_audio_queue.put_nowait(WEB_AUDIO_TURN_END)
+        except queue.Full:
+            self.get_logger().warn("browser turn-end marker dropped")
 
     def _on_web_audio(self, msg: UInt8MultiArray):
         if not self._web_audio_active:
@@ -400,6 +420,15 @@ class DoubaoVoiceNode(Node):
             except queue.Empty:
                 continue
             try:
+                if audio is WEB_AUDIO_TURN_END:
+                    await self._ws.send(
+                        build_frame(
+                            event_id=EVT_END_ASR,
+                            payload=b"{}",
+                            session_id=self._session_id,
+                        )
+                    )
+                    continue
                 await self._ws.send(build_audio_frame(audio, self._session_id))
             except Exception as exc:
                 self.get_logger().error(f"发送网页音频失败: {exc}")

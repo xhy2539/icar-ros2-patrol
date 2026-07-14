@@ -31,6 +31,7 @@ EVT_FINISH_CONNECTION = 2
 EVT_START_SESSION = 100
 EVT_FINISH_SESSION = 102
 EVT_TASK_REQUEST = 200
+EVT_END_ASR = 400
 EVT_CHAT_TTS_TEXT = 500
 EVT_CHAT_TEXT_QUERY = 501
 
@@ -60,6 +61,7 @@ EVENT_NAMES = {
     150: "SessionStarted", 152: "SessionFinished", 153: "SessionFailed",
     154: "UsageResponse",
     200: "TaskRequest",
+    400: "EndASR",
     350: "TTSSentenceStart", 351: "TTSSentenceEnd",
     352: "TTSResponse", 359: "TTSEnded",
     450: "ASRInfo", 451: "ASRResponse", 459: "ASREnded",
