@@ -23,6 +23,7 @@ import uuid
 
 import numpy as np
 import rclpy
+from geometry_msgs.msg import Twist
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from std_msgs.msg import String, UInt8MultiArray
@@ -59,6 +60,7 @@ from .doubao_protocol import (
     SER_RAW,
     EVENT_NAMES,
 )
+from .voice_motion_command import parse_voice_motion_command
 
 try:
     import sounddevice as sd
@@ -138,6 +140,8 @@ class DoubaoVoiceNode(Node):
         self._web_audio_queue = queue.Queue(maxsize=256)
         self._web_audio_active = False
         self._running = True
+        self._motion_cancel = None
+        self._motion_lock = threading.Lock()
 
         # ── QoS ──
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
@@ -158,6 +162,7 @@ class DoubaoVoiceNode(Node):
             String, "/voice/assistant_result", qos
         )
         self._status_pub = self.create_publisher(String, "/voice/status", qos)
+        self._llm_motion_pub = self.create_publisher(Twist, "/cmd_vel_llm", qos)
 
         # ── 启动 asyncio 线程 ──
         self._loop = None
@@ -262,6 +267,56 @@ class DoubaoVoiceNode(Node):
             ensure_ascii=False,
         )
         self._status_pub.publish(msg)
+
+    def _handle_voice_motion(self, text: str):
+        command = parse_voice_motion_command(text)
+        if command is None:
+            return
+        self._cancel_motion()
+        if command.direction == "stop":
+            self.get_logger().info("voice motion: stop")
+            return
+        cancelled = threading.Event()
+        with self._motion_lock:
+            self._motion_cancel = cancelled
+        thread = threading.Thread(
+            target=self._publish_motion_for_duration,
+            args=(command.direction, command.duration_sec, cancelled),
+            daemon=True,
+        )
+        thread.start()
+        self.get_logger().info(
+            f"voice motion: {command.direction} for {command.duration_sec:.1f}s"
+        )
+
+    def _cancel_motion(self):
+        with self._motion_lock:
+            if self._motion_cancel is not None:
+                self._motion_cancel.set()
+                self._motion_cancel = None
+        self._llm_motion_pub.publish(Twist())
+
+    def _publish_motion_for_duration(self, direction: str, duration_sec: float, cancelled):
+        vectors = {
+            "forward": (0.18, 0.0, 0.0),
+            "backward": (-0.18, 0.0, 0.0),
+            "left": (0.0, 0.18, 0.0),
+            "right": (0.0, -0.18, 0.0),
+            "turn_left": (0.0, 0.0, 0.45),
+            "turn_right": (0.0, 0.0, -0.45),
+        }
+        x, y, z = vectors[direction]
+        until = time.monotonic() + duration_sec
+        try:
+            while not cancelled.is_set() and time.monotonic() < until:
+                msg = Twist()
+                msg.linear.x = x
+                msg.linear.y = y
+                msg.angular.z = z
+                self._llm_motion_pub.publish(msg)
+                time.sleep(0.1)
+        finally:
+            self._llm_motion_pub.publish(Twist())
 
     # ── asyncio 主循环 ───────────────────────────────────────
 
@@ -475,6 +530,7 @@ class DoubaoVoiceNode(Node):
                 if full_text.strip():
                     self.get_logger().info(f"豆包: {full_text[:80]}")
                     self._publish_result(full_text)
+                    self._handle_voice_motion(full_text)
                 full_text = ""
 
             elif evt == EVT_TTS_RESPONSE:
