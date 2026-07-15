@@ -28,6 +28,8 @@ CAR_URL = f"ws://{CAR_HOST}:{CAR_PORT}/ws/control"
 VOICE_URL = f"ws://{CAR_HOST}:{CAR_VOICE_PORT}/ws/voice"
 HTTP_ROUTES = {
     "/health",
+    "/snapshot",
+    "/yolo_snapshot",
     "/video_feed",
     "/yolo_video_feed",
     "/yolo_detailed_status",

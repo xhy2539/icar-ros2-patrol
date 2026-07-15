@@ -160,7 +160,7 @@ class CloudMqttService {
     return _publish(_topics.control, {
       'command': command,
       'speed': speed.clamp(0.0, 1.0),
-      'lease_ms': 1000,
+      'lease_ms': 2000,
       'issued_at_ms': DateTime.now().millisecondsSinceEpoch,
     });
   }

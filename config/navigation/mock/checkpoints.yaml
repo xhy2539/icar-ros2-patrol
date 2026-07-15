@@ -1,32 +1,15 @@
 route:
+  - HOME
   - A
-  - B
-  - C
-  - D
 
 checkpoints:
   HOME:
-    x: 10.762
-    y: 38.694
-    yaw: 1.613
+    x: 11.897
+    y: 32.607
+    yaw: -1.5708
     label: Home
   A:
-    x: 9.407
-    y: 32.890
-    yaw: -1.519
+    x: 11.997
+    y: 28.481
+    yaw: -1.5708
     label: Checkpoint A
-  B:
-    x: 11.0
-    y: 38.0
-    yaw: 0.0
-    label: Checkpoint B
-  C:
-    x: 11.369
-    y: 23.262
-    yaw: -1.554
-    label: Checkpoint C
-  D:
-    x: 11.331
-    y: 8.676
-    yaw: -1.664
-    label: Checkpoint D

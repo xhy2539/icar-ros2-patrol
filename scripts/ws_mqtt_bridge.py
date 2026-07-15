@@ -17,7 +17,7 @@ import websockets
 from websockets.server import WebSocketServerProtocol
 
 WS_HOST = os.getenv("ICAR_WS_MQTT_HOST", "0.0.0.0")
-WS_PORT = int(os.getenv("ICAR_WS_MQTT_PORT", "9003"))
+WS_PORT = int(os.getenv("ICAR_WS_MQTT_PORT", "9010"))
 MQTT_HOST = os.getenv("ICAR_MQTT_HOST", "82.156.132.43")
 MQTT_PORT = int(os.getenv("ICAR_MQTT_PORT", "1883"))
 MQTT_USER = os.getenv("ICAR_MQTT_USER", "icar")
@@ -29,7 +29,7 @@ DEVICE_ID = os.getenv("ICAR_DEVICE_ID", "")
 def _car_topic(suffix: str) -> str:
     """Build a cloud MQTT topic matching the cloud_bridge convention."""
     base = f"{TOPIC_PREFIX}/{DEVICE_ID}" if DEVICE_ID else TOPIC_PREFIX
-    return f"{base}/{suffix}"
+    return f"{base.rstrip('/')}/{suffix}"
 
 
 # Topic routing: the bridge subscribes to these car→app MQTT topics and
@@ -108,7 +108,7 @@ class MqttBridge:
                     self._loop,
                 )
 
-    def _on_disconnect(self, client, userdata, reason_code, properties=None):
+    def _on_disconnect(self, client, userdata, flags, reason_code, properties=None):
         self._connected = False
 
     def _on_message(self, client, userdata, msg):
@@ -153,10 +153,11 @@ class MqttBridge:
 
     def subscribe(self, suffix: str):
         topic = _car_topic(suffix)
-        if topic not in self._subscribed:
-            self._subscribed.add(topic)
-            if self._connected:
-                self.client.subscribe(topic, qos=1)
+        # Always subscribe (even if already tracked) so retained messages
+        # are delivered to each new browser connection.
+        self._subscribed.add(topic)
+        if self._connected:
+            self.client.subscribe(topic, qos=1)
 
     def publish(self, suffix: str, payload: dict):
         topic = _car_topic(CMD_TOPICS.get(suffix, f"cmd/{suffix}"))
